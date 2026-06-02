@@ -2,8 +2,6 @@
 
 A native iOS music client built for self-hosted Subsonic-compatible servers — Navidrome, Airsonic, Funkwhale, and anything else that speaks the Subsonic API.
 
-Built with SwiftUI, no third-party dependencies.
-
 ---
 
 ## What it does
