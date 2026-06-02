@@ -1,16 +1,22 @@
 # Volta
 
-A native iOS music client for self-hosted [Subsonic](http://www.subsonic.org/)-compatible servers (Navidrome, Airsonic, Funkwhale, etc.).
+A native iOS music client built for self-hosted Subsonic-compatible servers — Navidrome, Airsonic, Funkwhale, and anything else that speaks the Subsonic API.
 
-## Features
+Built with SwiftUI, no third-party dependencies.
 
-- **Now Playing** — large artwork, scrubber, lossless badge, Siri integration
-- **Lyrics** — synced (LRC) and plain lyrics via OpenSubsonic, LRCLib fallback
-- **Library** — albums, artists, playlists, song browser
-- **Stats** — play history with charts (daily / weekly / monthly / yearly / all-time)
-- **Downloads** — offline playback with per-track download management
-- **Siri / App Intents** — "Play Kendrick Lamar on Volta"
-- **Settings** — streaming quality, crossfade, autoplay, developer logs
+---
+
+## What it does
+
+- **Now Playing** — full-screen artwork, scrubber, lossless badge, Siri integration
+- **Lyrics** — synced (LRC) and plain, via OpenSubsonic or LRCLib as a fallback
+- **Library** — albums, artists, playlists, songs, and a downloaded tracks section for offline
+- **Queue** — drag to reorder, swipe to play next, gapless playback
+- **AutoPlay** — when the queue runs dry, it pulls in more music automatically
+- **Downloads** — per-track download management with multithreaded transfers
+- **Stats** — local play history with daily, weekly, monthly, and all-time charts
+- **Siri** — "Play ArtistName on Volta", pause, skip, and more
+- **Settings** — streaming quality (Wi-Fi + cellular separately), transcoding format, crossfade, appearance
 
 ## Requirements
 
@@ -19,13 +25,9 @@ A native iOS music client for self-hosted [Subsonic](http://www.subsonic.org/)-c
 
 ## Building
 
-This project uses [Swift Package Manager](https://www.swift.org/package-manager/) and [xtool](https://github.com/xtool-org/xtool) for on-device builds without Xcode.
+This project uses Swift Package Manager and [xtool](https://github.com/xtool-org/xtool) for on-device builds without Xcode.
 
 ```bash
-# Install xtool (macOS / Linux)
-brew install xtool-org/tap/xtool          # macOS
-# or follow https://github.com/xtool-org/xtool for Linux
-
 # Build & run on a connected device
 xtool dev run --udid <DEVICE_UDID>
 
@@ -33,25 +35,4 @@ xtool dev run --udid <DEVICE_UDID>
 xtool devices
 ```
 
-Alternatively, open `Package.swift` in Xcode 16+ and run on a simulator or device.
-
-## Project Structure
-
-```
-Sources/music/
-├── App/            RootView, navigation root
-├── Components/     Reusable UI (BottomBar, MiniPlayer, ArtworkView…)
-├── Intents/        Siri / App Intents (PlayArtistIntent, PlaySongIntent…)
-├── Models/         Subsonic data models (Song, Album, Artist…)
-├── Networking/     SubsonicClient, API methods, error types
-├── Persistence/    StatsStore (play events), PersistenceModels
-├── Resources/      Assets, app icons
-├── Services/       AudioPlayer, DownloadService, LyricsService, Logger…
-├── Utilities/      Theme, Symbols, ColorExtractor, helpers
-├── ViewModels/     AppState, HomeViewModel, StatsViewModel…
-└── Views/          All SwiftUI screens
-```
-
-## License
-
-MIT
+Or open `Package.swift` in Xcode 16+ and run on a simulator or device.
