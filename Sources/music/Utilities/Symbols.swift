@@ -1,0 +1,72 @@
+import Foundation
+
+enum Symbols {
+    static let home = "house.fill"
+    static let library = "square.stack.fill"
+    static let playlists = "music.note.list"
+    static let stats = "chart.bar.fill"
+    static let search = "magnifyingglass"
+
+    static let account = "person.crop.circle.fill"
+    static let switchServer = "arrow.left.arrow.right"
+    static let logout = "rectangle.portrait.and.arrow.right"
+    static let settings = "gearshape.fill"
+    static let back = "chevron.backward"
+    static let chevron = "chevron.right"
+    static let chevronDown = "chevron.down"
+
+    static let server = "server.rack"
+    static let person = "person.fill"
+    static let lock = "lock.fill"
+
+    static let play = "play.fill"
+    static let pause = "pause.fill"
+    static let next = "forward.fill"
+    static let previous = "backward.fill"
+    static let shuffle = "shuffle"
+    static let repeatAll = "repeat"
+    static let repeatOne = "repeat.1"
+    static let skipForward15 = "goforward.15"
+    static let skipBackward15 = "gobackward.15"
+
+    static let volumeLow = "speaker.fill"
+    static let volumeHigh = "speaker.wave.3.fill"
+    static let airplay = "airplayvideo"
+    static let queue = "list.bullet"
+    static let lyrics = "quote.bubble.fill"
+    static let lyricsInactive = "quote.bubble"
+
+    static let star = "star.fill"
+    static let starEmpty = "star"
+    static let more = "ellipsis"
+    static let moreCircle = "ellipsis.circle"
+    static let info = "info.circle"
+    static let addToPlaylist = "text.badge.plus"
+    static let download = "arrow.down.circle"
+    static let downloaded = "checkmark.circle.fill"
+    static let downloading = "arrow.down.circle.dotted"
+    static let check = "checkmark"
+
+    static let newPlaylist = "plus"
+    static let trash = "trash"
+    static let edit = "pencil"
+    static let dragHandle = "line.3.horizontal"
+
+    static let albumPlaceholder = "music.note"
+    static let playlistPlaceholder = "music.note.list"
+    static let artistPlaceholder = "person.fill"
+    static let warning = "exclamationmark.triangle.fill"
+    static let doc = "doc.text"
+
+    static let artists = "person.2.fill"
+    static let albums = "square.stack.fill"
+    static let songs = "music.note"
+    static let genres = "tag.fill"
+
+    static let logs = "doc.text.magnifyingglass"
+    static let copy = "doc.on.doc"
+    static let network = "network"
+    static let playbackLog = "waveform"
+    static let uiLog = "rectangle.on.rectangle"
+    static let otherLog = "ellipsis.curlybraces"
+}
