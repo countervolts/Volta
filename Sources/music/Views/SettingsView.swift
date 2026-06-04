@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private struct ArtworkPrefetchProgress: Equatable {
     var completed = 0
@@ -22,39 +23,35 @@ struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
-    // Playback
-    @AppStorage("autoplayEnabled")     private var autoplayEnabled     = false
-    @AppStorage("gaplessPlayback")     private var gaplessPlayback     = "on"    // "off", "weak", "on"
-    @AppStorage("replayGainMode")      private var replayGainMode      = "off"   // "off", "track", "album"
+    @AppStorage("gaplessPlayback")     private var gaplessPlayback     = "on"
+    @AppStorage("replayGainMode")      private var replayGainMode      = "off"
 
-    // Streaming & Downloads
-    @AppStorage("streamingBitrate")    private var streamingBitrate    = 0       // 0 = original
-    @AppStorage("streamingBitrateCell")private var streamingBitrateCell = 0      // cellular override
+    @AppStorage("streamingBitrate")    private var streamingBitrate    = 0
+    @AppStorage("streamingBitrateCell")private var streamingBitrateCell = 0
     @AppStorage("downloadBitrate")     private var downloadBitrate     = 0
-    @AppStorage("transcodingFormat")   private var transcodingFormat   = "raw"   // "mp3", "aac", "opus", "raw"
-    @AppStorage("downloadThreadingMode") private var downloadThreadingMode = "multi" // "multi", "single"
-    @AppStorage("downloadSpeedLimitKBps") private var downloadSpeedLimitKBps = 0      // 0 = unlimited
-    @AppStorage("downloadCapMB")       private var downloadCapMB       = 0            // 0 = unlimited
+    @AppStorage("transcodingFormat")   private var transcodingFormat   = "raw"
+    @AppStorage("downloadThreadingMode") private var downloadThreadingMode = "multi"
+    @AppStorage("downloadSpeedLimitKBps") private var downloadSpeedLimitKBps = 0
+    @AppStorage("downloadCapMB")       private var downloadCapMB       = 0
     @AppStorage("autoEvictDownloads")  private var autoEvictDownloads  = false
 
-    // Appearance
     @AppStorage("artworkAnimation")    private var artworkAnimation    = true
     @AppStorage("liveArtwork")         private var liveArtwork         = true
     @AppStorage("showLosslessBadge")   private var showLosslessBadge   = true
     @AppStorage("dynamicBackground")   private var dynamicBackground   = true
     @AppStorage("showTrackArtwork")    private var showTrackArtwork    = true
     @AppStorage("accentColorName")     private var accentColorName     = "purple"
+    @AppStorage("customAccentRed")      private var customAccentRed     = 0.55
+    @AppStorage("customAccentGreen")    private var customAccentGreen   = 0.36
+    @AppStorage("customAccentBlue")     private var customAccentBlue    = 0.96
 
-    // Performance (read by ArtworkLoader at launch; applied on next launch)
-    @AppStorage("imageLoadMode")       private var imageLoadMode       = "balanced" // fast / balanced / conservative
-    @AppStorage("cacheMode")           private var cacheMode           = "balanced" // aggressive / balanced / light
+    @AppStorage("imageLoadMode")       private var imageLoadMode       = "balanced"
+    @AppStorage("cacheMode")           private var cacheMode           = "balanced"
     @AppStorage("prefetchArtistImages") private var prefetchArtistImages = false
     @AppStorage("localArtworkLibraryDownloaded") private var localArtworkLibraryDownloaded = false
 
-    // Library
     @AppStorage("albumSortOrder")      private var albumSortOrder      = "alphabetical"
 
-    // Developer
     @AppStorage("developerLogging")    private var developerLogging    = true
 
     @State private var downloadsSize: String  = "…"
@@ -63,6 +60,9 @@ struct SettingsView: View {
     @State private var localArtworkBytes: Int = 0
     @State private var dataSize: String        = "…"
     @State private var totalCacheSize: String  = "…"
+    @State private var playEventsSize: String = "…"
+    @State private var logsSize: String = "…"
+    @State private var artworkLibraryEstimate = "Calculating…"
     @State private var showClearCacheAlert   = false
     @State private var showClearArtworkAlert = false
     @State private var showClearLocalArtworkAlert = false
@@ -80,6 +80,9 @@ struct SettingsView: View {
 
     private var audio: AudioPlayer { appState.audioPlayer }
     private var hasLocalArtworkLibrary: Bool { localArtworkLibraryDownloaded || localArtworkBytes > 0 }
+    private var customAccentColor: Color {
+        Color(red: customAccentRed, green: customAccentGreen, blue: customAccentBlue)
+    }
 
     // MARK: - Search filtering
 
@@ -88,15 +91,11 @@ struct SettingsView: View {
     }
     private var isSearching: Bool { !query.isEmpty }
 
-    // a single row is shown when not searching, the section title matches, or
-    // any of the row's keywords matches the query.
     private func rowVisible(_ section: String, _ keywords: [String]) -> Bool {
         guard isSearching else { return true }
         if section.lowercased().contains(query) { return true }
         return keywords.contains { $0.lowercased().contains(query) }
     }
-    // a whole section is shown when not searching, its title matches, or any of
-    // its rows match.
     private func sectionVisible(_ section: String, _ rows: [[String]]) -> Bool {
         guard isSearching else { return true }
         if section.lowercased().contains(query) { return true }
@@ -125,12 +124,13 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarBackButtonHidden(true)
-        .background(SwipeBackEnabler())   // re-enable swipe-from-edge to exit settings
+        .background(SwipeBackEnabler())
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
         }
         .preferredColorScheme(.dark)
         .onAppear { refreshCacheSize() }
+        .task(id: appState.currentServer?.id) { await estimateArtworkLibrarySize() }
         .alert("Clear Downloads", isPresented: $showClearCacheAlert) {
             Button("Clear", role: .destructive) { clearDownloads() }
             Button("Cancel", role: .cancel) {}
@@ -187,6 +187,42 @@ struct SettingsView: View {
         return gb >= 1 ? String(format: "%g GB", gb) : "\(downloadCapMB) MB"
     }
 
+    private var customAccentSwatch: some View {
+        let selected = accentColorName == "custom"
+        return Circle()
+            .fill(customAccentColor)
+            .frame(width: 32, height: 32)
+            .overlay(
+                Image(systemName: "checkmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .opacity(selected ? 1 : 0)
+            )
+            .overlay(
+                Circle().stroke(.white.opacity(0.9), lineWidth: selected ? 2 : 0)
+                    .padding(-3)
+            )
+            .scaleEffect(selected ? 1.12 : 1)
+            .onTapGesture {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    accentColorName = "custom"
+                }
+            }
+    }
+
+    private func setCustomAccent(_ color: Color) {
+        let ui = UIColor(color)
+        var r: CGFloat = 0
+        var g: CGFloat = 0
+        var b: CGFloat = 0
+        var a: CGFloat = 0
+        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
+        customAccentRed = Double(r)
+        customAccentGreen = Double(g)
+        customAccentBlue = Double(b)
+        accentColorName = "custom"
+    }
+
     // MARK: - Playback
 
     @ViewBuilder
@@ -197,7 +233,7 @@ struct SettingsView: View {
                 if rowVisible(s, ["autoplay", "play"]) {
                     Toggle(isOn: Binding(
                         get: { audio.isAutoplay },
-                        set: { _ in audio.toggleAutoplay() }
+                        set: { audio.isAutoplay = $0 }
                     )) {
                         Label("Autoplay", systemImage: "play.circle")
                     }
@@ -495,7 +531,7 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
             } else {
-                Text(hasLocalArtworkLibrary ? "Local artwork ready: \(localArtworkSize)" : "Local artwork: \(localArtworkSize)")
+                Text(hasLocalArtworkLibrary ? "Local artwork ready: \(localArtworkSize)" : "Estimated total: \(artworkLibraryEstimate)")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -539,14 +575,11 @@ struct SettingsView: View {
                 }
 
                 if rowVisible(s, ["accent color", "accent", "color", "colour", "theme"]) {
-                    // custom swatch row — drawing Circle shapes avoids the SF Symbol tint
-                    // bug where every option rendered in the accent colour (all purple)
                     VStack(alignment: .leading, spacing: 12) {
                         Label("Accent Color", systemImage: "paintbrush")
-                        // horizontal scroll so the swatches swipe smoothly instead of
-                        // cramming every colour into one fixed row
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 16) {
+                                customAccentSwatch
                                 ForEach(Theme.accentNames, id: \.self) { name in
                                     let color = Theme.accentColor(named: name)
                                     let selected = accentColorName == name
@@ -571,12 +604,15 @@ struct SettingsView: View {
                                         }
                                 }
                             }
-                            // selected swatch grows (scaleEffect) + draws a ring 3pt
-                            // outside its circle, so leave enough room or the scroll
-                            // view clips the ring (it was cut off at the top edge)
                             .padding(.vertical, 10)
                             .padding(.horizontal, 10)
                         }
+
+                        ColorPicker(
+                            "Custom Accent",
+                            selection: Binding(get: { customAccentColor }, set: { setCustomAccent($0) }),
+                            supportsOpacity: false
+                        )
                     }
                 }
             }
@@ -704,6 +740,10 @@ struct SettingsView: View {
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("Local Artwork Library", value: localArtworkSize)
                 .foregroundStyle(Theme.primaryText)
+            LabeledContent("Logged Play Events", value: playEventsSize)
+                .foregroundStyle(Theme.primaryText)
+            LabeledContent("Logs", value: logsSize)
+                .foregroundStyle(Theme.primaryText)
             LabeledContent("App Data", value: dataSize)
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("Total", value: totalCacheSize)
@@ -801,7 +841,7 @@ struct SettingsView: View {
         } header: {
             Text(s)
         } footer: {
-            Text("Verbose logging captures all network requests and playback events.")
+            Text("Verbose logging keeps info-level network and playback entries. Warnings and errors are always kept.")
         }
         .listRowBackground(Theme.secondaryBackground)
         }
@@ -845,7 +885,7 @@ struct SettingsView: View {
             let albums = await albumsRequest
             let artists = (try? await artistsRequest) ?? []
             let coverIDs = Array(Set(albums.compactMap(\.coverArt))).sorted()
-            let artworkSizes: [Int?] = [nil, 80, 100, 200, 240, 300, 320, 400, 600, 800]
+            let artworkSizes: [Int?] = [nil, 300, 600]
             let total = coverIDs.count * artworkSizes.count + artists.count
 
             artworkPrefetchProgress = ArtworkPrefetchProgress(
@@ -855,12 +895,10 @@ struct SettingsView: View {
                 current: "Downloading album covers…"
             )
 
-            for coverID in coverIDs {
-                for size in artworkSizes {
-                    let ok = await ArtworkLoader.shared.persist(client.coverArtURL(id: coverID, size: size))
-                    recordArtworkPrefetchStep(ok: ok, current: "Downloading album covers…")
-                }
+            let coverURLs = coverIDs.flatMap { coverID in
+                artworkSizes.map { client.coverArtURL(id: coverID, size: $0) }
             }
+            await persistArtworkURLs(coverURLs, current: "Downloading album covers…")
 
             if !artists.isEmpty {
                 artworkPrefetchProgress.current = "Downloading artist photos…"
@@ -914,10 +952,48 @@ struct SettingsView: View {
         return false
     }
 
+    private func persistArtworkURLs(_ urls: [URL?], current: String) async {
+        let batchSize = 8
+        var index = 0
+        while index < urls.count {
+            let end = min(index + batchSize, urls.count)
+            let batch = Array(urls[index..<end])
+            let results = await withTaskGroup(of: Bool.self) { group in
+                for url in batch {
+                    group.addTask {
+                        await ArtworkLoader.shared.persist(url)
+                    }
+                }
+                var values: [Bool] = []
+                for await ok in group { values.append(ok) }
+                return values
+            }
+            for ok in results {
+                recordArtworkPrefetchStep(ok: ok, current: current)
+            }
+            index = end
+        }
+    }
+
     private func recordArtworkPrefetchStep(ok: Bool, current: String) {
         artworkPrefetchProgress.completed += 1
         if !ok { artworkPrefetchProgress.failed += 1 }
         artworkPrefetchProgress.current = current
+    }
+
+    private func estimateArtworkLibrarySize() async {
+        guard let client = appState.client else {
+            artworkLibraryEstimate = "Unavailable"
+            return
+        }
+        async let albumsRequest = loadAllAlbumsForArtwork(client: client)
+        async let artistsRequest = client.artists()
+        let albums = await albumsRequest
+        let artists = (try? await artistsRequest) ?? []
+        let coverCount = Set(albums.compactMap(\.coverArt)).count
+        let itemCount = coverCount * 3 + artists.count
+        let estimatedBytes = itemCount * 140_000
+        artworkLibraryEstimate = SettingsView.formatBytes(estimatedBytes)
     }
 
     private func refreshCacheSize() {
@@ -932,19 +1008,20 @@ struct SettingsView: View {
                           + SettingsView.directorySize(at: caches.appendingPathComponent("api"))
             let localArtwork = await ArtworkLoader.shared.pinnedArtworkSize()
             let data      = SettingsView.directorySize(at: support.appendingPathComponent("Volta"))
-            let total     = downloads + artwork + data
+            let playEvents = StatsStore.shared.storageSizeBytes()
+            let logs = AppLogger.shared.estimatedSizeBytes()
+            let total     = downloads + artwork + data + logs
 
-            @Sendable func fmt(_ n: Int) -> String {
-                ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file)
-            }
             await MainActor.run {
-                downloadsSize  = fmt(downloads)
-                artworkSize    = fmt(artwork)
-                localArtworkSize = fmt(localArtwork)
+                downloadsSize  = SettingsView.formatBytes(downloads)
+                artworkSize    = SettingsView.formatBytes(artwork)
+                localArtworkSize = SettingsView.formatBytes(localArtwork)
                 localArtworkBytes = localArtwork
                 localArtworkLibraryDownloaded = localArtwork > 0
-                dataSize       = fmt(data)
-                totalCacheSize = fmt(total)
+                dataSize       = SettingsView.formatBytes(data)
+                playEventsSize = SettingsView.formatBytes(playEvents)
+                logsSize       = SettingsView.formatBytes(logs)
+                totalCacheSize = SettingsView.formatBytes(total)
             }
         }
     }
@@ -975,6 +1052,10 @@ struct SettingsView: View {
         return enumerator.compactMap { ($0 as? URL) }
             .compactMap { try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize }
             .reduce(0, +)
+    }
+
+    private nonisolated static func formatBytes(_ n: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file)
     }
 
     private func exportLogs() {
@@ -1297,8 +1378,25 @@ struct ServerInfoView: View {
 
 // MARK: - Logs view
 
+private enum LogLevelFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case info = "Info"
+    case warning = "Warning"
+    case error = "Error"
+    var id: String { rawValue }
+}
+
+private enum LogSortMode: String, CaseIterable, Identifiable {
+    case newest = "Newest"
+    case oldest = "Oldest"
+    case severity = "Severity"
+    var id: String { rawValue }
+}
+
 struct LogsView: View {
     @State private var selected: LogCategory = .networking
+    @State private var levelFilter: LogLevelFilter = .all
+    @State private var sortMode: LogSortMode = .newest
     @State private var entries: [LogEntry] = []
     @State private var copied = false
 
@@ -1313,6 +1411,22 @@ struct LogsView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(16)
+
+                HStack(spacing: 10) {
+                    Picker("Level", selection: $levelFilter) {
+                        ForEach(LogLevelFilter.allCases) { level in
+                            Text(level.rawValue).tag(level)
+                        }
+                    }
+                    Picker("Sort", selection: $sortMode) {
+                        ForEach(LogSortMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                }
+                .pickerStyle(.menu)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
 
                 HStack {
                     Text("\(entries.count) entries")
@@ -1391,11 +1505,41 @@ struct LogsView: View {
         .preferredColorScheme(.dark)
         .onAppear { reload() }
         .onChange(of: selected) { _, _ in reload() }
+        .onChange(of: levelFilter) { _, _ in reload() }
+        .onChange(of: sortMode) { _, _ in reload() }
         .onReceive(NotificationCenter.default.publisher(for: .logEntryAdded)) { _ in reload() }
     }
 
     private func reload() {
-        entries = AppLogger.shared.entries(for: selected)
+        var next = AppLogger.shared.entries(for: selected)
+        switch levelFilter {
+        case .all: break
+        case .info: next = next.filter { $0.level == .info }
+        case .warning: next = next.filter { $0.level == .warning }
+        case .error: next = next.filter { $0.level == .error }
+        }
+        switch sortMode {
+        case .newest:
+            next.sort { $0.timestamp > $1.timestamp }
+        case .oldest:
+            next.sort { $0.timestamp < $1.timestamp }
+        case .severity:
+            next.sort {
+                let l = severityRank($0.level)
+                let r = severityRank($1.level)
+                if l != r { return l > r }
+                return $0.timestamp > $1.timestamp
+            }
+        }
+        entries = next
+    }
+
+    private func severityRank(_ level: LogEntry.Level) -> Int {
+        switch level {
+        case .info: return 0
+        case .warning: return 1
+        case .error: return 2
+        }
     }
 }
 
@@ -1404,7 +1548,6 @@ private struct LogEntryRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            // level pill
             Text(entry.level.rawValue.prefix(1).uppercased())
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(.black)

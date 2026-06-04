@@ -18,7 +18,11 @@ stuff that needs to be done
 - [x] tapping a synced lyric line seeks to that point in the song (tap any line in synced lyrics view)
 - [x] sleep timer (moon button in player bottom bar: 5/15/30/45/60 min or end of track)
 - [x] volume normalization / ReplayGain (Settings → Playback → Volume Normalization: off/track/album, peak-protected)
-- [x] share button on now playing 3-dot + song 3-dot menus via subsonic createShare (only shown when server has sharing enabled)
+- [x] share button on now playing 3-dot + song 3-dot menus via Songlink/Odesli-style public pages
+- [x] artist profile Play plays the full discography in album order; Shuffle shuffles all artist songs
+- [x] album about text and playlist descriptions show below the action row with More/Less expansion
+- [x] lyric translation button uses Apple's Translation framework on supported iOS versions
+- [x] volume slider supports tap or drag from anywhere on the bar
 
 ### Library & Navigation
 - [x] fix song view in the library tab because currently it shows nothing
@@ -31,9 +35,17 @@ stuff that needs to be done
 - [x] custom daily mixes ("Genre Mix" / "Artist Mix") generated from the library, shown in Picks for You, rotate each day (seeded RNG), 20–50 songs each
 - [x] add folder/directory browsing in the library tab — new "Folders" filter backed by getMusicFolders / getIndexes / getMusicDirectory, drill into directories, Play/Shuffle a directory, multi-folder picker, search-filtered
 - [x] add multi-select mode — long-press a song in the Library Songs list to enter selection, tap to multi-select, floating bar to batch Play Next / Queue / Add to Playlist / Download, Select All + count
+- [x] share actions now resolve to Songlink/Odesli-style links instead of Navidrome server shares
+- [x] Picks for You includes daily Discovery Station and Heavy Rotation mixes
+- [x] smart playlists can be pinned to the top
+- [x] holding an album includes a View Stats option
+- [x] smart playlist creation has searchable multi-select pickers for artists and albums plus clearer rule summaries
+- [x] Library Songs has Album sorting plus Play and Shuffle controls
+- [x] genre grids can be left with the normal swipe-back gesture
 
 ### Search & History
 - [x] show previous search results when using the search feature
+- [x] search includes matching genres
 
 ### Downloads
 - [x] when using the download feature show a download circle progress next to each song of the album or playlist to show how much of each song is downloaded
@@ -59,6 +71,11 @@ stuff that needs to be done
 - [x] raised download speed limits (up to 100 MB/s) with a custom MB/s entry; storage cap presets up to 100 GB with a custom GB entry
 - [x] custom 10-band graphic equalizer (Settings → Playback → Equalizer): enable toggle, presets, per-band ±12 dB sliders, applied globally via MTAudioProcessingTap
 - [x] add feature for url switching when on data vs wifi — optional per-server Cellular URL (Edit Connection), auto-switches the client base URL via NWPathMonitor; also wired the previously-dead Cellular Quality streaming setting
+- [x] local artwork library download is faster and shows an estimated total size
+- [x] custom accent colour picker works through the app theme
+- [x] storage shows logged play events size
+- [x] storage shows logs size
+- [x] verbose logs can be filtered by level and sorted newest/oldest
 
 ### Bugs & Fixes
 - [x] fix error in stats where it will say avg play for 700,000 days instead of the amount of days the app was installed
@@ -85,6 +102,7 @@ stuff that needs to be done
 - [x] fixed crash when long-pressing an album cover (ArtworkView no longer force-reads the app environment inside context-menu previews)
 - [x] artist profile photo appears as soon as it loads now (mirrored into view @State so the body re-renders without interaction)
 - [x] fixed the black bar on the side of some Picks for You covers (artwork forced to a true 1:1 square)
+- [x] fixed the intermittent Picks for You black bar in both pick cards and mix cards
 - [x] miniplayer swipe no longer also opens the player (highPriorityGesture), fixing the stuck open/close state afterwards
 - [x] fixed the library `.searchable` bar bleeding into the artist profile (toolbar hidden on artist detail)
 - [x] foreground progress bar no longer detaches from the track (fill anchored inside the track via overlay)
@@ -93,12 +111,16 @@ stuff that needs to be done
 - [x] fix ui bug when leaving an album then scrolling detaches the album cover — gated the swipe-back pop gesture (no longer fires mid-zoom-transition or simultaneously with the scroll pan) which was orphaning the zoom source snapshot
 - [x] all animations and that should be vsync based (hot drag/scroll updates throttled to CADisplayLink; visual sleep-delays removed from player nudge)
 - [x] fix issue when viewing artists profiles where the frame rate will be extremely low (artist header scroll updates throttled to vsync and profile images downsampled)
+- [x] artist profile low-FPS pass tightened further with smaller header image decoding and ignored sub-pixel scroll updates
 - [x] fix issue when making player smaller the frame rate will be very low (player dismiss drag updates throttled to vsync)
 - [x] fix the search bar on artists in the library tab again to just be exactly like how it works on albums/genres (artist rows use native NavigationLink push)
 - [x] when using airpods and going next at the end of a album while using autoplay or algorithm it will just repeat the same song (autoplay/algorithm now preloads before queue end so remote next advances)
 
 ### UI
 - [x] do slight redesign for the Picks for you section text panel uses album dominant color
+- [x] on the login page allow http with a warning and a continue/edit choice
+- [x] add a nicer fade/slide animation when lyrics switch state or song
+- [x] add silent fallback for devices below iOS 26 (no setting; older systems use legacy tabs/material instead)
 - [x] redesign the artist view (top songs) compact rows, Show All/Less toggle, up to 15 songs
 - [x] add section near the bottom of each artist to include stats (albums, plays, years active, genres)
 - [x] in the player dragging the progress bar makes it slightly larger (track grows 5→9pt while scrubbing)
@@ -117,6 +139,7 @@ stuff that needs to be done
 - [x] mixes unified into the "Picks for You" row at the same card size, interleaved randomly (stable per day)
 - [x] ArtistName / Genre mixes open like an album (new MixDetailView with play/shuffle + track list)
 - [x] swipe left/right on the miniplayer to skip / go back, with a slide animation
+- [x] swipe songs to queue next and swipe up/down inside albums, playlists, and smart playlists to move through tracks
 - [x] "View Credits" now shows only creation data (performers, writing, production & engineering) via a dedicated credits sheet
 - [x] removed the floating back button on album/playlist when opened from the library tab (swipe-back instead)
 - [x] artist profile now has a true stretchy header — pulling/scrolling zooms the photo and fills the gap so the background colour never shows behind it
@@ -130,51 +153,3 @@ stuff that needs to be done
 - [x] show the artist name under the song title in playlists (TrackRow showArtist)
 - [x] add/edit playlist descriptions (pencil button → edit sheet) and pin playlists to the top of the playlists tab (long-press → Pin)
 - [x] playlist detail action row now matches albums (shuffle circle · white Play · download)
-
-## not done
-
-### UI & Design
-- [ ] allow users to swipe on songs to add them into the queue next as well allow users to swipe down and up on playlists to move throughout the album/playlist
-- [ ] on the login page allow users to use http but if http is going to be used warn the user saying its not that safe and either allow them to change it or allow them to continue
-- [ ] add animation when switching lyrics so it looks nicer
-
-### Bugs & Fixes
-- [ ] bug still exists for Picks for You section where the cover will have weird black bar on the right only sometimes
-- [ ] low frame rate when viewing a artists profile still
-
-### Player & Playback
-- [ ] for artists the play and shuffle button within them should shuffle/play all songs, play should play each album in order shuffle should shuffle all songs
-- [ ] below the play button show a album about (fetch from a api), as for playlists show the description there, add a "more" button to view it fully
-- [ ] add lyric translation using `TranslationSession.translate(_:)` (https://developer.apple.com/documentation/translation)
-
-### Library & Navigation
-- [ ] change share button (3 dots context menu) to use odesli or songlink instead of navidrome
-- [ ] add the following to the home "Picks for You" section
-  - [ ] a discovery station/album/playlist (should update once a day (every 24 hours))
-  - [ ] a heavy rotation station/album/playlist
-- [ ] allow the user to pin smart playlists
-- [ ] add a option when holding albums to view stats about it
-- [ ] when making a smart album change the following
-  - [ ] when picking "Artists Contains" (assuming this means what artists will be in the album) have it be a dropdown with all the artists name, or open a new ui where the user can search for artists (make both multi-select)
-  - [ ] same above but with albums
-  - [ ] all around make smart playlists have the same ability but make them have more QoL changes to make them easier to use
-- [ ] in library under songs, add a filter for album where it will sort the songs by album
-  - [ ] alongside adding that add the option to play from the library song section 
-- [ ] allow swiping to leave when viewing genre from the library tab
-- [ ] when either using the "Play" or "Shuffle" button from a artists profile it should play or shuffle all their songs not just top songs 
-
-### Settings & Integration
-- [ ] make downloading all artwork faster (if possible) also make it show a est total size for it all
-- [ ] allow custom accent colour
-- [ ] show the size of logged play events (under storage section)
-- [ ] show the size of logs (under storage section)
-
-### Search & History
-- [ ] allow users to search for genres
-
-### Misc (do not add to "done" section just remove when finished)
-- [ ] make codespace more github ready
-- [ ] improve readme.md so its more like a navidrome client iOS player (update list of features) and add a "Why Volta" section
-- [ ] rewrite comments to be more human like and simple, alongside making comments less freq
-- [ ] ensure all settings are properly wired up and work as they should
-- [ ] add the ability to sort logs for verbose level

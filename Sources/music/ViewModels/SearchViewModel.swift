@@ -1,12 +1,19 @@
 import Foundation
 import Observation
 
+struct GenreSearchResult: Identifiable, Hashable {
+    let name: String
+    let albums: [Album]
+    var id: String { name }
+}
+
 @MainActor
 @Observable
 final class SearchViewModel {
     private(set) var artists: [Artist] = []
     private(set) var albums: [Album] = []
     private(set) var songs: [Song] = []
+    private(set) var genres: [GenreSearchResult] = []
     private(set) var isSearching = false
     private(set) var hasSearched = false
 
@@ -63,6 +70,7 @@ final class SearchViewModel {
             artists = []
             albums = []
             songs = []
+            genres = []
             hasSearched = false
             return
         }
@@ -79,9 +87,11 @@ final class SearchViewModel {
         async let r2 = useBoth
             ? client.search(query: normalized, artistCount: 10, albumCount: 10, songCount: 20)
             : nil
+        async let genreAlbums = client.allAlbums(size: 500)
 
         let res1 = (try? await r1)
         let res2 = (try? await r2)
+        let albumSample = (try? await genreAlbums) ?? []
 
         var mergedArtists = res1?.artists ?? []
         var mergedAlbums  = res1?.albums  ?? []
@@ -99,6 +109,19 @@ final class SearchViewModel {
         artists = mergedArtists
         albums  = mergedAlbums
         songs   = mergedSongs
+        genres  = matchingGenres(query: q, albums: albumSample)
+    }
+
+    private func matchingGenres(query: String, albums: [Album]) -> [GenreSearchResult] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        let grouped = Dictionary(grouping: albums) { album in
+            album.genre?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+        return grouped
+            .filter { !$0.key.isEmpty && $0.key.localizedCaseInsensitiveContains(trimmed) }
+            .map { GenreSearchResult(name: $0.key, albums: $0.value.sorted { $0.name < $1.name }) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }
 

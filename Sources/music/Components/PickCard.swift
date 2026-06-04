@@ -16,15 +16,17 @@ struct PickCard: View {
         VStack(alignment: .leading, spacing: 0) {
             // a clear square forces the art to a true 1:1 at full card width,
             // so non-square server covers can't leave a black bar on the side
-            Color.clear
-                .aspectRatio(1, contentMode: .fit)
-                .overlay {
-                    ArtworkView(coverArtID: album.coverArt, size: 400, cornerRadius: 0,
-                                onImageLoaded: { image in
-                                    accentColor = Color(ColorExtractor.dominantColor(from: image))
-                                })
-                }
-                .clipped()
+            GeometryReader { geo in
+                ArtworkView(coverArtID: album.coverArt, size: 600, cornerRadius: 0,
+                            onImageLoaded: { image in
+                                accentColor = Color(ColorExtractor.dominantColor(from: image))
+                            })
+                    .frame(width: geo.size.width, height: geo.size.width)
+                    .clipped()
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .background(Theme.secondaryBackground)
+            .clipped()
 
             VStack(alignment: .leading, spacing: 4) {
                 if let label = topLabel {

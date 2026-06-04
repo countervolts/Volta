@@ -110,6 +110,26 @@ extension SubsonicClient {
         return body.album
     }
 
+    func songsForArtist(id: String) async throws -> [Song] {
+        guard let loadedArtist = try await self.artist(id: id) else { return [] }
+        let albums = (loadedArtist.album ?? []).sorted {
+            let y0 = $0.year ?? Int.max
+            let y1 = $1.year ?? Int.max
+            if y0 != y1 { return y0 < y1 }
+            return ($0.createdDate ?? .distantPast) < ($1.createdDate ?? .distantPast)
+        }
+        let fullAlbums = try await self.albums(ids: albums.map(\.id))
+        let byID = Dictionary(uniqueKeysWithValues: fullAlbums.map { ($0.id, $0) })
+        return albums.flatMap { album in
+            (byID[album.id]?.song ?? album.song ?? []).sorted {
+                let d0 = $0.discNumber ?? 1
+                let d1 = $1.discNumber ?? 1
+                if d0 != d1 { return d0 < d1 }
+                return ($0.track ?? 0) < ($1.track ?? 0)
+            }
+        }
+    }
+
     func albums(ids: [String]) async throws -> [Album] {
         try await withThrowingTaskGroup(of: Album?.self) { group in
             for id in ids {

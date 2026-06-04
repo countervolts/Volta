@@ -78,6 +78,11 @@ final class StatsStore {
         queue.sync { events }
     }
 
+    func storageSizeBytes() -> Int {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+        return attrs?[.size] as? Int ?? 0
+    }
+
     func events(from start: Date, to end: Date) -> [PlayEvent] {
         queue.sync { events.filter { $0.timestamp >= start && $0.timestamp <= end } }
     }

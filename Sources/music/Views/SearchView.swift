@@ -20,7 +20,7 @@ struct SearchView: View {
                         ProgressView()
                             .controlSize(.large)
                             .tint(Theme.accent)
-                    } else if vm.hasSearched && vm.artists.isEmpty && vm.albums.isEmpty && vm.songs.isEmpty {
+                    } else if vm.hasSearched && vm.artists.isEmpty && vm.albums.isEmpty && vm.songs.isEmpty && vm.genres.isEmpty {
                         noResults
                     } else {
                         results
@@ -53,11 +53,17 @@ struct SearchView: View {
         switch route {
         case .album(let album):
             AlbumDetailView(album: album)
-                .navigationTransition(.zoom(sourceID: album.id, in: heroNamespace))
+                .zoomNavigationTransition(sourceID: album.id, in: heroNamespace)
         case .playlist(let pl):
             PlaylistDetailView(playlist: pl)
         case .artist(let artist):
             ArtistDetailView(artist: artist)
+        case .genre(let genre):
+            FullMediaGrid(title: genre.name, items: genre.albums.map(MediaItem.init(album:))) { item in
+                if let album = item.albumRef {
+                    path.append(.album(album))
+                }
+            }
         }
     }
 
@@ -188,6 +194,44 @@ struct SearchView: View {
                     }
                 }
 
+                if !vm.genres.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Genres")
+                            .font(.title3.bold())
+                            .foregroundStyle(Theme.primaryText)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
+                        ForEach(vm.genres) { genre in
+                            NavigationLink(value: SearchRoute.genre(genre)) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: Symbols.genres)
+                                        .font(.system(size: 18))
+                                        .foregroundStyle(Theme.accent)
+                                        .frame(width: 44, height: 44)
+                                        .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(genre.name)
+                                            .font(.body)
+                                            .foregroundStyle(Theme.primaryText)
+                                        Text("\(genre.albums.count) albums")
+                                            .font(.caption)
+                                            .foregroundStyle(Theme.secondaryText)
+                                    }
+                                    Spacer()
+                                    Image(systemName: Symbols.chevron)
+                                        .font(.caption)
+                                        .foregroundStyle(Theme.secondaryText)
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            Divider().background(Theme.secondaryText.opacity(0.2)).padding(.leading, 72)
+                        }
+                    }
+                }
+
                 Color.clear.frame(height: 80)
             }
             .padding(.top, 16)
@@ -236,4 +280,5 @@ enum SearchRoute: Hashable {
     case album(Album)
     case playlist(Playlist)
     case artist(Artist)
+    case genre(GenreSearchResult)
 }

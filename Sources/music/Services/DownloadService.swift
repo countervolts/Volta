@@ -1,14 +1,12 @@
 import Foundation
 import UIKit
 
-// tracks the download state of a song for UI binding
 enum DownloadState: Equatable, Sendable {
     case notDownloaded
     case downloading(progress: Double)
     case downloaded
 }
 
-// thread-safe progress accumulator shared across concurrent segment downloads.
 private actor ByteCounter {
     private let total: Int
     private var received = 0
@@ -22,16 +20,6 @@ private actor ByteCounter {
 
 private enum SegmentError: Error { case rangeNotSupported, badResponse }
 
-// persists downloaded audio files locally for offline playback.
-// downloads are stored in Documents/volta-downloads/{songID}.{suffix}
-// a manifest.json maps song IDs to their local file paths.
-//
-// two transfer strategies, chosen by the "downloadThreadingMode" setting:
-//   • "multi"  (default) – splits the file into byte-range segments fetched in
-//                          parallel, then stitches them together. faster on
-//                          high-latency links. falls back to single if the
-//                          server ignores Range or the size is unknown.
-//   • "single"           – one plain download task with granular progress.
 @MainActor
 @Observable
 final class DownloadService {
@@ -41,15 +29,12 @@ final class DownloadService {
     private var activeTasks: [String: URLSessionDownloadTask] = [:]
     private var observations: [String: NSKeyValueObservation] = [:]
     private var segmentTasks: [String: Task<Void, Never>] = [:]
-    private var startTimes: [String: Date] = [:]   // for average-speed logging
+    private var startTimes: [String: Date] = [:]
     private var client: SubsonicClient?
 
-    // session-scoped dedupe so an album's tracks each only trigger one artwork
-    // persist pass (and one artist-info lookup) per cover / artist.
     private var pinnedCovers: Set<String> = []
     private var pinnedArtists: Set<String> = []
 
-    // the cover-art sizes the UI requests — persisted so every screen resolves offline.
     static let artworkSizes = [80, 100, 200, 300, 400, 600, 800]
 
     private let directory: URL
@@ -94,16 +79,11 @@ final class DownloadService {
         let manifestURL = manifestURL
         let mode = UserDefaults.standard.string(forKey: "downloadThreadingMode") ?? "multi"
 
-        let speedLimit = UserDefaults.standard.integer(forKey: "downloadSpeedLimitKBps") * 1024  // bytes/sec, 0 = off
+        let speedLimit = UserDefaults.standard.integer(forKey: "downloadSpeedLimitKBps") * 1024
 
-        // multithreaded path needs a known size big enough to be worth splitting.
-        // a speed limit also routes through the segmented path (serial + paced).
         if total > 0, (mode != "single" && total > 1_048_576) || speedLimit > 0 {
             let segments = max(2, min(6, total / (512 * 1024)))
             AppLogger.shared.log("⬇ \(title) — starting (\(segments) segments, \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))\(speedLimit > 0 ? ", limited" : ""))", category: .other)
-            // strong capture is safe: DownloadService is a long-lived singleton,
-            // and the Task inherits this MainActor so the state mutations below
-            // are same-actor calls.
             let task = Task { [self] in
                 do {
                     try await DownloadService.downloadSegmented(url: streamURL, title: title, total: total, dest: destURL, speedLimit: speedLimit) { progress in
@@ -114,8 +94,6 @@ final class DownloadService {
                     AppLogger.shared.log("✗ \(title) — cancelled", category: .other)
                     fail(songID, removing: destURL)
                 } catch {
-                    // server ignored Range or transfer failed → fall back to a
-                    // single plain stream so the download still succeeds.
                     AppLogger.shared.log("⚠ \(title) — segmented failed (\(error.localizedDescription)), falling back to single", category: .other, level: .warning)
                     startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL)
                 }
@@ -149,7 +127,6 @@ final class DownloadService {
         unpinOrphanedArtwork(after: song)
     }
 
-    // drop pinned cover / artist art once no remaining download references it.
     private func unpinOrphanedArtwork(after song: Song) {
         let remaining = downloadedSongs()
         if let cover = song.coverArt, !remaining.contains(where: { $0.coverArt == cover }) {
@@ -163,10 +140,7 @@ final class DownloadService {
         }
     }
 
-    // builds the on-disk filename from a server-supplied song id + suffix.
-    // strips path separators so a hostile/buggy server can't use an id like
-    // "../../foo" to write outside the downloads directory. the leading
-    // "<id>." guarantees the result is never "." or ".." on its own.
+    // Avoid letting a server-supplied song id become a path.
     private nonisolated static func safeFileName(id: String, suffix: String) -> String {
         func clean(_ s: String) -> String {
             s.replacingOccurrences(of: "/", with: "_")
@@ -220,7 +194,7 @@ final class DownloadService {
         title: String,
         total: Int,
         dest: URL,
-        speedLimit: Int = 0,            // bytes/sec, 0 = unlimited
+        speedLimit: Int = 0,
         progress: @escaping @Sendable (Double) async -> Void
     ) async throws {
         let maxSegments = 6
@@ -232,7 +206,6 @@ final class DownloadService {
         let parts: [URL] = (0..<segments).map { dest.appendingPathExtension("part\($0)") }
         for p in parts { try? FileManager.default.removeItem(at: p) }
 
-        // fetches one byte-range segment to its part file.
         func fetchSegment(_ i: Int) async throws -> Int {
             try Task.checkCancellation()
             let start = i * chunk
@@ -244,7 +217,6 @@ final class DownloadService {
 
             let (data, response) = try await URLSession.shared.data(for: req)
             guard let http = response as? HTTPURLResponse else { throw SegmentError.badResponse }
-            // 206 = partial content. 200 means the server ignored Range.
             guard http.statusCode == 206 else { throw SegmentError.rangeNotSupported }
             try data.write(to: parts[i], options: .atomic)
             let p = await counter.add(data.count)
@@ -255,7 +227,6 @@ final class DownloadService {
 
         do {
             if speedLimit > 0 {
-                // serial + paced so the average rate stays under the limit
                 let started = Date()
                 var downloaded = 0
                 for i in 0..<segments {
@@ -275,7 +246,6 @@ final class DownloadService {
                 }
             }
 
-            // stitch the segments back together in order.
             AppLogger.shared.log("🧵 \(title) — stitching \(segments) segments", category: .other)
             try? FileManager.default.removeItem(at: dest)
             FileManager.default.createFile(atPath: dest.path, contents: nil)
@@ -308,10 +278,8 @@ final class DownloadService {
         observations.removeValue(forKey: songID)
         segmentTasks.removeValue(forKey: songID)
         saveManifest(to: manifestURL)
-        // keep within the user's storage cap (won't evict the song just saved)
         enforceStorageCap(keeping: songID)
 
-        // log final size, elapsed time and the average transfer speed
         let bytes = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
         let elapsed = startTimes.removeValue(forKey: songID).map { Date().timeIntervalSince($0) } ?? 0
         let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
@@ -323,13 +291,9 @@ final class DownloadService {
         }
     }
 
-    // pin the album cover + the artist's profile photo into the persistent offline
-    // store while still online, so both keep rendering when viewing downloads
-    // offline (a plain Caches fetch could be purged → placeholder cover).
     private func prefetchArtwork(for song: Song) {
         guard let client else { return }
 
-        // album cover: pin every size the UI requests so all screens resolve offline
         if let cover = song.coverArt, pinnedCovers.insert(cover).inserted {
             let urls = Self.artworkSizes.compactMap { client.coverArtURL(id: cover, size: $0) }
             Task.detached(priority: .utility) {
@@ -337,8 +301,6 @@ final class DownloadService {
             }
         }
 
-        // artist profile picture: resolve the real photo URL (getArtistInfo2 →
-        // last.fm/spotify) then pin it under a stable artist-id key for offline.
         if let artistId = song.artistId, pinnedArtists.insert(artistId).inserted {
             Task.detached(priority: .utility) { [client] in
                 guard let info = try? await client.artistInfo(id: artistId),
@@ -359,20 +321,16 @@ final class DownloadService {
 
     // MARK: - Manifest
 
-    // each entry keeps the local file path AND the full Song metadata so the
-    // library can list downloaded artists/albums/songs/genres offline without
-    // re-querying the server.
     struct Record: Codable {
         let path: String
         var song: Song?
-        var lastPlayed: Date?   // for least-recently-played eviction
+        var lastPlayed: Date?
     }
 
     private var manifest: [String: Record] = [:]
 
     // MARK: - Storage cap / LRU eviction
 
-    // call when a downloaded song starts playing so eviction keeps the freshest.
     func markPlayed(_ songID: String) {
         guard manifest[songID] != nil else { return }
         manifest[songID]?.lastPlayed = .now
@@ -385,8 +343,6 @@ final class DownloadService {
         }
     }
 
-    // when over the user's storage cap, evict least-recently-played downloads
-    // until back under the limit (skips anything still downloading / now playing).
     private func enforceStorageCap(keeping protectedID: String?) {
         guard UserDefaults.standard.bool(forKey: "autoEvictDownloads") else { return }
         let capMB = UserDefaults.standard.integer(forKey: "downloadCapMB")
@@ -399,7 +355,6 @@ final class DownloadService {
         var total = manifest.values.reduce(0) { $0 + fileSize($1.path) }
         guard total > capBytes else { return }
 
-        // oldest first (nil lastPlayed = never played = evict earliest)
         let candidates = manifest
             .filter { $0.key != protectedID && states[$0.key] == .downloaded }
             .sorted { ($0.value.lastPlayed ?? .distantPast) < ($1.value.lastPlayed ?? .distantPast) }
@@ -416,7 +371,6 @@ final class DownloadService {
         saveManifest(to: manifestURL)
     }
 
-    // all songs with a present local file, for the Downloaded library source.
     func downloadedSongs() -> [Song] {
         manifest.values.compactMap { rec in
             guard let song = rec.song,
@@ -427,11 +381,9 @@ final class DownloadService {
 
     private func loadManifest() {
         guard let data = try? Data(contentsOf: manifestURL) else { return }
-        // current format: [id: Record]
         if let decoded = try? JSONDecoder().decode([String: Record].self, from: data) {
             manifest = decoded
         } else if let legacy = try? JSONDecoder().decode([String: String].self, from: data) {
-            // migrate old [id: path] manifests (no stored metadata).
             manifest = legacy.mapValues { Record(path: $0, song: nil) }
         }
         for (id, rec) in manifest {

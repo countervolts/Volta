@@ -1,7 +1,6 @@
 import SwiftUI
 import UIKit
 
-// one enum drives every sheet (single .sheet — stacking several is unreliable).
 enum MixSheet: Identifiable {
     case addToPlaylist(Song)
     case album(Album)
@@ -15,8 +14,6 @@ enum MixSheet: Identifiable {
     }
 }
 
-// opens a daily mix ("Rock Mix", "Artist Mix") like an album — dynamic
-// background, play/shuffle, and the full track list.
 struct MixDetailView: View {
     @Environment(AppState.self) private var appState
     let mix: MusicMix
@@ -42,9 +39,6 @@ struct MixDetailView: View {
                 }
             }
             .scrollIndicators(.hidden)
-
-            // no back button — swipe from the left edge to go back (SwipeBackEnabler)
-
             if let msg = toastMessage {
                 VStack {
                     Spacer()

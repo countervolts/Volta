@@ -32,6 +32,12 @@ final class SmartPlaylistStore {
         save()
     }
 
+    func togglePin(_ playlist: SmartPlaylist) {
+        guard let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
+        playlists[index].pinned.toggle()
+        save()
+    }
+
     private func save() {
         if let data = try? JSONEncoder().encode(playlists) {
             UserDefaults.standard.set(data, forKey: Self.key)

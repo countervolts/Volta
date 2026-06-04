@@ -7,6 +7,7 @@ struct AlbumContextMenu: ViewModifier {
     var onAddToPlaylist: ((Song) -> Void)? = nil
 
     @Environment(AppState.self) private var appState
+    @State private var showStats = false
     private var audio: AudioPlayer { appState.audioPlayer }
 
     func body(content: Content) -> some View {
@@ -24,6 +25,7 @@ struct AlbumContextMenu: ViewModifier {
             Section {
                 Button { download() } label: { Label("Download", systemImage: Symbols.download) }
                 Button { favorite() } label: { Label("Favorite", systemImage: Symbols.starEmpty) }
+                Button { showStats = true } label: { Label("View Stats", systemImage: Symbols.stats) }
             }
         } preview: {
             VStack(alignment: .leading, spacing: 10) {
@@ -38,13 +40,17 @@ struct AlbumContextMenu: ViewModifier {
             .padding(16)
             .background(Theme.secondaryBackground)
         }
+        .sheet(isPresented: $showStats) {
+            AlbumStatsSheet(album: album)
+        }
     }
 
     // MARK: - Actions
 
     private func fetchSongs() async -> [Song] {
         if let s = album.song, !s.isEmpty { return s }
-        return (try? await appState.client?.album(id: album.id))?.song ?? []
+        guard let client = appState.client else { return [] }
+        return (try? await client.album(id: album.id))?.song ?? []
     }
 
     private func play(shuffled: Bool) {
@@ -74,6 +80,56 @@ struct AlbumContextMenu: ViewModifier {
 
     private func favorite() {
         Task { try? await appState.client?.star(id: album.id) }
+    }
+}
+
+private struct AlbumStatsSheet: View {
+    let album: Album
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(album.name) {
+                    statRow("Artist", album.displayArtist)
+                    statRow("Songs", album.songCount.map(String.init))
+                    statRow("Duration", album.duration.map(formatDuration))
+                    statRow("Plays", album.playCount.map(String.init))
+                    statRow("Year", album.year.map(String.init))
+                    statRow("Genre", album.genre)
+                    statRow("Added", album.createdDate?.formatted(date: .abbreviated, time: .omitted))
+                    statRow("Label", album.recordLabel)
+                }
+            }
+            .navigationTitle("Album Stats")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    @ViewBuilder
+    private func statRow(_ title: String, _ value: String?) -> some View {
+        if let value, !value.isEmpty {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(value)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+        }
+    }
+
+    private func formatDuration(_ seconds: Int) -> String {
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        if h > 0 { return "\(h) hr \(m) min" }
+        return "\(m) min"
     }
 }
 

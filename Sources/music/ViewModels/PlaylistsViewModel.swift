@@ -14,7 +14,6 @@ final class PlaylistsViewModel {
     var showCreateSheet = false
     var newPlaylistName = ""
 
-    // locally pinned playlist IDs (persisted) — pinned playlists sort to the top
     private static let pinnedKey = "pinnedPlaylistIDs"
     private(set) var pinnedIDs: Set<String> = Set(
         UserDefaults.standard.stringArray(forKey: PlaylistsViewModel.pinnedKey) ?? []
@@ -35,7 +34,6 @@ final class PlaylistsViewModel {
         let base = searchText.isEmpty
             ? playlists
             : playlists.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-        // stable sort: pinned first, preserving original order within each group
         return base.enumerated()
             .sorted { lhs, rhs in
                 let lp = pinnedIDs.contains(lhs.element.id)
@@ -50,12 +48,20 @@ final class PlaylistsViewModel {
         Set(smartSourceSongs.compactMap(\.genre)).sorted()
     }
 
+    var smartArtists: [String] {
+        Set(smartSourceSongs.compactMap(\.artist)).sorted()
+    }
+
+    var smartAlbums: [String] {
+        Set(smartSourceSongs.compactMap(\.album)).sorted()
+    }
+
     func load(client: SubsonicClient) async {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         async let playlistsTask = client.playlists()
-        async let songsTask = client.randomSongs(size: 500)
+        async let songsTask = client.randomSongs(size: 1000)
         playlists = (try? await playlistsTask) ?? []
         smartSourceSongs = (try? await songsTask) ?? []
         hasLoaded = true

@@ -1,11 +1,15 @@
 import SwiftUI
 
-// switches between login and the main app based on session phase, with an
-// animated crossfade.
 struct RootView: View {
     @Environment(AppState.self) private var appState
-    // observe accent so the whole window tint refreshes live on change
     @AppStorage("accentColorName") private var accentColorName = "purple"
+    @AppStorage("customAccentRed") private var customAccentRed = 0.55
+    @AppStorage("customAccentGreen") private var customAccentGreen = 0.36
+    @AppStorage("customAccentBlue") private var customAccentBlue = 0.96
+
+    private var accentRefreshKey: String {
+        "\(accentColorName)-\(customAccentRed)-\(customAccentGreen)-\(customAccentBlue)"
+    }
 
     var body: some View {
         ZStack {
@@ -26,6 +30,7 @@ struct RootView: View {
         }
         .tint(Theme.accent)
         .animation(.spring(response: 0.55, dampingFraction: 0.9), value: appState.phase)
+        .animation(.easeInOut(duration: 0.2), value: accentRefreshKey)
         .task {
             appState.restoreSession()
         }

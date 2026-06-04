@@ -1,7 +1,5 @@
 import SwiftUI
 
-// central design tokens. colors defined in code so they resolve regardless
-// of bundle, with the asset catalog AccentColor mirroring `accent`.
 enum Theme {
     static let background = Color.black
     static let secondaryBackground = Color(red: 0.07, green: 0.07, blue: 0.08)
@@ -9,8 +7,6 @@ enum Theme {
     static let secondaryText = Color.white.opacity(0.6)
     static let error = Color(red: 0.95, green: 0.26, blue: 0.30)
 
-    // accent resolves live from the user's chosen palette name (AppStorage
-    // "accentColorName"). any view body that re-evaluates picks up the change.
     static var accent: Color { accentColor(named: currentAccentName) }
 
     static var currentAccentName: String {
@@ -20,6 +16,7 @@ enum Theme {
     static let accentNames = ["purple", "blue", "indigo", "teal", "green", "yellow", "orange", "red", "pink"]
 
     static func accentColor(named name: String) -> Color {
+        if name == "custom" { return customAccentColor }
         switch name {
         case "blue":   return Color(red: 0.20, green: 0.52, blue: 0.96)
         case "indigo": return Color(red: 0.35, green: 0.34, blue: 0.84)
@@ -29,8 +26,16 @@ enum Theme {
         case "yellow": return Color(red: 0.98, green: 0.78, blue: 0.18)
         case "red":    return Color(red: 0.94, green: 0.27, blue: 0.27)
         case "green":  return Color(red: 0.20, green: 0.78, blue: 0.45)
-        default:       return Color(red: 0.55, green: 0.36, blue: 0.96) // purple
+        default:       return Color(red: 0.55, green: 0.36, blue: 0.96)
         }
+    }
+
+    static var customAccentColor: Color {
+        let defaults = UserDefaults.standard
+        let r = defaults.object(forKey: "customAccentRed") as? Double ?? 0.55
+        let g = defaults.object(forKey: "customAccentGreen") as? Double ?? 0.36
+        let b = defaults.object(forKey: "customAccentBlue") as? Double ?? 0.96
+        return Color(red: r, green: g, blue: b)
     }
 
     enum Layout {

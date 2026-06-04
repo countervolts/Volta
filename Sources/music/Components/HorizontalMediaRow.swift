@@ -76,15 +76,17 @@ struct PickMixCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Color.clear
-                .aspectRatio(1, contentMode: .fit)
-                .overlay {
-                    ArtworkView(coverArtID: mix.coverArt, size: 400, cornerRadius: 0,
-                                onImageLoaded: { image in
-                                    accentColor = Color(ColorExtractor.dominantColor(from: image))
-                                })
-                }
-                .clipped()
+            GeometryReader { geo in
+                ArtworkView(coverArtID: mix.coverArt, size: 600, cornerRadius: 0,
+                            onImageLoaded: { image in
+                                accentColor = Color(ColorExtractor.dominantColor(from: image))
+                            })
+                    .frame(width: geo.size.width, height: geo.size.width)
+                    .clipped()
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .background(Theme.secondaryBackground)
+            .clipped()
                 .overlay(alignment: .topLeading) {
                     Label("MIX", systemImage: "square.stack.fill")
                         .font(.caption2.bold())

@@ -23,6 +23,10 @@ final class LoginViewModel {
         !isConnecting
     }
 
+    var usesInsecureHTTP: Bool {
+        SubsonicConfig.normalizedURL(from: serverAddress)?.scheme?.lowercased() == "http"
+    }
+
     func connect(using appState: AppState) async {
         guard !isConnecting else { return }
         serverError = nil
