@@ -11,6 +11,16 @@ final class HomeViewModel {
     }
 
     private(set) var picks: [Album] = []
+    private(set) var mixes: [MusicMix] = []
+
+    // mixes + pick albums interleaved randomly but stably for the day, so the
+    // "Picks for You" row mixes both at the same card size instead of grouping them.
+    var picksFeed: [PickFeedItem] {
+        var items = mixes.map(PickFeedItem.mix) + picks.map(PickFeedItem.album)
+        var rng = SeededRNG(seed: SeededRNG.daySeed() &+ 0x9151)
+        items.shuffle(using: &rng)
+        return items
+    }
     private(set) var recentlyPlayed: [MediaItem] = []
     private(set) var moreLike: [MoreLikeSection] = []
     private(set) var discover: [Album] = []
@@ -48,6 +58,7 @@ final class HomeViewModel {
         // each section loads independently; a failure leaves that section empty
         // rather than failing the whole screen.
         async let picksResult       = loadPicks(client: client)
+        async let mixesResult       = loadMixes(client: client)
         async let recentResult      = loadRecentlyPlayed(client: client)
         async let moreLikeResult    = loadMoreLike(client: client)
         async let discoverResult    = loadDiscover(client: client, serverID: serverID, store: appState.store)
@@ -55,6 +66,7 @@ final class HomeViewModel {
         async let artistsResult     = loadTopArtists(client: client)
 
         picks         = await picksResult
+        mixes         = await mixesResult
         recentlyPlayed = await recentResult
         moreLike      = await moreLikeResult
         discover      = await discoverResult
@@ -71,6 +83,7 @@ final class HomeViewModel {
 
     private struct HomeSnapshot: Codable {
         var picks: [Album]
+        var mixes: [MusicMix]?
         var recentlyPlayed: [MediaItem]
         var moreLike: [MoreLikeSection]
         var discover: [Album]
@@ -84,6 +97,7 @@ final class HomeViewModel {
 
     private func apply(_ snapshot: HomeSnapshot) {
         picks          = snapshot.picks
+        mixes          = snapshot.mixes ?? []
         recentlyPlayed = snapshot.recentlyPlayed
         moreLike       = snapshot.moreLike
         discover       = snapshot.discover
@@ -93,7 +107,7 @@ final class HomeViewModel {
 
     private func saveSnapshot(serverID: String) {
         let snapshot = HomeSnapshot(
-            picks: picks, recentlyPlayed: recentlyPlayed, moreLike: moreLike,
+            picks: picks, mixes: mixes, recentlyPlayed: recentlyPlayed, moreLike: moreLike,
             discover: discover, newReleases: newReleases, topArtists: topArtists
         )
         let key = Self.cacheKey(serverID)
@@ -104,6 +118,62 @@ final class HomeViewModel {
 
     private func loadPicks(client: SubsonicClient) async -> [Album] {
         (try? await client.randomAlbums(size: Self.sectionCount)) ?? []
+    }
+
+    // MARK: - Daily mixes ("Rock Mix", "Artist Mix" …)
+
+    private func loadMixes(client: SubsonicClient) async -> [MusicMix] {
+        var rng = SeededRNG(seed: SeededRNG.daySeed())
+
+        // sample the library to find the most common genres + active artists
+        let sample = (try? await client.allAlbums(size: 300)) ?? []
+        guard !sample.isEmpty else { return [] }
+
+        var mixes: [MusicMix] = []
+
+        // up to 2 genre mixes from the top genres
+        let genreCounts = Dictionary(grouping: sample.compactMap { $0.genre }, by: { $0 }).mapValues(\.count)
+        let topGenres = genreCounts.sorted { $0.value > $1.value }.map(\.key)
+        for genre in topGenres.shuffled(using: &rng).prefix(2) {
+            let pool = (try? await client.songsByGenre(genre, count: 200)) ?? []
+            if let mix = makeMix(id: "genre-\(genre)", title: "\(genre) Mix", subtitle: "Daily \(genre.lowercased()) mix", from: pool, rng: &rng) {
+                mixes.append(mix)
+            }
+        }
+
+        // up to 2 artist mixes from artists with the most albums in the sample
+        let artistCounts = Dictionary(grouping: sample.compactMap { a -> (String, String)? in
+            guard let id = a.artistId, let name = a.artist else { return nil }
+            return (id, name)
+        }, by: { $0.0 })
+        let topArtistIDs = artistCounts.sorted { $0.value.count > $1.value.count }.map { ($0.key, $0.value.first!.1) }
+        for (artistID, artistName) in topArtistIDs.shuffled(using: &rng).prefix(2) {
+            var pool = (try? await client.topSongs(artistName: artistName, count: 50)) ?? []
+            if pool.count < 10, let artist = try? await client.artist(id: artistID) {
+                // fall back to gathering tracks from the artist's albums
+                let albums = (artist.album ?? []).prefix(6)
+                for album in albums {
+                    if let full = try? await client.album(id: album.id) { pool.append(contentsOf: full.song ?? []) }
+                }
+            }
+            if let mix = makeMix(id: "artist-\(artistID)", title: "\(artistName) Mix", subtitle: "Based on \(artistName)", from: pool, rng: &rng) {
+                mixes.append(mix)
+            }
+        }
+
+        return mixes.shuffled(using: &rng)
+    }
+
+    // builds a 20–50 song mix from a candidate pool, or nil if too few tracks
+    private func makeMix(id: String, title: String, subtitle: String, from pool: [Song], rng: inout SeededRNG) -> MusicMix? {
+        // dedupe by song id
+        var seen = Set<String>()
+        let unique = pool.filter { seen.insert($0.id).inserted }
+        guard unique.count >= 10 else { return nil }
+        let target = min(unique.count, Int.random(in: 20...50, using: &rng))
+        let songs = Array(unique.shuffled(using: &rng).prefix(target))
+        let cover = songs.first(where: { $0.coverArt != nil })?.coverArt
+        return MusicMix(id: id, title: title, subtitle: subtitle, coverArt: cover, songs: songs)
     }
 
     private func loadTopArtists(client: SubsonicClient) async -> [Artist] {

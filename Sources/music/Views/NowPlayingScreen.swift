@@ -2,6 +2,7 @@ import SwiftUI
 import AVKit
 import AVFoundation
 import MediaPlayer
+import UIKit
 
 enum PlayerTab { case nowPlaying, queue, lyrics }
 
@@ -10,11 +11,20 @@ struct NowPlayingScreen: View {
     @Binding var isPresented: Bool
     @State private var activeTab: PlayerTab = .nowPlaying
     @State private var dragOffset: CGFloat = 0
-    @State private var showSongInfo = false
+    @State private var pendingDragOffset: CGFloat = 0
+    @State private var dragThrottler: VSyncThrottler?
+    @State private var infoSheet: SongMenuSheet? = nil
+    @State private var showLosslessInfo = false
+    // scrub state lifted out of ScrubBar so the time labels share it (so the bar,
+    // elapsed and remaining all read one snapshot and can't drift apart)
+    @State private var scrubbing = false
+    @State private var scrubTime: TimeInterval = 0
     @State private var artistToShow: Artist?
     @State private var albumToShow: Album?
     @State private var isFetchingArtist = false
     @State private var isFetchingAlbum = false
+    @State private var tasteStore = TasteStore.shared
+    private var sharingAvailable: Bool { appState.sharingAvailable }
     @AppStorage("showLosslessBadge") private var showLosslessBadge = true
     @AppStorage("artworkAnimation") private var artworkAnimation = true
     // observe accent so player controls retint live on change
@@ -25,6 +35,9 @@ struct NowPlayingScreen: View {
     @State private var prevNudge: CGFloat = 0
 
     private var audio: AudioPlayer { appState.audioPlayer }
+    private var currentTaste: TasteState {
+        audio.currentSong.map { tasteStore.state(for: $0.id) } ?? .neutral
+    }
 
     private var bg: Color {
         if let image = audio.currentArtwork {
@@ -46,21 +59,35 @@ struct NowPlayingScreen: View {
             }
         }
         .gesture(
-            DragGesture()
-                .onChanged { v in dragOffset = max(0, v.translation.height) }
+            DragGesture(coordinateSpace: .global)
+                .onChanged { v in
+                    pendingDragOffset = max(0, v.translation.height)
+                    if let dragThrottler {
+                        dragThrottler.schedule()
+                    } else {
+                        dragOffset = pendingDragOffset
+                    }
+                }
                 .onEnded { v in
                     if v.translation.height > 120 || v.predictedEndTranslation.height > 300 {
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
                             isPresented = false
                         }
                     }
-                    withAnimation { dragOffset = 0 }
+                    pendingDragOffset = 0
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { dragOffset = 0 }
                 }
         )
+        // offset tracks the finger 1:1 during the drag (snap-back animated on release).
+        // no implicit .animation(value:) here — it wrapped the whole subtree, so the
+        // per-frame TimelineView scrubber/time labels got the spring applied to every
+        // redraw and visibly bounced while dragging.
         .offset(y: dragOffset)
-        .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.9), value: dragOffset)
-        .sheet(isPresented: $showSongInfo) {
-            SongInfoSheet(song: audio.currentSong)
+        .sheet(item: $infoSheet) { which in
+            switch which {
+            case .info:    SongInfoSheet(song: audio.currentSong)
+            case .credits: SongCreditsSheet(song: audio.currentSong)
+            }
         }
         .sheet(item: $albumToShow) { album in
             NavigationStack {
@@ -86,7 +113,50 @@ struct NowPlayingScreen: View {
             }
             .preferredColorScheme(.dark)
         }
+        .onAppear {
+            dragThrottler = VSyncThrottler {
+                dragOffset = pendingDragOffset
+            }
+        }
+        .onDisappear {
+            dragThrottler?.invalidate()
+            dragThrottler = nil
+        }
         .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Share / sleep helpers
+
+    private func shareCurrentSong() {
+        guard let song = audio.currentSong else { return }
+        Task {
+            if let url = try? await appState.client?.createShare(id: song.id) {
+                ShareSheet.present([url])
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sleepTimerMenu: some View {
+        Menu {
+            if audio.sleepTimerActive {
+                Button(role: .destructive) { audio.cancelSleepTimer() } label: {
+                    Label(audio.sleepEndsAtTrackEnd ? "Cancel (end of track)" : "Cancel Timer",
+                          systemImage: "xmark.circle")
+                }
+                Divider()
+            }
+            ForEach([5, 15, 30, 45, 60], id: \.self) { m in
+                Button("\(m) minutes") { audio.startSleepTimer(minutes: m) }
+            }
+            Button("End of Track") { audio.startSleepTimerEndOfTrack() }
+        } label: {
+            Image(systemName: audio.sleepTimerActive ? "moon.fill" : "moon.zzz")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(audio.sleepTimerActive ? Theme.accent : .white.opacity(0.6))
+                .frame(width: 44, height: 44)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Drag handle
@@ -191,6 +261,19 @@ struct NowPlayingScreen: View {
 
                 Menu {
                     Button {
+                        if let s = audio.currentSong { tasteStore.toggleLove(s.id) }
+                    } label: {
+                        Label(currentTaste == .loved ? "Unlove" : "Love",
+                              systemImage: currentTaste == .loved ? "heart.fill" : "heart")
+                    }
+                    Button {
+                        if let s = audio.currentSong { tasteStore.toggleDislike(s.id) }
+                    } label: {
+                        Label(currentTaste == .disliked ? "Remove Dislike" : "Dislike",
+                              systemImage: currentTaste == .disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                    }
+                    Divider()
+                    Button {
                         if let s = audio.currentSong { audio.playNext(s) }
                     } label: {
                         Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
@@ -201,8 +284,11 @@ struct NowPlayingScreen: View {
                         Label("Play Last", systemImage: "text.line.last.and.arrowtriangle.forward")
                     }
                     Divider()
-                    Button { showSongInfo = true } label: { Label("Info", systemImage: Symbols.info) }
-                    Button { showSongInfo = true } label: { Label("View Credits", systemImage: "list.star") }
+                    Button { infoSheet = .info } label: { Label("Info", systemImage: Symbols.info) }
+                    Button { infoSheet = .credits } label: { Label("View Credits", systemImage: "list.star") }
+                    if sharingAvailable {
+                        Button { shareCurrentSong() } label: { Label("Share", systemImage: Symbols.share) }
+                    }
                     if audio.currentSong?.albumId != nil {
                         Button {
                             guard let albumId = audio.currentSong?.albumId else { return }
@@ -255,7 +341,10 @@ struct NowPlayingScreen: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color(white: 0.12))
                 .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
-            if let image = audio.currentArtwork {
+            if let animated = audio.currentAnimatedArtwork {
+                // live (animated) cover art — full player only
+                AnimatedImageView(image: animated)
+            } else if let image = audio.currentArtwork {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -274,11 +363,6 @@ struct NowPlayingScreen: View {
             insertion: .scale(scale: 0.92).combined(with: .opacity),
             removal: .scale(scale: 0.92).combined(with: .opacity)
         ))
-    }
-
-    private var isLossless: Bool {
-        guard let s = audio.currentSong?.suffix?.lowercased() else { return false }
-        return ["flac", "wav", "aiff", "aif", "alac", "ape", "wv", "tta"].contains(s)
     }
 
     private var trackInfo: some View {
@@ -324,6 +408,19 @@ struct NowPlayingScreen: View {
 
                 Menu {
                     Button {
+                        if let s = audio.currentSong { tasteStore.toggleLove(s.id) }
+                    } label: {
+                        Label(currentTaste == .loved ? "Unlove" : "Love",
+                              systemImage: currentTaste == .loved ? "heart.fill" : "heart")
+                    }
+                    Button {
+                        if let s = audio.currentSong { tasteStore.toggleDislike(s.id) }
+                    } label: {
+                        Label(currentTaste == .disliked ? "Remove Dislike" : "Dislike",
+                              systemImage: currentTaste == .disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                    }
+                    Divider()
+                    Button {
                         if let s = audio.currentSong { audio.playNext(s) }
                     } label: {
                         Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
@@ -334,8 +431,11 @@ struct NowPlayingScreen: View {
                         Label("Play Last", systemImage: "text.line.last.and.arrowtriangle.forward")
                     }
                     Divider()
-                    Button { showSongInfo = true } label: { Label("Info", systemImage: Symbols.info) }
-                    Button { showSongInfo = true } label: { Label("View Credits", systemImage: "list.star") }
+                    Button { infoSheet = .info } label: { Label("Info", systemImage: Symbols.info) }
+                    Button { infoSheet = .credits } label: { Label("View Credits", systemImage: "list.star") }
+                    if sharingAvailable {
+                        Button { shareCurrentSong() } label: { Label("Share", systemImage: Symbols.share) }
+                    }
                     Divider()
                     if audio.currentSong?.albumId != nil {
                         Button {
@@ -374,28 +474,46 @@ struct NowPlayingScreen: View {
     private var scrubber: some View {
         VStack(spacing: 6) {
             ScrubBar(
-                currentTime: audio.currentTime,
-                duration: audio.duration,
+                duration: { audio.liveDuration() },
+                liveTime: { audio.liveTime() },
+                scrubbing: $scrubbing,
+                scrubTime: $scrubTime,
                 onSeek: { audio.seek(to: $0) }
             )
-            HStack {
-                Text(formatTime(audio.currentTime))
-                    .monospacedDigit()
-                Spacer()
-                if isLossless && showLosslessBadge {
-                    Label("Lossless", systemImage: "waveform")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.white.opacity(0.7))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(.white.opacity(0.15), in: Capsule())
+            // labels redraw off the SAME live snapshot as the bar so elapsed and
+            // remaining always agree (and remaining uses the live item duration so
+            // it can't read 0:00 while audio is still playing). paused while
+            // scrubbing — then scrubTime drives them instead.
+            TimelineView(.animation(minimumInterval: 0.2, paused: scrubbing)) { _ in
+                let total = audio.liveDuration()
+                let t = scrubbing ? scrubTime : audio.liveTime()
+                let losslessStatus = LosslessBadgeResolver.status(for: audio.currentSong)
+                HStack {
+                    Text(formatTime(t))
+                        .monospacedDigit()
+                    Spacer()
+                    if let losslessStatus, showLosslessBadge {
+                        Button { showLosslessInfo = true } label: {
+                            Label(losslessStatus.title, systemImage: losslessStatus.systemImage)
+                                .font(.caption2.bold())
+                                .foregroundStyle(.white.opacity(0.7))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(.white.opacity(0.15), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showLosslessInfo) {
+                            LosslessInfoPopover(song: audio.currentSong)
+                                .presentationCompactAdaptation(.popover)
+                        }
+                    }
+                    Spacer()
+                    Text("-\(formatTime(max(0, total - t)))")
+                        .monospacedDigit()
                 }
-                Spacer()
-                Text("-\(formatTime(max(0, audio.duration - audio.currentTime)))")
-                    .monospacedDigit()
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.5))
             }
-            .font(.caption)
-            .foregroundStyle(.white.opacity(0.5))
         }
     }
 
@@ -481,6 +599,8 @@ struct NowPlayingScreen: View {
                     .frame(width: 44, height: 44)
                     .frame(maxWidth: .infinity)
 
+                sleepTimerMenu
+
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         activeTab = activeTab == .queue ? .nowPlaying : .queue
@@ -503,18 +623,12 @@ struct NowPlayingScreen: View {
 
     private func animateSkip() {
         withAnimation(.easeOut(duration: 0.1)) { skipNudge = 14 }
-        Task {
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { skipNudge = 0 }
-        }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.65).delay(0.1)) { skipNudge = 0 }
     }
 
     private func animatePrev() {
         withAnimation(.easeOut(duration: 0.1)) { prevNudge = -14 }
-        Task {
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { prevNudge = 0 }
-        }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.65).delay(0.1)) { prevNudge = 0 }
     }
 
     private func formatTime(_ t: TimeInterval) -> String {
@@ -527,45 +641,50 @@ struct NowPlayingScreen: View {
 // MARK: - Scrub bar (larger track for Apple Music feel)
 
 private struct ScrubBar: View {
-    let currentTime: TimeInterval
-    let duration: TimeInterval
+    let duration: () -> TimeInterval     // LIVE item duration, sampled per frame — the
+                                         // same source the time labels read, so the fill
+                                         // can't reach 100% while audio keeps playing and
+                                         // scrubbing can't drift from the remaining label
+    let liveTime: () -> TimeInterval     // sampled per frame so the fill can't drift
+    @Binding var scrubbing: Bool
+    @Binding var scrubTime: TimeInterval
     let onSeek: (TimeInterval) -> Void
-
-    @State private var isDragging = false
-    @State private var dragValue: TimeInterval = 0
-
-    private var displayTime: TimeInterval { isDragging ? dragValue : currentTime }
-    private var progress: Double { duration > 0 ? displayTime / duration : 0 }
 
     var body: some View {
         GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.2)).frame(height: 5)
-                Capsule()
-                    .fill(.white)
-                    .frame(width: max(0, geo.size.width * CGFloat(progress)), height: 5)
-                    .animation(.linear(duration: isDragging ? 0 : 0.5), value: progress)
-                // thumb shown only while scrubbing — no height change prevents parent-drag interference
-                if isDragging {
-                    Circle()
-                        .fill(.white)
-                        .frame(width: 14, height: 14)
-                        .offset(x: max(0, geo.size.width * CGFloat(progress) - 7))
-                        .transition(.scale.combined(with: .opacity))
-                }
+            let trackHeight: CGFloat = scrubbing ? 9 : 5
+            // redraw the fill ~30×/s straight from the player's real position. there
+            // is no implicit fill animation to lag behind or detach from the track —
+            // the width is recomputed from the source of truth every frame instead.
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: scrubbing)) { _ in
+                let total = duration()
+                let t = scrubbing ? scrubTime : liveTime()
+                let progress = total > 0 ? min(1, max(0, t / total)) : 0
+                let fillWidth = max(0, min(geo.size.width, geo.size.width * CGFloat(progress)))
+                Capsule().fill(.white.opacity(0.2))
+                    .frame(width: geo.size.width, height: trackHeight)
+                    .overlay(alignment: .leading) {
+                        // scrubber stays white regardless of accent colour
+                        Capsule().fill(.white)
+                            .frame(width: fillWidth, height: trackHeight)
+                    }
+                    .frame(maxHeight: .infinity, alignment: .center)
             }
-            .frame(maxHeight: .infinity, alignment: .center)
+            // only the bar's thickness animates (Apple Music feel); the fill itself
+            // is frame-accurate, not animated
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: scrubbing)
             .contentShape(Rectangle())
             .gesture(
                 // minimumDistance > 0 so parent vertical swipe doesn't activate scrubber
                 DragGesture(minimumDistance: 4)
                     .onChanged { v in
-                        isDragging = true
-                        dragValue = max(0, min(duration, Double(v.location.x / geo.size.width) * duration))
+                        let total = duration()
+                        scrubbing = true
+                        scrubTime = max(0, min(total, Double(v.location.x / geo.size.width) * total))
                     }
-                    .onEnded { v in
-                        onSeek(dragValue)
-                        isDragging = false
+                    .onEnded { _ in
+                        onSeek(scrubTime)
+                        scrubbing = false
                     }
             )
         }
@@ -576,15 +695,77 @@ private struct ScrubBar: View {
 // MARK: - System volume (MPVolumeView — actually sets device volume)
 
 private struct SystemVolumeSlider: UIViewRepresentable {
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> MPVolumeView {
         let v = MPVolumeView()
         v.tintColor = .white
         let blank = UIImage()
         v.setVolumeThumbImage(blank, for: .normal)
         v.setVolumeThumbImage(blank, for: .highlighted)
+        context.coordinator.volumeView = v
+        // tap OR drag anywhere along the bar sets the volume — the bare MPVolumeView
+        // only responds to a thumb drag, so the rest of the track felt dead.
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handle(_:)))
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handle(_:)))
+        v.addGestureRecognizer(pan)
+        v.addGestureRecognizer(tap)
         return v
     }
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
+
+    final class Coordinator: NSObject {
+        weak var volumeView: MPVolumeView?
+
+        private var slider: UISlider? {
+            volumeView?.subviews.compactMap { $0 as? UISlider }.first
+        }
+
+        @objc func handle(_ g: UIGestureRecognizer) {
+            guard let v = volumeView, let slider, v.bounds.width > 0 else { return }
+            let x = g.location(in: v).x
+            let frac = Float(max(0, min(1, x / v.bounds.width)))
+            slider.setValue(frac, animated: false)
+            slider.sendActions(for: .valueChanged)   // pushes through to system volume
+        }
+    }
+}
+
+// MARK: - Animated (live) artwork
+
+// Plays a multi-frame UIImage (animated GIF / APNG) via UIImageView, which animates
+// natively. Low layout priorities so it fills its SwiftUI frame instead of imposing
+// the image's intrinsic size.
+private struct AnimatedImageView: UIViewRepresentable {
+    let image: UIImage
+
+    func makeUIView(context: Context) -> UIImageView {
+        let v = UIImageView()
+        v.contentMode = .scaleAspectFill
+        v.clipsToBounds = true
+        v.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        v.setContentHuggingPriority(.defaultLow, for: .vertical)
+        v.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        v.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        configure(v)
+        return v
+    }
+
+    func updateUIView(_ uiView: UIImageView, context: Context) {
+        if uiView.image !== image { configure(uiView) }
+    }
+
+    private func configure(_ v: UIImageView) {
+        if let frames = image.images, frames.count > 1 {
+            v.animationImages = frames
+            v.animationDuration = image.duration
+            v.animationRepeatCount = 0
+            v.image = frames.first
+            v.startAnimating()
+        } else {
+            v.image = image
+        }
+    }
 }
 
 // MARK: - AirPlay button
@@ -616,9 +797,13 @@ struct SongInfoSheet: View {
                     row("Genre", song.genre)
                     row("Duration", song.duration.map { "\($0 / 60):\(String(format: "%02d", $0 % 60))" })
                     row("Bit Rate", song.bitRate.map { "\($0) kbps" })
+                    row("Sample Rate", song.samplingRate.map { String(format: "%.1f kHz", Double($0) / 1000) })
+                    row("Bit Depth", song.bitDepth.map { "\($0)-bit" })
                     row("Format", song.contentType)
                     row("File Type", song.suffix?.uppercased())
                     row("File Size", song.size.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) })
+                    row("Play Count", song.playCount.map(String.init))
+                    row("Path", song.path)
                 }
             }
             .navigationTitle("Song Info")
@@ -630,5 +815,50 @@ struct SongInfoSheet: View {
     @ViewBuilder
     private func row(_ label: String, _ value: String?) -> some View {
         if let value { LabeledContent(label, value: value) }
+    }
+}
+
+// MARK: - Lossless badge popover (format / bitrate / sample rate)
+
+private struct LosslessInfoPopover: View {
+    let song: Song?
+    private var status: LosslessBadgeStatus? { LosslessBadgeResolver.status(for: song) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: status?.systemImage ?? "waveform")
+                Text(status?.status ?? "Lossless Audio").font(.headline)
+            }
+            .padding(.bottom, 2)
+
+            if let status {
+                detailRow("Output", status.output)
+                detailRow("Route", status.reason)
+            }
+            if let format { detailRow("Format", format) }
+            if let rate = song?.bitRate { detailRow("Bitrate", "\(rate) kbps") }
+            if let sr = song?.samplingRate {
+                detailRow("Sample Rate", String(format: "%.1f kHz", Double(sr) / 1000))
+            }
+            if let bd = song?.bitDepth { detailRow("Bit Depth", "\(bd)-bit") }
+        }
+        .padding(16)
+        .frame(minWidth: 220)
+    }
+
+    private var format: String? {
+        song?.suffix?.uppercased() ?? song?.contentType
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label).foregroundStyle(.secondary)
+            Spacer(minLength: 24)
+            Text(value).fontWeight(.medium)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.subheadline)
     }
 }

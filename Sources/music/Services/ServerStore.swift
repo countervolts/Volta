@@ -27,10 +27,22 @@ final class ServerStore {
         servers.first { $0.isCurrent }
     }
 
-    func config(for record: ServerRecord) -> SubsonicConfig? {
-        guard let url = URL(string: record.urlString),
+    func config(for record: ServerRecord, cellular: Bool = false) -> SubsonicConfig? {
+        // on cellular, prefer the per-connection URL when one is set; otherwise fall
+        // back to the primary URL so behaviour is unchanged for single-URL servers.
+        let chosen = (cellular ? record.cellularURLString?.nonBlank : nil) ?? record.urlString
+        guard let url = URL(string: chosen),
               let password = KeychainService.password(for: record.id) else { return nil }
         return SubsonicConfig(baseURL: url, username: record.username, password: password)
+    }
+
+    // updates the cellular-only URL for a record and returns the updated record.
+    @discardableResult
+    func setCellularURL(_ urlString: String?, for record: ServerRecord) -> ServerRecord {
+        guard let idx = servers.firstIndex(where: { $0.id == record.id }) else { return record }
+        servers[idx].cellularURLString = urlString?.nonBlank
+        save()
+        return servers[idx]
     }
 
     @discardableResult
@@ -98,5 +110,14 @@ final class ServerStore {
         if let data = try? JSONEncoder().encode(servers) {
             try? data.write(to: serversURL, options: .atomic)
         }
+    }
+}
+
+extension String {
+    // trimmed value, or nil when empty/whitespace — keeps blank URL fields from
+    // masquerading as a real cellular override.
+    var nonBlank: String? {
+        let t = trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
     }
 }

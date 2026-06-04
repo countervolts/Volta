@@ -14,11 +14,17 @@ struct PickCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ArtworkView(coverArtID: album.coverArt, size: 400, cornerRadius: 0,
-                        onImageLoaded: { image in
-                            accentColor = Color(ColorExtractor.dominantColor(from: image))
-                        })
+            // a clear square forces the art to a true 1:1 at full card width,
+            // so non-square server covers can't leave a black bar on the side
+            Color.clear
                 .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    ArtworkView(coverArtID: album.coverArt, size: 400, cornerRadius: 0,
+                                onImageLoaded: { image in
+                                    accentColor = Color(ColorExtractor.dominantColor(from: image))
+                                })
+                }
+                .clipped()
 
             VStack(alignment: .leading, spacing: 4) {
                 if let label = topLabel {

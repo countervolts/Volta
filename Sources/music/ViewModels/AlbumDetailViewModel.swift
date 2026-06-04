@@ -18,6 +18,11 @@ final class AlbumDetailViewModel {
         return set.sorted()
     }
 
+    // album counts as lossless when every track is in a lossless format
+    var isLossless: Bool {
+        !songs.isEmpty && songs.allSatisfy(\.isLossless)
+    }
+
     func songs(forDisc disc: Int) -> [Song] {
         if discNumbers.count <= 1 { return songs }
         return songs.filter { ($0.discNumber ?? 1) == disc }
@@ -42,13 +47,22 @@ final class AlbumDetailViewModel {
             return artist?.album ?? []
         }()
 
-        if let loaded = try? await fullAlbum {
-            album = loaded
-            songs = (loaded.song ?? []).sorted {
+        let sortTracks: ([Song]) -> [Song] = { list in
+            list.sorted {
                 let d0 = $0.discNumber ?? 1, d1 = $1.discNumber ?? 1
                 if d0 != d1 { return d0 < d1 }
                 return ($0.track ?? 0) < ($1.track ?? 0)
             }
+        }
+
+        if let loaded = try? await fullAlbum, !(loaded.song ?? []).isEmpty {
+            album = loaded
+            songs = sortTracks(loaded.song ?? [])
+        } else if songs.isEmpty {
+            // offline / server unreachable: show this album's downloaded tracks so
+            // the album view isn't empty (the Songs section already worked offline)
+            let local = DownloadService.shared.downloadedSongs().filter { $0.albumId == album.id }
+            if !local.isEmpty { songs = sortTracks(local) }
         }
         moreBySameArtist = (await artistAlbums).filter { $0.id != album.id }
     }

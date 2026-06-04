@@ -47,6 +47,8 @@ enum Symbols {
     static let downloading = "arrow.down.circle.dotted"
     static let check = "checkmark"
 
+    static let share = "square.and.arrow.up"
+    static let sleep = "moon.zzz"
     static let newPlaylist = "plus"
     static let trash = "trash"
     static let edit = "pencil"

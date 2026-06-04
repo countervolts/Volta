@@ -46,19 +46,15 @@ struct AlbumDetailView: View {
             .scrollIndicators(.hidden)
 
 
+            // no back button — swipe from the left edge to go back (SwipeBackEnabler)
+
             // toast notification
             if let msg = toastMessage {
                 VStack {
                     Spacer()
-                    Text(msg)
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .shadow(radius: 8)
+                    PlaybackActionToast(message: msg)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .padding(.bottom, 100)
+                        .padding(.bottom, 78)
                 }
             }
         }
@@ -126,6 +122,13 @@ struct AlbumDetailView: View {
                     Text("·").foregroundStyle(.white.opacity(0.3))
                     Text(String(year)).foregroundStyle(.white.opacity(0.55))
                 }
+                if !vm.songs.isEmpty {
+                    Text("·").foregroundStyle(.white.opacity(0.3))
+                    Label(vm.isLossless ? "Lossless" : "Lossy",
+                          systemImage: vm.isLossless ? "waveform" : "music.note")
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(.white.opacity(0.55))
+                }
             }
             .font(.footnote)
         }
@@ -159,15 +162,15 @@ struct AlbumDetailView: View {
                     appState.audioPlayer.playQueue(songs, startIndex: 0, source: vm.album.name, album: vm.album)
                 }
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: 7) {
                     Image(systemName: Symbols.play)
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 14, weight: .bold))
                     Text("Play")
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
                 }
                 .foregroundStyle(playFg)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+                .padding(.vertical, 12)
                 .background(.white, in: Capsule())
             }
             .buttonStyle(.plain)
@@ -208,6 +211,11 @@ struct AlbumDetailView: View {
 
     private var trackList: some View {
         VStack(spacing: 0) {
+            // defined separator between the action row and the first track
+            Divider()
+                .frame(height: 0.75)
+                .overlay(.white.opacity(0.15))
+                .padding(.bottom, 4)
             let discs = vm.discNumbers
             if discs.count > 1 {
                 ForEach(discs, id: \.self) { disc in
@@ -240,6 +248,10 @@ struct AlbumDetailView: View {
                     if let idx = vm.songs.firstIndex(where: { $0.id == song.id }) {
                         appState.audioPlayer.playQueue(vm.songs, startIndex: idx, source: vm.album.name, album: vm.album)
                     }
+                },
+                onSwipePlayNext: {
+                    appState.audioPlayer.playNext(song)
+                    showToast("Playing Next")
                 }
             ) {
                 SongMenu(
@@ -248,7 +260,7 @@ struct AlbumDetailView: View {
                     onAddToPlaylist: { showAddToPlaylist = song }
                 )
             }
-            Divider().background(.white.opacity(0.08))
+            Divider().overlay(.white.opacity(0.14))
         }
     }
 
@@ -320,11 +332,19 @@ struct AlbumDetailView: View {
             if let artist = try? await appState.client?.artist(id: id) { drillArtist = artist }
         }
     }
+
+    private func showToast(_ message: String) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { toastMessage = message }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            withAnimation { toastMessage = nil }
+        }
+    }
 }
 
-// MARK: - Download button
+// MARK: - Download button (shared by album + playlist detail)
 
-private struct DownloadAlbumButton: View {
+struct DownloadAlbumButton: View {
     let songs: [Song]
     @State private var overallState: DownloadState = .notDownloaded
 

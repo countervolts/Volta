@@ -32,6 +32,19 @@ final class PlaylistDetailViewModel {
         try? await client.removeFromPlaylist(playlistID: playlist.id, index: index)
     }
 
+    // edit sheet: name + description in one go (the cover is stored locally by the
+    // view via PlaylistCoverStore, since Subsonic can't accept a playlist cover).
+    func update(name: String, comment: String, client: SubsonicClient) async {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty, trimmed != playlist.name {
+            try? await client.renamePlaylist(playlistID: playlist.id, name: trimmed)
+        }
+        if comment != (playlist.comment ?? "") {
+            try? await client.updatePlaylistComment(playlistID: playlist.id, comment: comment)
+        }
+        await load(client: client)
+    }
+
     func setDominantColor(_ color: UIColor) { dominantColor = color }
     func toggleDescription() { isDescriptionExpanded.toggle() }
 }

@@ -1,12 +1,35 @@
 import SwiftUI
+import PhotosUI
+
+// one enum drives every sheet on this screen. stacking several `.sheet`
+// modifiers on one view is unreliable (they swallow each other — that was the
+// "pencil does nothing" bug), so they're all funneled through `activeSheet`.
+enum PlaylistSheet: Identifiable {
+    case addToPlaylist(Song)
+    case album(Album)
+    case artist(Artist)
+    case edit
+
+    var id: String {
+        switch self {
+        case .addToPlaylist(let s): return "song-\(s.id)"
+        case .album(let a):         return "album-\(a.id)"
+        case .artist(let a):        return "artist-\(a.id)"
+        case .edit:                 return "edit"
+        }
+    }
+}
 
 struct PlaylistDetailView: View {
     @Environment(AppState.self) private var appState
     @State private var vm: PlaylistDetailViewModel
-    @State private var showAddToPlaylist: Song? = nil
+    @State private var activeSheet: PlaylistSheet? = nil
     @State private var toastMessage: String? = nil
-    @State private var drillAlbum: Album? = nil
-    @State private var drillArtist: Artist? = nil
+    @State private var editText = ""
+    @State private var editName = ""
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var pickedCover: UIImage?
+    @AppStorage("showTrackArtwork") private var showTrackArtwork = true
 
     init(playlist: Playlist) {
         _vm = State(wrappedValue: PlaylistDetailViewModel(playlist: playlist))
@@ -33,28 +56,30 @@ struct PlaylistDetailView: View {
             }
             .scrollIndicators(.hidden)
 
-            HStack {
-                GlassBackButton()
-                Spacer()
-            }
-            .padding(.top, 56)
+            // no back button — swipe from the left edge to go back (SwipeBackEnabler)
 
             if let msg = toastMessage {
                 VStack {
                     Spacer()
-                    Text(msg)
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16).padding(.vertical, 10)
-                        .background(.ultraThinMaterial, in: Capsule())
+                    PlaybackActionToast(message: msg)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .padding(.bottom, 100)
+                        .padding(.bottom, 78)
                 }
             }
         }
         .navigationBarHidden(true)
         .preferredColorScheme(.dark)
-        .sheet(item: $showAddToPlaylist) { song in
+        .background(SwipeBackEnabler())
+        .sheet(item: $activeSheet) { sheet in
+            sheetContent(sheet)
+        }
+        .task { if let c = appState.client { await vm.load(client: c) } }
+    }
+
+    @ViewBuilder
+    private func sheetContent(_ sheet: PlaylistSheet) -> some View {
+        switch sheet {
+        case .addToPlaylist(let song):
             AddToPlaylistSheet(song: song, onAdded: { name in
                 withAnimation { toastMessage = "Added to \(name)" }
                 Task {
@@ -62,39 +87,129 @@ struct PlaylistDetailView: View {
                     withAnimation { toastMessage = nil }
                 }
             })
-        }
-        .sheet(item: $drillAlbum) { album in
+        case .album(let album):
             NavigationStack {
                 AlbumDetailView(album: album)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { drillAlbum = nil }.foregroundStyle(Theme.accent)
+                            Button("Done") { activeSheet = nil }.foregroundStyle(Theme.accent)
                         }
                     }
             }
             .preferredColorScheme(.dark)
-        }
-        .sheet(item: $drillArtist) { artist in
+        case .artist(let artist):
             NavigationStack {
                 ArtistDetailView(artist: artist)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { drillArtist = nil }.foregroundStyle(Theme.accent)
+                            Button("Done") { activeSheet = nil }.foregroundStyle(Theme.accent)
                         }
                     }
             }
             .preferredColorScheme(.dark)
+        case .edit:
+            editSheet
         }
-        .task { if let c = appState.client { await vm.load(client: c) } }
+    }
+
+    // edit name + description + cover in one sheet. name/description go to the
+    // server; the cover is saved locally (Subsonic has no playlist-cover upload).
+    private var editSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    PhotosPicker(selection: $pickerItem, matching: .images) {
+                        HStack {
+                            Spacer()
+                            ZStack(alignment: .bottomTrailing) {
+                                editCoverPreview
+                                    .frame(width: 150, height: 150)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                                Image(systemName: "pencil.circle.fill")
+                                    .font(.system(size: 28))
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, Theme.accent)
+                                    .padding(6)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Color.clear)
+                }
+                Section("Name") {
+                    TextField("Playlist name", text: $editName)
+                }
+                Section("Description") {
+                    TextField("Add a description", text: $editText, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+            }
+            .navigationTitle("Edit Playlist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { activeSheet = nil }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { saveEdits() }
+                        .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onChange(of: pickerItem) { _, item in
+                guard let item else { return }
+                Task {
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let img = UIImage(data: data) {
+                        withAnimation { pickedCover = img }
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .presentationDetents([.large])
+    }
+
+    @ViewBuilder
+    private var editCoverPreview: some View {
+        if let pickedCover {
+            Image(uiImage: pickedCover)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            PlaylistCover(playlist: vm.playlist, size: 400, cornerRadius: 14)
+        }
+    }
+
+    private func openEdit() {
+        editName = vm.playlist.name
+        editText = vm.playlist.comment ?? ""
+        pickedCover = nil
+        pickerItem = nil
+        activeSheet = .edit
+    }
+
+    private func saveEdits() {
+        guard let client = appState.client else { return }
+        if let cover = pickedCover {
+            PlaylistCoverStore.shared.set(cover, for: vm.playlist.id)
+        }
+        let name = editName
+        let comment = editText
+        Task {
+            await vm.update(name: name, comment: comment, client: client)
+            activeSheet = nil
+        }
     }
 
     private var artworkSection: some View {
         GeometryReader { geo in
-            ArtworkView(coverArtID: vm.playlist.coverArt, size: 800, cornerRadius: 0,
-                        onImageLoaded: { image in
-                            let color = ColorExtractor.dominantColor(from: image)
-                            vm.setDominantColor(color)
-                        })
+            PlaylistCover(playlist: vm.playlist, size: 800, cornerRadius: 0,
+                          onImageLoaded: { image in
+                              let color = ColorExtractor.dominantColor(from: image)
+                              vm.setDominantColor(color)
+                          })
                 .aspectRatio(1, contentMode: .fill)
                 .frame(width: geo.size.width, height: geo.size.width)
                 .clipped()
@@ -108,9 +223,21 @@ struct PlaylistDetailView: View {
 
     private var infoSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(vm.playlist.name)
-                .font(.title2.bold())
-                .foregroundStyle(.white)
+            HStack(spacing: 10) {
+                Text(vm.playlist.name)
+                    .font(.title2.bold())
+                    .foregroundStyle(.white)
+                // small edit affordance right beside the title (replaces the old
+                // top-right pencil) — opens the name/description/cover editor
+                Button { openEdit() } label: {
+                    Image(systemName: Symbols.edit)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .glassCircle()
+                }
+                .buttonStyle(.plain)
+            }
             if let owner = vm.playlist.owner {
                 Text("by \(owner)")
                     .font(.footnote)
@@ -122,6 +249,7 @@ struct PlaylistDetailView: View {
         .padding(.top, 16)
     }
 
+    // mirrors the album action row: shuffle circle · white Play · download
     private var actionRow: some View {
         HStack(spacing: 14) {
             Button {
@@ -131,34 +259,30 @@ struct PlaylistDetailView: View {
                 }
             } label: {
                 Image(systemName: Symbols.shuffle)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 48, height: 48)
+                    .frame(width: 50, height: 50)
                     .glassCircle()
             }
             .buttonStyle(.plain)
-
-            Spacer()
 
             Button {
                 if !vm.songs.isEmpty {
                     appState.audioPlayer.playQueue(vm.songs, startIndex: 0, source: vm.playlist.name, playlist: vm.playlist)
                 }
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: Symbols.play).font(.system(size: 16, weight: .bold))
-                    Text("Play").font(.headline)
+                HStack(spacing: 7) {
+                    Image(systemName: Symbols.play).font(.system(size: 14, weight: .bold))
+                    Text("Play").font(.subheadline.weight(.semibold))
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 32).padding(.vertical, 14)
-                .glassCapsule(tinted: true)
+                .foregroundStyle(.black)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(.white, in: Capsule())
             }
             .buttonStyle(.plain)
 
-            Spacer()
-
-            // spacer button to keep layout balanced
-            Color.clear.frame(width: 48, height: 48)
+            DownloadAlbumButton(songs: vm.songs)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
@@ -187,6 +311,11 @@ struct PlaylistDetailView: View {
 
     private var trackList: some View {
         VStack(spacing: 0) {
+            // defined separator between the action row and the first track
+            Divider()
+                .frame(height: 0.75)
+                .overlay(.white.opacity(0.15))
+                .padding(.bottom, 4)
             ForEach(Array(vm.songs.enumerated()), id: \.element.id) { i, song in
                 TrackRow(
                     song: song,
@@ -194,18 +323,24 @@ struct PlaylistDetailView: View {
                     isCurrentlyPlaying: appState.audioPlayer.currentSong?.id == song.id,
                     onTap: {
                         appState.audioPlayer.playQueue(vm.songs, startIndex: i, source: vm.playlist.name, playlist: vm.playlist)
+                    },
+                    showArtist: true,
+                    leadingArtwork: showTrackArtwork,
+                    onSwipePlayNext: {
+                        appState.audioPlayer.playNext(song)
+                        showToast("Playing Next")
                     }
                 ) {
                     SongMenu(
                         song: song,
                         onGoToAlbum: song.albumId == nil ? nil : { goToAlbum(song) },
                         onGoToArtist: song.artistId == nil ? nil : { goToArtist(song) },
-                        onAddToPlaylist: { showAddToPlaylist = song },
+                        onAddToPlaylist: { activeSheet = .addToPlaylist(song) },
                         onDelete: { removeSong(song) },
                         deleteLabel: "Remove from Playlist"
                     )
                 }
-                Divider().background(.white.opacity(0.08))
+                Divider().overlay(.white.opacity(0.14))
             }
         }
         .padding(.horizontal, 20)
@@ -236,14 +371,14 @@ struct PlaylistDetailView: View {
     private func goToAlbum(_ song: Song) {
         guard let id = song.albumId else { return }
         Task {
-            if let album = try? await appState.client?.album(id: id) { drillAlbum = album }
+            if let album = try? await appState.client?.album(id: id) { activeSheet = .album(album) }
         }
     }
 
     private func goToArtist(_ song: Song) {
         guard let id = song.artistId else { return }
         Task {
-            if let artist = try? await appState.client?.artist(id: id) { drillArtist = artist }
+            if let artist = try? await appState.client?.artist(id: id) { activeSheet = .artist(artist) }
         }
     }
 
@@ -251,5 +386,13 @@ struct PlaylistDetailView: View {
         guard let idx = vm.songs.firstIndex(where: { $0.id == song.id }),
               let client = appState.client else { return }
         Task { await vm.removeSong(at: idx, client: client) }
+    }
+
+    private func showToast(_ message: String) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { toastMessage = message }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            withAnimation { toastMessage = nil }
+        }
     }
 }

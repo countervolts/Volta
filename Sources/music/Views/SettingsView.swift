@@ -1,13 +1,31 @@
 import SwiftUI
 
+private struct ArtworkPrefetchProgress: Equatable {
+    var completed = 0
+    var total = 0
+    var failed = 0
+    var current = "Ready"
+
+    var fraction: Double {
+        guard total > 0 else { return 0 }
+        return min(1, Double(completed) / Double(total))
+    }
+
+    var detail: String {
+        guard total > 0 else { return current }
+        let base = "\(completed) of \(total)"
+        return failed > 0 ? "\(base) · \(failed) failed" : base
+    }
+}
+
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
     // Playback
     @AppStorage("autoplayEnabled")     private var autoplayEnabled     = false
-    @AppStorage("crossfadeEnabled")    private var crossfadeEnabled    = false
     @AppStorage("gaplessPlayback")     private var gaplessPlayback     = "on"    // "off", "weak", "on"
+    @AppStorage("replayGainMode")      private var replayGainMode      = "off"   // "off", "track", "album"
 
     // Streaming & Downloads
     @AppStorage("streamingBitrate")    private var streamingBitrate    = 0       // 0 = original
@@ -15,12 +33,23 @@ struct SettingsView: View {
     @AppStorage("downloadBitrate")     private var downloadBitrate     = 0
     @AppStorage("transcodingFormat")   private var transcodingFormat   = "raw"   // "mp3", "aac", "opus", "raw"
     @AppStorage("downloadThreadingMode") private var downloadThreadingMode = "multi" // "multi", "single"
+    @AppStorage("downloadSpeedLimitKBps") private var downloadSpeedLimitKBps = 0      // 0 = unlimited
+    @AppStorage("downloadCapMB")       private var downloadCapMB       = 0            // 0 = unlimited
+    @AppStorage("autoEvictDownloads")  private var autoEvictDownloads  = false
 
     // Appearance
     @AppStorage("artworkAnimation")    private var artworkAnimation    = true
+    @AppStorage("liveArtwork")         private var liveArtwork         = true
     @AppStorage("showLosslessBadge")   private var showLosslessBadge   = true
     @AppStorage("dynamicBackground")   private var dynamicBackground   = true
+    @AppStorage("showTrackArtwork")    private var showTrackArtwork    = true
     @AppStorage("accentColorName")     private var accentColorName     = "purple"
+
+    // Performance (read by ArtworkLoader at launch; applied on next launch)
+    @AppStorage("imageLoadMode")       private var imageLoadMode       = "balanced" // fast / balanced / conservative
+    @AppStorage("cacheMode")           private var cacheMode           = "balanced" // aggressive / balanced / light
+    @AppStorage("prefetchArtistImages") private var prefetchArtistImages = false
+    @AppStorage("localArtworkLibraryDownloaded") private var localArtworkLibraryDownloaded = false
 
     // Library
     @AppStorage("albumSortOrder")      private var albumSortOrder      = "alphabetical"
@@ -30,17 +59,27 @@ struct SettingsView: View {
 
     @State private var downloadsSize: String  = "…"
     @State private var artworkSize: String     = "…"
+    @State private var localArtworkSize: String = "…"
+    @State private var localArtworkBytes: Int = 0
     @State private var dataSize: String        = "…"
     @State private var totalCacheSize: String  = "…"
     @State private var showClearCacheAlert   = false
     @State private var showClearArtworkAlert = false
+    @State private var showClearLocalArtworkAlert = false
     @State private var showClearLogsAlert   = false
     @State private var showLogoutAlert      = false
     @State private var connectionStatus     = ""
     @State private var isTesting            = false
+    @State private var isPrefetchingArtwork = false
+    @State private var artworkPrefetchProgress = ArtworkPrefetchProgress()
     @State private var settingsSearch       = ""
+    @State private var showCustomSpeedAlert = false
+    @State private var showCustomCapAlert   = false
+    @State private var customSpeedText      = ""
+    @State private var customCapText        = ""
 
     private var audio: AudioPlayer { appState.audioPlayer }
+    private var hasLocalArtworkLibrary: Bool { localArtworkLibraryDownloaded || localArtworkBytes > 0 }
 
     // MARK: - Search filtering
 
@@ -70,6 +109,7 @@ struct SettingsView: View {
             List {
                 playbackSection
                 streamingSection
+                performanceSection
                 appearanceSection
                 librarySection
                 serverSection
@@ -85,6 +125,7 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarBackButtonHidden(true)
+        .background(SwipeBackEnabler())   // re-enable swipe-from-edge to exit settings
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
         }
@@ -98,6 +139,10 @@ struct SettingsView: View {
             Button("Clear", role: .destructive) { clearArtworkCache() }
             Button("Cancel", role: .cancel) {}
         } message: { Text("Removes cached artwork and saved home data. They’ll be re-fetched as needed.") }
+        .alert("Delete Local Artwork Library", isPresented: $showClearLocalArtworkAlert) {
+            Button("Delete", role: .destructive) { clearLocalArtworkLibrary() }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Removes downloaded album covers and artist profile pictures used for faster local image loading.") }
         .alert("Clear All Logs", isPresented: $showClearLogsAlert) {
             Button("Clear", role: .destructive) { AppLogger.shared.clearAll() }
             Button("Cancel", role: .cancel) {}
@@ -106,6 +151,40 @@ struct SettingsView: View {
             Button("Log Out", role: .destructive) { appState.logout() }
             Button("Cancel", role: .cancel) {}
         } message: { Text("You'll be disconnected from \(appState.currentServer?.displayName ?? "the server").") }
+        .alert("Custom Speed Limit", isPresented: $showCustomSpeedAlert) {
+            TextField("MB per second", text: $customSpeedText)
+                .keyboardType(.decimalPad)
+            Button("Set") {
+                if let mb = Double(customSpeedText), mb > 0 {
+                    downloadSpeedLimitKBps = Int(mb * 1024)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Enter a download speed limit in MB/s.") }
+        .alert("Custom Storage Cap", isPresented: $showCustomCapAlert) {
+            TextField("GB", text: $customCapText)
+                .keyboardType(.decimalPad)
+            Button("Set") {
+                if let gb = Double(customCapText), gb > 0 {
+                    downloadCapMB = Int(gb * 1024)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Enter a maximum download size in GB.") }
+    }
+
+    // formatted current download-speed limit for the menu label
+    private var speedLimitLabel: String {
+        guard downloadSpeedLimitKBps > 0 else { return "Unlimited" }
+        let mb = Double(downloadSpeedLimitKBps) / 1024
+        return mb >= 1 ? String(format: "%g MB/s", mb) : "\(downloadSpeedLimitKBps) KB/s"
+    }
+
+    // formatted current storage cap for the menu label
+    private var capLabel: String {
+        guard downloadCapMB > 0 else { return "Unlimited" }
+        let gb = Double(downloadCapMB) / 1024
+        return gb >= 1 ? String(format: "%g GB", gb) : "\(downloadCapMB) MB"
     }
 
     // MARK: - Playback
@@ -113,7 +192,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var playbackSection: some View {
         let s = "Playback"
-        if sectionVisible(s, [["autoplay", "play"], ["crossfade", "fade"], ["gapless playback"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"]]) {
+        if sectionVisible(s, [["autoplay", "play"], ["crossfade", "fade", "automix", "transition"], ["gapless playback"], ["volume normalization", "replaygain", "replay gain", "normalize", "loudness"], ["equalizer", "eq", "bands", "graphic"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"]]) {
             Section(s) {
                 if rowVisible(s, ["autoplay", "play"]) {
                     Toggle(isOn: Binding(
@@ -125,12 +204,18 @@ struct SettingsView: View {
                     .tint(Theme.accent)
                 }
 
-                if rowVisible(s, ["crossfade", "fade"]) {
-                    Toggle(isOn: Binding(
-                        get: { audio.isCrossfade },
-                        set: { _ in audio.toggleCrossfade() }
+                if rowVisible(s, ["crossfade", "fade", "automix", "transition"]) {
+                    Picker(selection: Binding(
+                        get: { audio.transitionMode },
+                        set: { audio.setTransitionMode($0) }
                     )) {
-                        Label("Crossfade", systemImage: "waveform.path.ecg")
+                        ForEach(PlaybackTransitionMode.allCases) { mode in
+                            Text(mode.settingsLabel)
+                                .tag(mode)
+                                .disabled(mode == .automix && gaplessPlayback == "off")
+                        }
+                    } label: {
+                        Label("Track Transition", systemImage: audio.transitionMode.icon)
                     }
                     .tint(Theme.accent)
                 }
@@ -144,6 +229,31 @@ struct SettingsView: View {
                         Label("Gapless Playback", systemImage: "music.note")
                     }
                     .tint(Theme.accent)
+                    .onChange(of: gaplessPlayback) { _, mode in
+                        if mode == "off", audio.transitionMode == .automix {
+                            audio.setTransitionMode(.crossfade)
+                        }
+                    }
+                }
+
+                if rowVisible(s, ["volume normalization", "replaygain", "replay gain", "normalize", "loudness"]) {
+                    Picker(selection: $replayGainMode) {
+                        Text("Off").tag("off")
+                        Text("Track").tag("track")
+                        Text("Album").tag("album")
+                    } label: {
+                        Label("Volume Normalization", systemImage: "speaker.wave.2.bubble")
+                    }
+                    .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["equalizer", "eq", "bands", "graphic"]) {
+                    NavigationLink {
+                        EqualizerView()
+                    } label: {
+                        Label("Equalizer", systemImage: "slider.vertical.3")
+                    }
+                    .foregroundStyle(Theme.primaryText)
                 }
 
                 if rowVisible(s, ["shuffle"]) {
@@ -172,7 +282,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var streamingSection: some View {
         let s = "Streaming & Downloads"
-        if sectionVisible(s, [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["download quality", "download", "bitrate"], ["transcoding format", "transcode", "format", "mp3", "aac", "opus"], ["download mode", "multithreaded", "threads", "single", "parallel"]]) {
+        if sectionVisible(s, [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["download quality", "download", "bitrate"], ["transcoding format", "transcode", "format", "mp3", "aac", "opus"], ["download mode", "multithreaded", "threads", "single", "parallel"], ["download speed limit", "speed", "limit", "throttle"], ["storage cap", "cap", "max size", "storage"], ["auto-evict", "auto evict", "evict"]]) {
             Section {
                 if rowVisible(s, ["wi-fi quality", "wifi", "streaming", "quality", "bitrate"]) {
                     Picker(selection: $streamingBitrate) {
@@ -234,6 +344,58 @@ struct SettingsView: View {
                     }
                     .tint(Theme.accent)
                 }
+
+                if rowVisible(s, ["download speed limit", "speed", "limit", "throttle"]) {
+                    Menu {
+                        Button("Unlimited") { downloadSpeedLimitKBps = 0 }
+                        ForEach([1, 2, 5, 10, 20, 50, 100], id: \.self) { mb in
+                            Button("\(mb) MB/s") { downloadSpeedLimitKBps = mb * 1024 }
+                        }
+                        Divider()
+                        Button("Custom…") {
+                            customSpeedText = downloadSpeedLimitKBps > 0
+                                ? String(format: "%g", Double(downloadSpeedLimitKBps) / 1024) : ""
+                            showCustomSpeedAlert = true
+                        }
+                    } label: {
+                        LabeledContent {
+                            Text(speedLimitLabel).foregroundStyle(Theme.secondaryText)
+                        } label: {
+                            Label("Download Speed Limit", systemImage: "speedometer")
+                        }
+                    }
+                    .tint(Theme.primaryText)
+                }
+
+                if rowVisible(s, ["storage cap", "cap", "limit", "max size", "storage"]) {
+                    Menu {
+                        Button("Unlimited") { downloadCapMB = 0 }
+                        ForEach([1, 2, 5, 10, 20, 50, 100], id: \.self) { gb in
+                            Button("\(gb) GB") { downloadCapMB = gb * 1024 }
+                        }
+                        Divider()
+                        Button("Custom…") {
+                            customCapText = downloadCapMB > 0
+                                ? String(format: "%g", Double(downloadCapMB) / 1024) : ""
+                            showCustomCapAlert = true
+                        }
+                    } label: {
+                        LabeledContent {
+                            Text(capLabel).foregroundStyle(Theme.secondaryText)
+                        } label: {
+                            Label("Download Storage Cap", systemImage: "internaldrive")
+                        }
+                    }
+                    .tint(Theme.primaryText)
+                }
+
+                if rowVisible(s, ["auto-evict", "auto evict", "evict", "storage cap"]) {
+                    Toggle(isOn: $autoEvictDownloads) {
+                        Label("Auto-Evict Oldest", systemImage: "trash.circle")
+                    }
+                    .tint(Theme.accent)
+                    .disabled(downloadCapMB == 0)
+                }
             } header: {
                 Text(s)
             } footer: {
@@ -243,16 +405,128 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Performance
+
+    @ViewBuilder
+    private var performanceSection: some View {
+        let s = "Performance"
+        if sectionVisible(s, [["image loading", "images", "speed", "power", "threads", "fast", "conservative"], ["data caching", "cache", "aggressive", "memory"], ["prefetch artist images", "prefetch", "artist", "profile", "pictures"], ["download local artwork library", "cover", "covers", "cover.png", "cover.webp", "album artwork", "artist pictures", "local images"]]) {
+            Section {
+                if rowVisible(s, ["image loading", "images", "speed", "power", "threads", "fast", "conservative"]) {
+                    Picker(selection: $imageLoadMode) {
+                        Text("Fast").tag("fast")
+                        Text("Balanced").tag("balanced")
+                        Text("Conservative").tag("conservative")
+                    } label: {
+                        Label("Image Loading", systemImage: "bolt.horizontal")
+                    }
+                    .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["data caching", "cache", "aggressive", "memory"]) {
+                    Picker(selection: $cacheMode) {
+                        Text("Aggressive").tag("aggressive")
+                        Text("Balanced").tag("balanced")
+                        Text("Light").tag("light")
+                    } label: {
+                        Label("Data Caching", systemImage: "memorychip")
+                    }
+                    .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["prefetch artist images", "prefetch", "artist", "profile", "pictures"]) {
+                    Toggle(isOn: $prefetchArtistImages) {
+                        Label("Prefetch Artist Images", systemImage: "person.crop.square.badge.camera")
+                    }
+                    .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["download local artwork library", "cover", "covers", "cover.png", "cover.webp", "album artwork", "artist pictures", "local images"]) {
+                    artworkLibraryDownloadRow
+                }
+            } header: {
+                Text(s)
+            } footer: {
+                Text("Fast uses more connections and CPU for snappier loading; Conservative saves battery. Aggressive caching keeps more artwork in memory. Local artwork saves album covers and artist photos on device so image views can resolve before the server responds. Loading/caching changes apply on next launch.")
+            }
+            .listRowBackground(Theme.secondaryBackground)
+        }
+    }
+
+    private var artworkLibraryDownloadRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Label("Download Local Artwork Library", systemImage: "photo.on.rectangle.angled")
+                    .foregroundStyle(Theme.primaryText)
+                Spacer()
+                if isPrefetchingArtwork {
+                    ProgressView().controlSize(.small).tint(Theme.accent)
+                } else if hasLocalArtworkLibrary {
+                    Label("Downloaded", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.green)
+                } else {
+                    Button {
+                        downloadLocalArtworkLibrary()
+                    } label: {
+                        Text("Download")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(appState.client == nil)
+                    .opacity(appState.client == nil ? 0.45 : 1)
+                }
+            }
+
+            if isPrefetchingArtwork {
+                if artworkPrefetchProgress.total > 0 {
+                    ProgressView(value: artworkPrefetchProgress.fraction)
+                        .tint(Theme.accent)
+                } else {
+                    ProgressView()
+                        .tint(Theme.accent)
+                }
+                HStack {
+                    Text(artworkPrefetchProgress.current)
+                    Spacer()
+                    Text(artworkPrefetchProgress.detail)
+                }
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+            } else {
+                Text(hasLocalArtworkLibrary ? "Local artwork ready: \(localArtworkSize)" : "Local artwork: \(localArtworkSize)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
     // MARK: - Appearance
 
     @ViewBuilder
     private var appearanceSection: some View {
         let s = "Appearance"
-        if sectionVisible(s, [["show lossless badge", "lossless", "badge"], ["dynamic player background", "dynamic", "background"], ["accent color", "accent", "color", "colour", "theme"]]) {
+        if sectionVisible(s, [["show lossless badge", "lossless", "badge"], ["live artwork", "animated artwork", "live", "gif", "motion"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["accent color", "accent", "color", "colour", "theme"]]) {
             Section(s) {
                 if rowVisible(s, ["show lossless badge", "lossless", "badge"]) {
                     Toggle(isOn: $showLosslessBadge) {
                         Label("Show Lossless Badge", systemImage: "waveform.badge.plus")
+                    }
+                    .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["live artwork", "animated artwork", "live", "gif", "motion"]) {
+                    Toggle(isOn: $liveArtwork) {
+                        Label("Live Artwork", systemImage: "sparkles.rectangle.stack")
+                    }
+                    .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["song artwork in lists", "artwork", "thumbnail", "cover", "track"]) {
+                    Toggle(isOn: $showTrackArtwork) {
+                        Label("Song Artwork in Lists", systemImage: "photo")
                     }
                     .tint(Theme.accent)
                 }
@@ -265,20 +539,45 @@ struct SettingsView: View {
                 }
 
                 if rowVisible(s, ["accent color", "accent", "color", "colour", "theme"]) {
-                    Picker(selection: $accentColorName) {
-                        ForEach(Theme.accentNames, id: \.self) { name in
-                            Label {
-                                Text(name.capitalized)
-                            } icon: {
-                                Image(systemName: "circle.fill")
-                                    .foregroundStyle(Theme.accentColor(named: name))
-                            }
-                            .tag(name)
-                        }
-                    } label: {
+                    // custom swatch row — drawing Circle shapes avoids the SF Symbol tint
+                    // bug where every option rendered in the accent colour (all purple)
+                    VStack(alignment: .leading, spacing: 12) {
                         Label("Accent Color", systemImage: "paintbrush")
+                        // horizontal scroll so the swatches swipe smoothly instead of
+                        // cramming every colour into one fixed row
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(Theme.accentNames, id: \.self) { name in
+                                    let color = Theme.accentColor(named: name)
+                                    let selected = accentColorName == name
+                                    Circle()
+                                        .fill(color)
+                                        .frame(width: 32, height: 32)
+                                        .overlay(
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 13, weight: .bold))
+                                                .foregroundStyle(.white)
+                                                .opacity(selected ? 1 : 0)
+                                        )
+                                        .overlay(
+                                            Circle().stroke(.white.opacity(0.9), lineWidth: selected ? 2 : 0)
+                                                .padding(-3)
+                                        )
+                                        .scaleEffect(selected ? 1.12 : 1)
+                                        .onTapGesture {
+                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                                accentColorName = name
+                                            }
+                                        }
+                                }
+                            }
+                            // selected swatch grows (scaleEffect) + draws a ring 3pt
+                            // outside its circle, so leave enough room or the scroll
+                            // view clips the ring (it was cut off at the top edge)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 10)
+                        }
                     }
-                    .tint(Theme.accent)
                 }
             }
             .listRowBackground(Theme.secondaryBackground)
@@ -292,15 +591,17 @@ struct SettingsView: View {
         let s = "Library"
         if sectionVisible(s, [["album sort order", "sort", "order", "album"]]) {
             Section(s) {
-                Picker(selection: $albumSortOrder) {
-                    Text("A–Z").tag("alphabetical")
-                    Text("Newest First").tag("newest")
-                    Text("Most Played").tag("most_played")
-                    Text("Year").tag("year")
-                } label: {
-                    Label("Album Sort Order", systemImage: "arrow.up.arrow.down")
+                if rowVisible(s, ["album sort order", "sort", "order", "album"]) {
+                    Picker(selection: $albumSortOrder) {
+                        Text("A–Z").tag("alphabetical")
+                        Text("Newest First").tag("newest")
+                        Text("Most Played").tag("most_played")
+                        Text("Year").tag("year")
+                    } label: {
+                        Label("Album Sort Order", systemImage: "arrow.up.arrow.down")
+                    }
+                    .tint(Theme.accent)
                 }
-                .tint(Theme.accent)
             }
             .listRowBackground(Theme.secondaryBackground)
         }
@@ -311,13 +612,17 @@ struct SettingsView: View {
     @ViewBuilder
     private var serverSection: some View {
         let s = "Server"
-        if sectionVisible(s, [["connected to", "server url", "username", "edit connection", "test connection", "log out", "logout", "sign out"]]) {
+        if sectionVisible(s, [["connected to", "server url", "cellular url", "data", "wifi", "username", "edit connection", "test connection", "log out", "logout", "sign out"]]) {
         Section(s) {
             if let server = appState.currentServer {
                 LabeledContent("Connected to", value: server.displayName)
                     .foregroundStyle(Theme.primaryText)
                 LabeledContent("Server URL", value: server.urlString)
                     .foregroundStyle(Theme.primaryText)
+                if let cell = server.cellularURLString, !cell.isEmpty {
+                    LabeledContent("Cellular URL", value: cell)
+                        .foregroundStyle(Theme.primaryText)
+                }
                 LabeledContent("Username", value: server.username)
                     .foregroundStyle(Theme.primaryText)
 
@@ -391,11 +696,13 @@ struct SettingsView: View {
     @ViewBuilder
     private var cacheSection: some View {
         let s = "Storage"
-        if sectionVisible(s, [["downloaded tracks", "artwork cache", "app data", "total", "clear downloads", "clear artwork", "cache", "storage"]]) {
+        if sectionVisible(s, [["downloaded tracks", "artwork cache", "local artwork library", "cover", "artist pictures", "app data", "total", "clear downloads", "clear artwork", "delete local artwork", "cache", "storage"]]) {
         Section {
             LabeledContent("Downloaded Tracks", value: downloadsSize)
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("Artwork Cache", value: artworkSize)
+                .foregroundStyle(Theme.primaryText)
+            LabeledContent("Local Artwork Library", value: localArtworkSize)
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("App Data", value: dataSize)
                 .foregroundStyle(Theme.primaryText)
@@ -412,10 +719,15 @@ struct SettingsView: View {
             } label: {
                 Label("Clear Artwork & Data Cache", systemImage: "photo.stack")
             }
+            Button(role: .destructive) {
+                showClearLocalArtworkAlert = true
+            } label: {
+                Label("Delete Local Artwork Library", systemImage: "photo.badge.minus")
+            }
         } header: {
             Text(s)
         } footer: {
-            Text("Downloaded tracks are kept for offline play. Artwork and data caches speed up the app and rebuild automatically.")
+            Text("Downloaded tracks are kept for offline play. Artwork and data caches rebuild automatically. The local artwork library is the persistent cover and artist photo store used for faster image loading.")
         }
         .listRowBackground(Theme.secondaryBackground)
         }
@@ -516,6 +828,98 @@ struct SettingsView: View {
 
     // MARK: - Helpers
 
+    private func downloadLocalArtworkLibrary() {
+        guard !isPrefetchingArtwork, let client = appState.client else { return }
+        isPrefetchingArtwork = true
+        artworkPrefetchProgress = ArtworkPrefetchProgress(current: "Loading library…")
+
+        Task {
+            defer {
+                isPrefetchingArtwork = false
+                refreshCacheSize()
+            }
+
+            async let albumsRequest = loadAllAlbumsForArtwork(client: client)
+            async let artistsRequest = client.artists()
+
+            let albums = await albumsRequest
+            let artists = (try? await artistsRequest) ?? []
+            let coverIDs = Array(Set(albums.compactMap(\.coverArt))).sorted()
+            let artworkSizes: [Int?] = [nil, 80, 100, 200, 240, 300, 320, 400, 600, 800]
+            let total = coverIDs.count * artworkSizes.count + artists.count
+
+            artworkPrefetchProgress = ArtworkPrefetchProgress(
+                completed: 0,
+                total: total,
+                failed: 0,
+                current: "Downloading album covers…"
+            )
+
+            for coverID in coverIDs {
+                for size in artworkSizes {
+                    let ok = await ArtworkLoader.shared.persist(client.coverArtURL(id: coverID, size: size))
+                    recordArtworkPrefetchStep(ok: ok, current: "Downloading album covers…")
+                }
+            }
+
+            if !artists.isEmpty {
+                artworkPrefetchProgress.current = "Downloading artist photos…"
+            }
+            for artist in artists {
+                let ok = await persistArtistArtwork(artist, client: client)
+                recordArtworkPrefetchStep(ok: ok, current: "Downloading artist photos…")
+            }
+
+            artworkPrefetchProgress.current = "Finished"
+            localArtworkLibraryDownloaded = artworkPrefetchProgress.completed > 0
+            AppLogger.shared.log(
+                "Local artwork library downloaded: \(artworkPrefetchProgress.completed) items, \(artworkPrefetchProgress.failed) failed",
+                category: .other
+            )
+        }
+    }
+
+    private func loadAllAlbumsForArtwork(client: SubsonicClient) async -> [Album] {
+        var all: [Album] = []
+        var offset = 0
+        let size = 500
+        while true {
+            let batch = (try? await client.allAlbums(size: size, offset: offset)) ?? []
+            all.append(contentsOf: batch)
+            if batch.count < size { break }
+            offset += size
+            if offset > 10000 { break }
+        }
+        return all
+    }
+
+    @discardableResult
+    private func persistArtistArtwork(_ artist: Artist, client: SubsonicClient) async -> Bool {
+        if await ArtworkLoader.shared.pinnedArtistImage(id: artist.id) != nil {
+            return true
+        }
+        if let directURL = artist.artistImageUrl.flatMap(URL.init(string:)),
+           await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: directURL) {
+            return true
+        }
+        if let info = try? await client.artistInfo(id: artist.id),
+           let urlString = info.bestImageUrl,
+           let url = URL(string: urlString),
+           await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: url) {
+            return true
+        }
+        if let fallbackURL = client.coverArtURL(id: artist.coverArt, size: 600) {
+            return await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: fallbackURL)
+        }
+        return false
+    }
+
+    private func recordArtworkPrefetchStep(ok: Bool, current: String) {
+        artworkPrefetchProgress.completed += 1
+        if !ok { artworkPrefetchProgress.failed += 1 }
+        artworkPrefetchProgress.current = current
+    }
+
     private func refreshCacheSize() {
         Task.detached(priority: .utility) {
             let fm = FileManager.default
@@ -526,15 +930,19 @@ struct SettingsView: View {
             let downloads = SettingsView.directorySize(at: docs.appendingPathComponent("volta-downloads"))
             let artwork   = SettingsView.directorySize(at: caches.appendingPathComponent("artwork"))
                           + SettingsView.directorySize(at: caches.appendingPathComponent("api"))
+            let localArtwork = await ArtworkLoader.shared.pinnedArtworkSize()
             let data      = SettingsView.directorySize(at: support.appendingPathComponent("Volta"))
             let total     = downloads + artwork + data
 
-            func fmt(_ n: Int) -> String {
+            @Sendable func fmt(_ n: Int) -> String {
                 ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file)
             }
             await MainActor.run {
                 downloadsSize  = fmt(downloads)
                 artworkSize    = fmt(artwork)
+                localArtworkSize = fmt(localArtwork)
+                localArtworkBytes = localArtwork
+                localArtworkLibraryDownloaded = localArtwork > 0
                 dataSize       = fmt(data)
                 totalCacheSize = fmt(total)
             }
@@ -546,6 +954,16 @@ struct SettingsView: View {
             await ArtworkLoader.shared.clearCache()
             DiskCache.clear()
             AppLogger.shared.log("Artwork & data cache cleared by user", category: .other)
+            refreshCacheSize()
+        }
+    }
+
+    private func clearLocalArtworkLibrary() {
+        Task {
+            await ArtworkLoader.shared.clearPinnedArtwork()
+            localArtworkLibraryDownloaded = false
+            localArtworkBytes = 0
+            AppLogger.shared.log("Local artwork library cleared by user", category: .other)
             refreshCacheSize()
         }
     }
@@ -594,6 +1012,7 @@ struct EditConnectionView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var serverURL: String = ""
+    @State private var cellularURL: String = ""
     @State private var username: String = ""
     @State private var password: String = ""
     @State private var isSaving = false
@@ -616,6 +1035,18 @@ struct EditConnectionView: View {
                     Text("Connection Details")
                 } footer: {
                     Text("Enter new credentials to reconnect. Leave password blank to keep existing.")
+                }
+                .listRowBackground(Theme.secondaryBackground)
+
+                Section {
+                    TextField("Cellular URL (optional)", text: $cellularURL)
+                        .keyboardType(.URL)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                } header: {
+                    Text("Cellular")
+                } footer: {
+                    Text("Used automatically when off Wi-Fi. Handy when the server URL above is a local-network address that's only reachable at home. Leave blank to always use the server URL.")
                 }
                 .listRowBackground(Theme.secondaryBackground)
 
@@ -654,6 +1085,7 @@ struct EditConnectionView: View {
     private func prefill() {
         guard let server = appState.currentServer else { return }
         serverURL = server.urlString
+        cellularURL = server.cellularURLString ?? ""
         username = server.username
     }
 
@@ -661,6 +1093,16 @@ struct EditConnectionView: View {
         guard let url = SubsonicConfig.normalizedURL(from: serverURL) else {
             errorMessage = "Invalid server URL"
             return
+        }
+        // normalise the optional cellular URL (blank → cleared); reject a non-blank but malformed one
+        let trimmedCell = cellularURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        var normalizedCell: String? = nil
+        if !trimmedCell.isEmpty {
+            guard let cellURL = SubsonicConfig.normalizedURL(from: trimmedCell) else {
+                errorMessage = "Invalid cellular URL"
+                return
+            }
+            normalizedCell = cellURL.absoluteString
         }
         let existingPassword = appState.store.config(for: appState.currentServer!)?.password ?? ""
         let pwd = password.isEmpty ? existingPassword : password
@@ -674,6 +1116,7 @@ struct EditConnectionView: View {
                 try await testClient.ping()
                 await MainActor.run {
                     appState.completeLogin(config: config)
+                    appState.updateCellularURL(normalizedCell)
                     dismiss()
                 }
             } catch {
