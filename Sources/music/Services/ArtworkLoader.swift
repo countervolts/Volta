@@ -10,8 +10,6 @@ struct LiveArtworkAsset {
     let videoURL: URL?
 }
 
-// two-tier artwork cache: in-memory NSCache for the current session and a disk
-// cache under Caches so artwork survives launches without refetching.
 actor ArtworkLoader {
     static let shared = ArtworkLoader()
 
@@ -20,19 +18,12 @@ actor ArtworkLoader {
     private let session: URLSession
     private let directory: URL
     private let liveArtworkDirectory: URL
-    // persistent store for artwork tied to downloaded content. lives under
-    // Application Support (NOT Caches) so the OS can't purge it while the audio
-    // is still downloaded — that purge was why album covers fell back to the
-    // placeholder when viewing downloads offline.
     private let pinnedDirectory: URL
     private var inFlight: [String: Task<UIImage?, Never>] = [:]
-    // when false (conservative power mode) we skip off-thread image decoding to save CPU
     private let prepareImages: Bool
 
     init() {
-        // power mode: "fast" (more connections), "balanced" (default), "conservative" (fewer, less CPU)
         let imageMode = UserDefaults.standard.string(forKey: "imageLoadMode") ?? "balanced"
-        // cache mode: how much decoded artwork to keep in memory
         let cacheMode = UserDefaults.standard.string(forKey: "cacheMode") ?? "balanced"
 
         let config = URLSessionConfiguration.default
@@ -57,11 +48,7 @@ actor ArtworkLoader {
         try? fileManager.createDirectory(at: pinnedDirectory, withIntermediateDirectories: true)
     }
 
-    // cache key that ignores the volatile Subsonic auth params (u/t/s/v/c/f — the
-    // salt+token are regenerated on EVERY makeURL call, so the same cover otherwise
-    // hashed to a new key each time → it never hit disk and never resolved offline).
-    // external URLs (last.fm/spotify artist photos) have none of these, so they're
-    // unaffected and still stable.
+    // Strip volatile Subsonic auth params so one cover maps to one cache file.
     private static func cacheKey(for url: URL) -> String {
         guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return Crypto.md5Hex(url.absoluteString)
@@ -94,11 +81,9 @@ actor ArtworkLoader {
             func finish(_ data: Data) -> UIImage? {
                 Self.decodeImage(from: data, maxPixelSize: maxPixelSize, prepare: prepareImages)
             }
-            // pinned (persistent, offline) hit first — survives a Caches purge
             if let data = try? Data(contentsOf: pinnedURL), let image = finish(data) {
                 return image
             }
-            // disk hit
             if let data = try? Data(contentsOf: fileURL), let image = finish(data) {
                 return image
             }
@@ -120,14 +105,10 @@ actor ArtworkLoader {
 
     // MARK: - Live (animated) artwork
 
-    // returns an animated UIImage when the artwork at `url` is a multi-frame image.
-    // Kept as a compatibility wrapper for the full player.
     func animatedImage(for url: URL?) async -> UIImage? {
         await liveArtwork(for: url)?.animatedImage
     }
 
-    // returns full live-artwork data: animated UIImage for the player, preview
-    // image, and a local video file for MPMediaItemAnimatedArtwork lock-screen use.
     func liveArtwork(for url: URL?) async -> LiveArtworkAsset? {
         guard let url else { return nil }
         let key = Self.cacheKey(for: url)
@@ -328,9 +309,6 @@ actor ArtworkLoader {
         return buffer
     }
 
-    // wipes the in-memory and on-disk artwork caches; images re-fetch on demand.
-    // the pinned offline store is left intact — it belongs to downloaded content
-    // and is only removed when the download itself is removed.
     func clearCache() {
         memory.removeAllObjects()
         try? fileManager.removeItem(at: directory)
@@ -341,8 +319,6 @@ actor ArtworkLoader {
 
     // MARK: - Offline (pinned) artwork
 
-    // copies the artwork at `url` into the persistent store so it keeps rendering
-    // offline even if the Caches copy is purged. idempotent + cheap once pinned.
     @discardableResult
     func persist(_ url: URL?) async -> Bool {
         guard let url else { return false }
@@ -350,7 +326,6 @@ actor ArtworkLoader {
         let pinnedURL = pinnedDirectory.appendingPathComponent(key)
         guard !fileManager.fileExists(atPath: pinnedURL.path) else { return true }
 
-        // reuse the Caches copy if we already fetched it, else download once
         let cacheURL = directory.appendingPathComponent(key)
         if let data = try? Data(contentsOf: cacheURL), UIImage(data: data) != nil {
             try? data.write(to: pinnedURL, options: .atomic)
@@ -363,9 +338,6 @@ actor ArtworkLoader {
         return fileManager.fileExists(atPath: pinnedURL.path)
     }
 
-    // pins an artist photo under a STABLE artist-id key (and its source URL) so the
-    // profile picture resolves offline even though the live photo URL comes from an
-    // external lookup (last.fm / spotify) that can't run without a network.
     @discardableResult
     func persistArtistImage(id: String, from url: URL) async -> Bool {
         let idKey = Crypto.md5Hex("artist:" + id)
@@ -374,14 +346,12 @@ actor ArtworkLoader {
         guard let (data, _) = try? await session.data(from: url),
               UIImage(data: data) != nil else { return false }
         try? data.write(to: pinnedIDURL, options: .atomic)
-        // also store under the URL key so the normal image(for:) path hits it online
         let urlKey = Self.cacheKey(for: url)
         try? data.write(to: pinnedDirectory.appendingPathComponent(urlKey), options: .atomic)
         try? data.write(to: directory.appendingPathComponent(urlKey), options: .atomic)
         return fileManager.fileExists(atPath: pinnedIDURL.path)
     }
 
-    // offline fallback for an artist's profile photo, keyed by artist id.
     func pinnedArtistImage(id: String) -> UIImage? {
         let idKey = Crypto.md5Hex("artist:" + id)
         let url = pinnedDirectory.appendingPathComponent(idKey)
@@ -389,7 +359,6 @@ actor ArtworkLoader {
         return UIImage(data: data)
     }
 
-    // drops pinned artwork when its download is removed (best-effort, no error if absent).
     func unpin(_ urls: [URL]) {
         for url in urls {
             let key = Self.cacheKey(for: url)
@@ -425,7 +394,6 @@ actor ArtworkLoader {
 }
 
 private extension UIImage {
-    // approx decoded byte size (w·h·scale²·4) for NSCache cost accounting.
     var cost: Int {
         let s = scale * scale
         return Int(size.width * size.height * s * 4)

@@ -1,26 +1,13 @@
 import SwiftUI
 
-// Mini player that lives inside the native `.tabViewBottomAccessory` slot.
-// The system draws the Liquid Glass capsule + handles the collapse-with-tab-bar
-// motion; we only supply the content and shrink it when the bar minimizes.
-//
-// placement == .inline  → accessory is riding INSIDE the minimized tab bar
-//                         (tight: artwork + title + play/pause only)
-// placement == .expanded/.none → full-width pill above the bar
-//                         (artwork + title/artist + play/pause + next)
+// Mini player content shared by the iOS 26 tab accessory and older fallback bar.
 struct MiniPlayerAccessory: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
     var onExpand: () -> Void
 
     private var audio: AudioPlayer { appState.audioPlayer }
 
     @State private var dragX: CGFloat = 0
-
-    private var compact: Bool {
-        if case .inline = placement { return true }
-        return false
-    }
 
     var body: some View {
         if let song = audio.currentSong {

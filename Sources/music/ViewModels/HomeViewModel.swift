@@ -131,6 +131,13 @@ final class HomeViewModel {
 
         var mixes: [MusicMix] = []
 
+        if let discovery = await loadDiscoveryStation(client: client, rng: &rng) {
+            mixes.append(discovery)
+        }
+        if let heavy = await loadHeavyRotation(client: client, rng: &rng) {
+            mixes.append(heavy)
+        }
+
         // up to 2 genre mixes from the top genres
         let genreCounts = Dictionary(grouping: sample.compactMap { $0.genre }, by: { $0 }).mapValues(\.count)
         let topGenres = genreCounts.sorted { $0.value > $1.value }.map(\.key)
@@ -162,6 +169,34 @@ final class HomeViewModel {
         }
 
         return mixes.shuffled(using: &rng)
+    }
+
+    private func loadDiscoveryStation(client: SubsonicClient, rng: inout SeededRNG) async -> MusicMix? {
+        let pool = (try? await client.randomSongs(size: 120)) ?? []
+        return makeMix(
+            id: "station-discovery-\(SeededRNG.daySeed())",
+            title: "Discovery Station",
+            subtitle: "Fresh picks for today",
+            from: pool,
+            rng: &rng
+        )
+    }
+
+    private func loadHeavyRotation(client: SubsonicClient, rng: inout SeededRNG) async -> MusicMix? {
+        let albums = (try? await client.frequentAlbums(size: 12)) ?? []
+        var pool: [Song] = []
+        for album in albums.prefix(8) {
+            if let full = try? await client.album(id: album.id) {
+                pool.append(contentsOf: full.song ?? [])
+            }
+        }
+        return makeMix(
+            id: "station-heavy-\(SeededRNG.daySeed())",
+            title: "Heavy Rotation",
+            subtitle: "Songs you keep coming back to",
+            from: pool,
+            rng: &rng
+        )
     }
 
     // builds a 20–50 song mix from a candidate pool, or nil if too few tracks

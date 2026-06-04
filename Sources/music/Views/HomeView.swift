@@ -57,10 +57,10 @@ struct HomeView: View {
         switch route {
         case .album(let album):
             AlbumDetailView(album: album)
-                .navigationTransition(.zoom(sourceID: album.id, in: heroNamespace))
+                .zoomNavigationTransition(sourceID: album.id, in: heroNamespace)
         case .playlist(let pl):
             PlaylistDetailView(playlist: pl)
-                .navigationTransition(.zoom(sourceID: pl.id, in: heroNamespace))
+                .zoomNavigationTransition(sourceID: pl.id, in: heroNamespace)
         case .artist(let artist):
             ArtistDetailView(artist: artist)
         case .mix(let mix):

@@ -100,10 +100,8 @@ struct SongMenu<Trigger: View>: View {
                 } label: {
                     Label("View Credits", systemImage: "list.star")
                 }
-                if appState.sharingAvailable {
-                    Button(action: shareSong) {
-                        Label("Share", systemImage: Symbols.share)
-                    }
+                Button(action: shareSong) {
+                    Label("Share", systemImage: Symbols.share)
                 }
             }
 
@@ -129,7 +127,7 @@ struct SongMenu<Trigger: View>: View {
 
     private func shareSong() {
         Task {
-            if let url = try? await appState.client?.createShare(id: song.id) {
+            if let url = await SongLinkService.pageURL(for: song) {
                 ShareSheet.present([url])
             }
         }

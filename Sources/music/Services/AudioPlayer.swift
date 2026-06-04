@@ -75,42 +75,35 @@ private struct AudioSilenceProfile: Sendable {
 @MainActor
 @Observable
 final class AudioPlayer {
-    // current track state
     private(set) var currentSong: Song?
     private(set) var isPlaying = false
     private(set) var currentTime: TimeInterval = 0
     private(set) var duration: TimeInterval = 0
     private(set) var currentArtwork: UIImage?
-    // animated ("live") cover art when the artwork is a multi-frame image; nil
-    // otherwise. Only the full player consumes this — the lock screen and miniplayer
-    // keep using the still currentArtwork.
     private(set) var currentAnimatedArtwork: UIImage?
     private var currentLiveArtwork: LiveArtworkAsset?
 
-    // queue
     private(set) var queue: [Song] = []
     private(set) var currentIndex: Int = 0
     private(set) var queueSourceTitle: String = ""
     private(set) var queueSourceAlbum: Album?
     private(set) var queueSourcePlaylist: Playlist?
 
-    // modes
     private(set) var isShuffle = false
     private(set) var repeatMode: RepeatMode = .off
     private(set) var autoplayMode: AutoplayMode = .off
     private(set) var transitionMode: PlaybackTransitionMode = .off
     var isCrossfade: Bool { transitionMode != .off }
 
-    // legacy shim used by SettingsView toggle
     var isAutoplay: Bool {
         get { autoplayMode != .off }
         set {
             autoplayMode = newValue ? .random : .off
+            UserDefaults.standard.set(newValue, forKey: "autoplayEnabled")
             ensureAutoplayPreloadedIfNeeded()
         }
     }
 
-    // starred IDs tracked locally (toggled optimistically)
     private(set) var starredIDs: Set<String> = []
 
     private let primaryPlayer = AVQueuePlayer()
@@ -132,15 +125,13 @@ final class AudioPlayer {
     private var preparedTransitionPlan: PlaybackTransitionPlan?
     private var isTransitioning = false
 
-    private var gaplessNextItem: AVPlayerItem? = nil   // pre-buffered for weak mode
+    private var gaplessNextItem: AVPlayerItem? = nil
     private var autoplayAppendTask: Task<Void, Never>?
     private let autoplayPreloadThreshold = 1
 
-    // when set, autoplay keeps pulling more songs from this artist (artist-profile play button)
     private(set) var autoplayArtistName: String?
     private(set) var autoplayArtistId: String?
 
-    // sleep timer
     private(set) var sleepTimerActive = false
     private(set) var sleepEndsAtTrackEnd = false
     private(set) var sleepRemaining: TimeInterval = 0
@@ -152,6 +143,7 @@ final class AudioPlayer {
 
     init() {
         activePlayer = primaryPlayer
+        autoplayMode = UserDefaults.standard.bool(forKey: "autoplayEnabled") ? .random : .off
         if let raw = UserDefaults.standard.string(forKey: "playbackTransitionMode"),
            let mode = PlaybackTransitionMode(rawValue: raw) {
             transitionMode = mode
@@ -166,7 +158,6 @@ final class AudioPlayer {
         configureRemoteCommands()
         addTimeObservers()
         addEndObserver()
-        // re-apply (or remove) the EQ tap on the current item when toggled
         NotificationCenter.default.addObserver(forName: .equalizerToggled, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let item = self.player.currentItem else { return }
@@ -175,8 +166,6 @@ final class AudioPlayer {
         }
     }
 
-    // attaches the equalizer tap to an item's audio track (no-op + clears the mix
-    // when the EQ is disabled, so default playback is never routed through a tap).
     private func applyEqualizer(to item: AVPlayerItem) {
         guard EqualizerEngine.shared.isEnabled else { item.audioMix = nil; return }
         Task { @MainActor [weak self] in
@@ -201,7 +190,6 @@ final class AudioPlayer {
     func playQueue(_ songs: [Song], startIndex: Int = 0, source: String = "", album: Album? = nil, playlist: Playlist? = nil) {
         cancelTransitionPlayback()
         gaplessNextItem = nil
-        // any normal play action clears artist-scoped autoplay
         autoplayArtistName = nil
         autoplayArtistId = nil
         queue = songs
@@ -218,13 +206,12 @@ final class AudioPlayer {
         playQueue([song], startIndex: 0, source: song.album ?? "")
     }
 
-    // play an artist's music and keep autoplay scoped to that artist
     func playArtist(_ songs: [Song], artist: Artist) {
         guard !songs.isEmpty else { return }
         playQueue(songs, startIndex: 0, source: artist.name)
         autoplayArtistName = artist.name
         autoplayArtistId = artist.id
-        if autoplayMode == .off { autoplayMode = .algorithm }   // so it keeps playing them
+        if autoplayMode == .off { autoplayMode = .algorithm }
     }
 
     func skipNext() {
@@ -301,17 +288,11 @@ final class AudioPlayer {
         updateNowPlayingTime()
     }
 
-    // live playback position straight from the player. the scrubber samples this
-    // every frame so its fill tracks the real position and can't drift/detach
-    // between the (coarser) periodic observer ticks.
     func liveTime() -> TimeInterval {
         let t = player.currentTime().seconds
         return t.isFinite ? t : currentTime
     }
 
-    // duration of the item actually playing right now. read live so the remaining
-    // time can't show 0:00 while audio keeps playing (stale metadata duration) and
-    // stays in lockstep with liveTime — both sampled from the same source.
     func liveDuration() -> TimeInterval {
         let d = player.currentItem?.duration.seconds ?? duration
         return (d.isFinite && d > 0) ? d : duration
@@ -321,7 +302,6 @@ final class AudioPlayer {
 
     func moveQueueItem(from source: IndexSet, to dest: Int) {
         queue.move(fromOffsets: source, toOffset: dest)
-        // keep currentIndex pointing at the same song after reorder
         if let moved = source.first {
             if moved == currentIndex {
                 currentIndex = dest > moved ? dest - 1 : dest
@@ -351,7 +331,6 @@ final class AudioPlayer {
         queue.append(song)
     }
 
-    // batch variants for multi-select — order is preserved.
     func playNext(_ songs: [Song]) {
         guard !songs.isEmpty else { return }
         guard !queue.isEmpty else {
@@ -409,6 +388,7 @@ final class AudioPlayer {
         case .random:    autoplayMode = .algorithm
         case .algorithm: autoplayMode = .off
         }
+        UserDefaults.standard.set(autoplayMode != .off, forKey: "autoplayEnabled")
         ensureAutoplayPreloadedIfNeeded()
     }
     func toggleAutoplay() { isAutoplay.toggle() }
@@ -482,11 +462,9 @@ final class AudioPlayer {
         let gainDB: Double? = mode == "album" ? (rg.albumGain ?? rg.trackGain) : (rg.trackGain ?? rg.albumGain)
         guard let g = gainDB else { return 1.0 }
         var linear = pow(10.0, g / 20.0)
-        // peak protection: never push the signal above full scale (clipping)
         if let peak = (mode == "album" ? rg.albumPeak : rg.trackPeak), peak > 0 {
             linear = min(linear, 1.0 / peak)
         }
-        // AVPlayer volume is capped at 1.0 so upward normalization is limited to attenuation
         return Float(min(1.0, max(0.0, linear)))
     }
 
@@ -563,15 +541,12 @@ final class AudioPlayer {
 
         var fresh: [Song] = []
 
-        // 1) artist-scoped autoplay: keep pulling the same artist's top songs
         if let name = autoplayArtistName {
             fresh = freshFrom((try? await client.topSongs(artistName: name, count: 50)) ?? [])
         }
-        // 2) algorithm mode: blended, taste-aware selection
         if fresh.isEmpty, autoplayMode == .algorithm {
             fresh = await algorithmicAutoplay(client: client, existingIDs: existingIDs)
         }
-        // 3) fallback: random library songs
         if fresh.isEmpty {
             var pool = (try? await client.randomSongs(size: 30)) ?? []
             if transitionMode == .automix, let g = currentSong?.genre, !g.isEmpty {
@@ -585,31 +560,22 @@ final class AudioPlayer {
         scheduleGaplessPreload()
     }
 
-    // algorithm mode draws from several signals and blends them:
-    //   • continuity — similar artists to what's playing + more of this genre
-    //   • taste      — the user's most-played artists from LOCAL play history
-    //   • server     — each artist's top (most-streamed) songs
-    // results are deduped, biased toward the current genre, but kept shuffled.
     private func algorithmicAutoplay(client: SubsonicClient, existingIDs: Set<String>) async -> [Song] {
         let currentGenre = currentSong?.genre?.lowercased()
         var pool: [Song] = []
 
-        // similar artists to the one playing (discovery, same neighbourhood)
         if let artistId = currentSong?.artistId,
            let info = try? await client.artistInfo(id: artistId) {
             let names = (info.similarArtist ?? []).prefix(3).map(\.name)
             pool += await topSongs(forArtists: names, client: client, each: 8)
         }
 
-        // the user's most-played artists from local stats (their actual taste)
         pool += await topSongs(forArtists: topLocalArtists(limit: 3), client: client, each: 8)
 
-        // keep the current vibe going with more of the same genre
         if let g = currentSong?.genre, !g.isEmpty {
             pool += (try? await client.songsByGenre(g, count: 25)) ?? []
         }
 
-        // dedupe + drop anything already queued
         var seen = Set<String>()
         let unique = pool.filter { seen.insert($0.id).inserted && !existingIDs.contains($0.id) }
 
@@ -617,7 +583,6 @@ final class AudioPlayer {
             return automixSmoothAutoplay(unique, current: currentSong)
         }
 
-        // partition by genre match so the current vibe leads, each part shuffled
         let matching = unique.filter { $0.genre?.lowercased() == currentGenre }.shuffled()
         let rest     = unique.filter { $0.genre?.lowercased() != currentGenre }.shuffled()
         return matching + rest
@@ -642,14 +607,12 @@ final class AudioPlayer {
         return lead + tail.shuffled()
     }
 
-    // the user's most-played artists from the local stats store (streamed count).
     private func topLocalArtists(limit: Int) -> [String] {
         var counts: [String: Int] = [:]
         for e in StatsStore.shared.allEvents() { counts[e.artist, default: 0] += 1 }
         return counts.sorted { $0.value > $1.value }.prefix(limit).map(\.key)
     }
 
-    // fetches each artist's top songs in parallel and flattens the result.
     private func topSongs(forArtists names: [String], client: SubsonicClient, each: Int) async -> [Song] {
         guard !names.isEmpty else { return [] }
         return await withTaskGroup(of: [Song].self) { group in
@@ -694,7 +657,6 @@ final class AudioPlayer {
 
         let gapless = UserDefaults.standard.string(forKey: "gaplessPlayback") ?? "off"
 
-        // Check if we pre-buffered this exact song (weak mode)
         let item: AVPlayerItem
         if gapless != "off",
            let preloaded = gaplessNextItem,
@@ -708,7 +670,6 @@ final class AudioPlayer {
 
         applyEqualizer(to: item)
 
-        // For gapless "on": use AVQueuePlayer's insert so transition is seamless
         if gapless == "on" {
             player.removeAllItems()
             player.insert(item, after: nil)
@@ -724,9 +685,8 @@ final class AudioPlayer {
         currentArtwork = nil
         currentAnimatedArtwork = nil
         currentLiveArtwork = nil
-        loggedSongIDs.remove(song.id)   // allow re-logging if replayed
+        loggedSongIDs.remove(song.id)
 
-        // starred state from server's starred field
         if song.starred != nil {
             starredIDs.insert(song.id)
         }
@@ -751,7 +711,6 @@ final class AudioPlayer {
         let nextItem = AVPlayerItem(url: url)
         applyEqualizer(to: nextItem)
         gaplessNextItem = nextItem
-        // For "on" mode: actually insert into AVQueuePlayer queue for seamless transition
         if gapless == "on" {
             player.insert(nextItem, after: player.currentItem)
         }
@@ -959,8 +918,6 @@ final class AudioPlayer {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         }
 
-        // probe for live (animated) artwork from the ORIGINAL cover (no size param,
-        // so a resizing server doesn't flatten the animation). full player only.
         let liveEnabled = UserDefaults.standard.object(forKey: "liveArtwork") as? Bool ?? true
         guard liveEnabled, song.coverArt != nil else { return }
         let originalURL = client?.coverArtURL(id: song.coverArt)
@@ -972,7 +929,6 @@ final class AudioPlayer {
     }
 
     private func loadDuration(from item: AVPlayerItem) async {
-        // poll until duration becomes available
         for _ in 0..<30 {
             let d = item.duration
             if d.isNumeric, d.seconds > 0 {
@@ -1010,7 +966,6 @@ final class AudioPlayer {
         guard let song = currentSong,
               duration > 0,
               !loggedSongIDs.contains(song.id) else { return }
-        // log when half listened or completed
         let threshold = min(duration * 0.5, Double(song.duration ?? Int(duration)) * 0.5)
         if currentTime >= threshold {
             loggedSongIDs.insert(song.id)
@@ -1030,7 +985,6 @@ final class AudioPlayer {
                 guard let self else { return }
                 guard let finishedItem = note.object as? AVPlayerItem else { return }
                 if self.isTransitioning, finishedItem !== self.player.currentItem { return }
-                // sleep timer set to "end of track": stop here instead of advancing
                 if self.sleepEndsAtTrackEnd {
                     self.player.pause()
                     self.isPlaying = false
@@ -1039,8 +993,6 @@ final class AudioPlayer {
                     return
                 }
                 let gapless = UserDefaults.standard.string(forKey: "gaplessPlayback") ?? "off"
-                // For "on" mode, AVQueuePlayer already advanced to the pre-queued item.
-                // Update our index + state without replacing the current item.
                 if gapless == "on",
                    self.repeatMode == .off,
                    self.currentIndex + 1 < self.queue.count {
@@ -1139,6 +1091,12 @@ final class AudioPlayer {
     }
 
     private func addAnimatedArtwork(to info: inout [String: Any], live: LiveArtworkAsset?) {
+        guard #available(iOS 26.0, *) else { return }
+        addSupportedAnimatedArtwork(to: &info, live: live)
+    }
+
+    @available(iOS 26.0, *)
+    private func addSupportedAnimatedArtwork(to info: inout [String: Any], live: LiveArtworkAsset?) {
         info.removeValue(forKey: MPNowPlayingInfoProperty1x1AnimatedArtwork)
         guard let live, let videoURL = live.videoURL else { return }
         let key = MPNowPlayingInfoProperty1x1AnimatedArtwork

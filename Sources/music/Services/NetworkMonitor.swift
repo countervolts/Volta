@@ -2,9 +2,6 @@ import Foundation
 import Network
 import Observation
 
-// watches the active network path so the app can switch behaviour between Wi-Fi
-// and cellular — used to pick a per-connection server URL (a local LAN address on
-// Wi-Fi, a public one on cellular) and to apply the cellular streaming quality.
 @MainActor
 @Observable
 final class NetworkMonitor {
@@ -27,7 +24,6 @@ final class NetworkMonitor {
         monitor.start(queue: queue)
     }
 
-    // register a handler fired (on the main actor) whenever the connection TYPE changes.
     func onConnectionChange(_ handler: @escaping (Connection) -> Void) {
         onChange.append(handler)
     }
@@ -36,8 +32,6 @@ final class NetworkMonitor {
         guard conn != connection else { return }
         let previous = connection
         connection = conn
-        // mirror to UserDefaults so the nonisolated stream/download URL builders
-        // (which can't touch this main-actor type) can read the current type cheaply.
         UserDefaults.standard.set(conn == .cellular, forKey: "networkIsCellular")
         AppLogger.shared.log("📶 Network: \(previous.rawValue) → \(conn.rawValue)", category: .networking)
         for handler in onChange { handler(conn) }
@@ -46,7 +40,7 @@ final class NetworkMonitor {
     nonisolated private static func classify(_ path: NWPath) -> Connection {
         guard path.status == .satisfied else { return .none }
         if path.usesInterfaceType(.wifi) { return .wifi }
-        if path.usesInterfaceType(.wiredEthernet) { return .wifi }   // treat wired like Wi-Fi
+        if path.usesInterfaceType(.wiredEthernet) { return .wifi }
         if path.usesInterfaceType(.cellular) { return .cellular }
         return .other
     }

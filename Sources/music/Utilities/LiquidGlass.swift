@@ -1,40 +1,39 @@
 import SwiftUI
 
-// iOS 26 Liquid Glass everywhere. The user-facing disable toggle was removed
-// (it caused rendering bugs); glass is always on. The fallback branches below
-// are kept dormant behind this flag in case a future build needs them.
+// Use iOS 26 Liquid Glass when available. Older systems silently fall back to
+// material/button styles so the app still runs without a settings toggle.
 
 private let liquidGlassDisabled = false
 
 extension View {
     @ViewBuilder
     func glassCard(cornerRadius: CGFloat = 16) -> some View {
-        if liquidGlassDisabled {
-            self.background(.ultraThinMaterial, in: .rect(cornerRadius: cornerRadius))
-        } else {
+        if !liquidGlassDisabled, #available(iOS 26.0, *) {
             self.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+        } else {
+            self.background(.ultraThinMaterial, in: .rect(cornerRadius: cornerRadius))
         }
     }
 
     @ViewBuilder
     func glassCircle() -> some View {
-        if liquidGlassDisabled {
-            self.background(.ultraThinMaterial, in: .circle)
-        } else {
+        if !liquidGlassDisabled, #available(iOS 26.0, *) {
             self.glassEffect(.regular, in: .circle)
+        } else {
+            self.background(.ultraThinMaterial, in: .circle)
         }
     }
 
     @ViewBuilder
     func glassCapsule(tinted: Bool = false) -> some View {
-        if liquidGlassDisabled {
-            self.background(
-                (tinted ? AnyShapeStyle(Theme.accent.opacity(0.35)) : AnyShapeStyle(.ultraThinMaterial)),
+        if !liquidGlassDisabled, #available(iOS 26.0, *) {
+            self.glassEffect(
+                tinted ? .regular.tint(Theme.accent.opacity(0.5)) : .regular,
                 in: .capsule
             )
         } else {
-            self.glassEffect(
-                tinted ? .regular.tint(Theme.accent.opacity(0.5)) : .regular,
+            self.background(
+                (tinted ? AnyShapeStyle(Theme.accent.opacity(0.35)) : AnyShapeStyle(.ultraThinMaterial)),
                 in: .capsule
             )
         }
@@ -42,12 +41,12 @@ extension View {
 
     @ViewBuilder
     func glassButtonStyle(prominent: Bool = false) -> some View {
-        if liquidGlassDisabled {
-            if prominent { self.buttonStyle(.borderedProminent) }
-            else { self.buttonStyle(.bordered) }
-        } else {
+        if !liquidGlassDisabled, #available(iOS 26.0, *) {
             if prominent { self.buttonStyle(.glassProminent) }
             else { self.buttonStyle(.glass) }
+        } else {
+            if prominent { self.buttonStyle(.borderedProminent) }
+            else { self.buttonStyle(.bordered) }
         }
     }
 }
@@ -57,12 +56,12 @@ struct LiquidGlassContainer<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        if liquidGlassDisabled {
-            content()
-        } else {
+        if !liquidGlassDisabled, #available(iOS 26.0, *) {
             GlassEffectContainer(spacing: spacing) {
                 content()
             }
+        } else {
+            content()
         }
     }
 }

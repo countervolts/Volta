@@ -6,11 +6,12 @@ struct LibraryView: View {
     @State private var vm = LibraryViewModel()
     @Binding var path: [LibraryRoute]
     @Namespace private var heroNamespace
+    @AppStorage("albumSortOrder") private var albumSortOrder = "alphabetical"
 
-    // multi-select (Songs section): long-press a row to enter, then batch act
     @State private var selectionMode = false
     @State private var selectedSongIDs: Set<String> = []
     @State private var showBatchPlaylistSheet = false
+    @State private var addToPlaylistSong: Song?
     @State private var batchToast: String? = nil
 
     private var selectedSongs: [Song] {
@@ -21,8 +22,6 @@ struct LibraryView: View {
         NavigationStack(path: $path) {
             ZStack {
                 Theme.background.ignoresSafeArea()
-                // single scroll view so the navigation-bar search field collapses
-                // on scroll-down, freeing up vertical space for the data
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         sourcePicker
@@ -47,8 +46,16 @@ struct LibraryView: View {
                     finishBatch("Added \(count) to \(name)")
                 }
             }
+            .sheet(item: $addToPlaylistSong) { song in
+                AddToPlaylistSheet(song: song) { name in
+                    showToast("Added to \(name)")
+                }
+            }
             .onChange(of: vm.filter) { _, _ in exitSelection() }
             .onChange(of: vm.source) { _, _ in exitSelection() }
+            .onChange(of: albumSortOrder) { _, value in
+                vm.setSort(LibraryViewModel.sortOrder(from: value))
+            }
         }
         .tint(Theme.accent)
         .preferredColorScheme(.dark)
@@ -66,10 +73,10 @@ struct LibraryView: View {
         switch route {
         case .album(let album):
             AlbumDetailView(album: album)
-                .navigationTransition(.zoom(sourceID: album.id, in: heroNamespace))
+                .zoomNavigationTransition(sourceID: album.id, in: heroNamespace)
         case .artist(let artist):
             ArtistDetailView(artist: artist)
-                .navigationTransition(.zoom(sourceID: artist.id, in: heroNamespace))
+                .zoomNavigationTransition(sourceID: artist.id, in: heroNamespace)
         case .playlist(let pl):
             PlaylistDetailView(playlist: pl)
         case .genreAlbums(let genre):
@@ -133,7 +140,6 @@ struct LibraryView: View {
                 .padding(.leading, Theme.Layout.screenPadding)
                 .padding(.vertical, 12)
             }
-            // sort/filter menu only applies to album & song sections
             if vm.filter == .albums || vm.filter == .songs {
                 filterMenu
                     .padding(.trailing, Theme.Layout.screenPadding)
@@ -321,42 +327,94 @@ struct LibraryView: View {
 
     private var songsList: some View {
         LazyVStack(spacing: 0) {
-            ForEach(vm.filteredSongs) { song in
-                songRow(song)
+            if !vm.filteredSongs.isEmpty {
+                librarySongsActions
+            }
+            ForEach(Array(vm.filteredSongs.enumerated()), id: \.element.id) { index, song in
+                songRow(song, visibleIndex: index)
                 Divider().background(Theme.secondaryText.opacity(0.12))
                     .padding(.leading, selectionMode ? 96 : 68)
             }
         }
     }
 
-    private func songRow(_ song: Song) -> some View {
+    private var librarySongsActions: some View {
+        HStack(spacing: 12) {
+            Button {
+                appState.audioPlayer.playQueue(vm.filteredSongs, startIndex: 0, source: "Library Songs")
+            } label: {
+                Label("Play", systemImage: Symbols.play)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Theme.accent, in: Capsule())
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                appState.audioPlayer.playQueue(vm.filteredSongs.shuffled(), startIndex: 0, source: "Library Songs")
+            } label: {
+                Label("Shuffle", systemImage: Symbols.shuffle)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .glassCapsule(tinted: true)
+                    .foregroundStyle(Theme.primaryText)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, Theme.Layout.screenPadding)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private func songRow(_ song: Song, visibleIndex: Int) -> some View {
         let selected = selectedSongIDs.contains(song.id)
-        return HStack(spacing: 12) {
-            if selectionMode {
+        if selectionMode {
+            HStack(spacing: 12) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
                     .foregroundStyle(selected ? Theme.accent : Theme.secondaryText)
                     .transition(.scale.combined(with: .opacity))
+                ArtworkView(coverArtID: song.coverArt, size: 80, cornerRadius: 6)
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(song.title).font(.body).foregroundStyle(Theme.primaryText).lineLimit(1)
+                    Text(song.artist ?? "").font(.caption).foregroundStyle(Theme.secondaryText).lineLimit(1)
+                }
+                Spacer()
             }
-            ArtworkView(coverArtID: song.coverArt, size: 80, cornerRadius: 6)
-                .frame(width: 44, height: 44)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(song.title).font(.body).foregroundStyle(Theme.primaryText).lineLimit(1)
-                Text(song.artist ?? "").font(.caption).foregroundStyle(Theme.secondaryText).lineLimit(1)
+            .padding(.horizontal, Theme.Layout.screenPadding)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+            .onTapGesture { toggleSelection(song) }
+            .onLongPressGesture(minimumDuration: 0.4) { enterSelection(with: song) }
+        } else {
+            TrackRow(
+                song: song,
+                index: visibleIndex + 1,
+                isCurrentlyPlaying: appState.audioPlayer.currentSong?.id == song.id,
+                onTap: {
+                    appState.audioPlayer.playQueue(vm.filteredSongs, startIndex: visibleIndex, source: "Library Songs")
+                },
+                showArtist: true,
+                leadingArtwork: true,
+                onSwipePlayNext: {
+                    appState.audioPlayer.playNext(song)
+                    showToast("Playing Next")
+                }
+            ) {
+                SongMenu(
+                    song: song,
+                    onGoToAlbum: song.albumId == nil ? nil : { goToAlbum(song) },
+                    onGoToArtist: song.artistId == nil ? nil : { goToArtist(song) },
+                    onAddToPlaylist: { addToPlaylistSong = song }
+                )
             }
-            Spacer()
-            if let dur = song.duration, !selectionMode {
-                Text(formatDuration(dur)).font(.caption.monospacedDigit()).foregroundStyle(Theme.secondaryText)
-            }
+            .padding(.horizontal, Theme.Layout.screenPadding)
+            .onLongPressGesture(minimumDuration: 0.4) { enterSelection(with: song) }
         }
-        .padding(.horizontal, Theme.Layout.screenPadding)
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if selectionMode { toggleSelection(song) }
-            else { appState.audioPlayer.play(song: song) }
-        }
-        .onLongPressGesture(minimumDuration: 0.4) { enterSelection(with: song) }
     }
 
     // MARK: - Multi-select
@@ -484,6 +542,24 @@ struct LibraryView: View {
         Task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             withAnimation { batchToast = nil }
+        }
+    }
+
+    private func goToAlbum(_ song: Song) {
+        guard let id = song.albumId else { return }
+        Task {
+            if let album = try? await appState.client?.album(id: id) {
+                path.append(.album(album))
+            }
+        }
+    }
+
+    private func goToArtist(_ song: Song) {
+        guard let id = song.artistId else { return }
+        Task {
+            if let artist = try? await appState.client?.artist(id: id) {
+                path.append(.artist(artist))
+            }
         }
     }
 

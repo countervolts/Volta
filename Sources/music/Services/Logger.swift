@@ -33,6 +33,9 @@ final class AppLogger: @unchecked Sendable {
     private let maxEntries = 4000
 
     func log(_ message: String, category: LogCategory = .other, level: LogEntry.Level = .info) {
+        let verbose = UserDefaults.standard.object(forKey: "developerLogging") as? Bool ?? true
+        guard verbose || level != .info else { return }
+
         let entry = LogEntry(timestamp: .now, category: category, level: level, message: message)
         lock.withLock {
             entries.append(entry)
@@ -49,6 +52,12 @@ final class AppLogger: @unchecked Sendable {
 
     func allEntries() -> [LogEntry] {
         lock.withLock { entries }
+    }
+
+    func estimatedSizeBytes() -> Int {
+        lock.withLock {
+            entries.map(\.formatted).joined(separator: "\n").lengthOfBytes(using: .utf8)
+        }
     }
 
     func clear(category: LogCategory) {

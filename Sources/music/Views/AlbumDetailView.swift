@@ -19,7 +19,6 @@ struct AlbumDetailView: View {
         Color(ColorExtractor.backgroundVariant(of: vm.dominantColor))
     }
 
-    // text color for the white Play button — darkened dominant so it reads on white
     private var playFg: Color {
         let c = vm.dominantColor
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
@@ -45,10 +44,6 @@ struct AlbumDetailView: View {
             }
             .scrollIndicators(.hidden)
 
-
-            // no back button — swipe from the left edge to go back (SwipeBackEnabler)
-
-            // toast notification
             if let msg = toastMessage {
                 VStack {
                     Spacer()
@@ -211,7 +206,6 @@ struct AlbumDetailView: View {
 
     private var trackList: some View {
         VStack(spacing: 0) {
-            // defined separator between the action row and the first track
             Divider()
                 .frame(height: 0.75)
                 .overlay(.white.opacity(0.15))
@@ -227,6 +221,7 @@ struct AlbumDetailView: View {
             }
         }
         .padding(.horizontal, 20)
+        .simultaneousGesture(verticalPlaybackSwipe)
     }
 
     private func discHeader(_ disc: Int) -> some View {
@@ -339,6 +334,23 @@ struct AlbumDetailView: View {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             withAnimation { toastMessage = nil }
         }
+    }
+
+    private var verticalPlaybackSwipe: some Gesture {
+        DragGesture(minimumDistance: 80)
+            .onEnded { value in
+                guard abs(value.translation.height) > 180,
+                      abs(value.translation.width) < 55 else { return }
+                moveWithinAlbum(delta: value.translation.height < 0 ? 1 : -1)
+            }
+    }
+
+    private func moveWithinAlbum(delta: Int) {
+        guard let current = appState.audioPlayer.currentSong,
+              let currentIndex = vm.songs.firstIndex(where: { $0.id == current.id }) else { return }
+        let nextIndex = max(0, min(vm.songs.count - 1, currentIndex + delta))
+        guard nextIndex != currentIndex else { return }
+        appState.audioPlayer.playQueue(vm.songs, startIndex: nextIndex, source: vm.album.name, album: vm.album)
     }
 }
 

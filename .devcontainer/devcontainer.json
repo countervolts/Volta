@@ -1,0 +1,20 @@
+{
+  "name": "Volta iOS",
+  "image": "swift:6.0",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "sswg.swift-lang"
+      ],
+      "settings": {
+        "swift.path": "/usr/bin/swift",
+        "sourcekit-lsp.serverPath": "/usr/bin/sourcekit-lsp"
+      }
+    }
+  },
+  "postCreateCommand": "swift package dump-package >/dev/null && gh auth status || true",
+  "remoteUser": "root"
+}

@@ -5,6 +5,7 @@ struct LoginView: View {
     @Environment(AppState.self) private var appState
     @State private var vm = LoginViewModel()
     @State private var appeared = false
+    @State private var showHTTPWarning = false
 
     var body: some View {
         @Bindable var vm = vm
@@ -64,6 +65,14 @@ struct LoginView: View {
                 appeared = true
             }
         }
+        .alert("HTTP is not secure", isPresented: $showHTTPWarning) {
+            Button("Edit Server", role: .cancel) {}
+            Button("Continue", role: .destructive) {
+                Task { await vm.connect(using: appState) }
+            }
+        } message: {
+            Text("Your login and music traffic may be visible on this connection. Use HTTPS when possible.")
+        }
     }
 
     private var header: some View {
@@ -83,7 +92,11 @@ struct LoginView: View {
 
     private var connectButton: some View {
         Button {
-            Task { await vm.connect(using: appState) }
+            if vm.usesInsecureHTTP {
+                showHTTPWarning = true
+            } else {
+                Task { await vm.connect(using: appState) }
+            }
         } label: {
             HStack(spacing: 8) {
                 if vm.isConnecting {

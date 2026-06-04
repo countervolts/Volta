@@ -1,7 +1,5 @@
 import SwiftUI
 
-// iOS 26 only — matchedTransitionSource available unconditionally.
-
 private struct HeroNamespaceKey: EnvironmentKey {
     static var defaultValue: Namespace.ID? { nil }
 }
@@ -14,8 +12,18 @@ extension EnvironmentValues {
 }
 
 extension View {
+    @ViewBuilder
     func heroSource(id: some Hashable) -> some View {
         HeroSourceWrapper(id: AnyHashable(id), content: self)
+    }
+
+    @ViewBuilder
+    func zoomNavigationTransition<ID: Hashable>(sourceID: ID, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 26.0, *) {
+            self.navigationTransition(.zoom(sourceID: sourceID, in: namespace))
+        } else {
+            self
+        }
     }
 }
 
@@ -25,7 +33,7 @@ private struct HeroSourceWrapper<Content: View>: View {
     @Environment(\.heroNamespace) private var ns
 
     var body: some View {
-        if let ns {
+        if let ns, #available(iOS 26.0, *) {
             content.matchedTransitionSource(id: id, in: ns)
         } else {
             content

@@ -24,6 +24,7 @@ struct FullMediaGrid: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .background(SwipeBackEnabler())
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {

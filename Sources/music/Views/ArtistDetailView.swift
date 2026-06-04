@@ -24,6 +24,7 @@ struct ArtistDetailView: View {
     }
 
     private static let headerHeight: CGFloat = 380
+    private static let legacyScrollSpace = "artist-scroll-space"
 
     var body: some View {
         GeometryReader { proxy in
@@ -63,30 +64,7 @@ struct ArtistDetailView: View {
                 .offset(y: -shift)
                 .allowsHitTesting(false)
 
-                ScrollView {
-                    VStack(spacing: 0) {
-                        Color.clear.frame(height: Self.headerHeight)   // sits over the header
-                        artistActionRow
-                        topSongsSection
-                        albumsSection
-                        appearedOnSection
-                        similarArtistsSection
-                        aboutSection
-                        artistStatsSection
-                        Color.clear.frame(height: 120)
-                    }
-                }
-                .scrollIndicators(.hidden)
-                .onScrollGeometryChange(for: CGFloat.self) { geo in
-                    geo.contentOffset.y + geo.contentInsets.top
-                } action: { _, newValue in
-                    pendingScrollY = newValue
-                    if let scrollThrottler {
-                        scrollThrottler.schedule()
-                    } else {
-                        scrollY = newValue
-                    }
-                }
+                artistScroll
 
                 if vm.isLoading && vm.albums.isEmpty {
                     ProgressView()
@@ -136,6 +114,61 @@ struct ArtistDetailView: View {
             })
         }
         .task { if let c = appState.client { await vm.load(client: c) } }
+    }
+
+    @ViewBuilder
+    private var artistScroll: some View {
+        if #available(iOS 18.0, *) {
+            scrollContent(includeLegacyOffsetProbe: false)
+                .onScrollGeometryChange(for: CGFloat.self) { geo in
+                    geo.contentOffset.y + geo.contentInsets.top
+                } action: { _, newValue in
+                    updateScrollOffset(newValue)
+                }
+        } else {
+            scrollContent(includeLegacyOffsetProbe: true)
+                .coordinateSpace(name: Self.legacyScrollSpace)
+                .onPreferenceChange(ArtistScrollOffsetPreferenceKey.self) { newValue in
+                    updateScrollOffset(newValue)
+                }
+        }
+    }
+
+    private func scrollContent(includeLegacyOffsetProbe: Bool) -> some View {
+        ScrollView {
+            if includeLegacyOffsetProbe {
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: ArtistScrollOffsetPreferenceKey.self,
+                        value: -geo.frame(in: .named(Self.legacyScrollSpace)).minY
+                    )
+                }
+                .frame(height: 0)
+            }
+
+            VStack(spacing: 0) {
+                Color.clear.frame(height: Self.headerHeight)   // sits over the header
+                artistActionRow
+                topSongsSection
+                albumsSection
+                appearedOnSection
+                similarArtistsSection
+                aboutSection
+                artistStatsSection
+                Color.clear.frame(height: 120)
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func updateScrollOffset(_ newValue: CGFloat) {
+        guard abs(newValue - pendingScrollY) > 0.5 else { return }
+        pendingScrollY = newValue
+        if let scrollThrottler {
+            scrollThrottler.schedule()
+        } else {
+            scrollY = newValue
+        }
     }
 
     // MARK: - Header image
@@ -527,6 +560,14 @@ struct ArtistDetailView: View {
         Task {
             if let album = try? await appState.client?.album(id: id) { drillAlbum = album }
         }
+    }
+}
+
+private struct ArtistScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

@@ -24,7 +24,6 @@ struct NowPlayingScreen: View {
     @State private var isFetchingArtist = false
     @State private var isFetchingAlbum = false
     @State private var tasteStore = TasteStore.shared
-    private var sharingAvailable: Bool { appState.sharingAvailable }
     @AppStorage("showLosslessBadge") private var showLosslessBadge = true
     @AppStorage("artworkAnimation") private var artworkAnimation = true
     // observe accent so player controls retint live on change
@@ -130,7 +129,7 @@ struct NowPlayingScreen: View {
     private func shareCurrentSong() {
         guard let song = audio.currentSong else { return }
         Task {
-            if let url = try? await appState.client?.createShare(id: song.id) {
+            if let url = await SongLinkService.pageURL(for: song) {
                 ShareSheet.present([url])
             }
         }
@@ -286,9 +285,7 @@ struct NowPlayingScreen: View {
                     Divider()
                     Button { infoSheet = .info } label: { Label("Info", systemImage: Symbols.info) }
                     Button { infoSheet = .credits } label: { Label("View Credits", systemImage: "list.star") }
-                    if sharingAvailable {
-                        Button { shareCurrentSong() } label: { Label("Share", systemImage: Symbols.share) }
-                    }
+                    Button { shareCurrentSong() } label: { Label("Share", systemImage: Symbols.share) }
                     if audio.currentSong?.albumId != nil {
                         Button {
                             guard let albumId = audio.currentSong?.albumId else { return }
@@ -433,9 +430,7 @@ struct NowPlayingScreen: View {
                     Divider()
                     Button { infoSheet = .info } label: { Label("Info", systemImage: Symbols.info) }
                     Button { infoSheet = .credits } label: { Label("View Credits", systemImage: "list.star") }
-                    if sharingAvailable {
-                        Button { shareCurrentSong() } label: { Label("Share", systemImage: Symbols.share) }
-                    }
+                    Button { shareCurrentSong() } label: { Label("Share", systemImage: Symbols.share) }
                     Divider()
                     if audio.currentSong?.albumId != nil {
                         Button {
@@ -566,7 +561,6 @@ struct NowPlayingScreen: View {
             }
             .padding(.bottom, 8)
 
-            // volume (native MPVolumeView — actually controls device volume)
             HStack(spacing: 10) {
                 Image(systemName: Symbols.volumeLow)
                     .font(.system(size: 13))
@@ -704,8 +698,6 @@ private struct SystemVolumeSlider: UIViewRepresentable {
         v.setVolumeThumbImage(blank, for: .normal)
         v.setVolumeThumbImage(blank, for: .highlighted)
         context.coordinator.volumeView = v
-        // tap OR drag anywhere along the bar sets the volume — the bare MPVolumeView
-        // only responds to a thumb drag, so the rest of the track felt dead.
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handle(_:)))
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handle(_:)))
         v.addGestureRecognizer(pan)
@@ -726,7 +718,7 @@ private struct SystemVolumeSlider: UIViewRepresentable {
             let x = g.location(in: v).x
             let frac = Float(max(0, min(1, x / v.bounds.width)))
             slider.setValue(frac, animated: false)
-            slider.sendActions(for: .valueChanged)   // pushes through to system volume
+            slider.sendActions(for: .valueChanged)
         }
     }
 }

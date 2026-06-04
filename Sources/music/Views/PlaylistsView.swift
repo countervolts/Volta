@@ -21,6 +21,8 @@ struct PlaylistsView: View {
     @State private var maxYearText = ""
     @State private var minPlayText = ""
     @State private var maxPlayText = ""
+    @State private var showSmartArtistPicker = false
+    @State private var showSmartAlbumPicker = false
 
     private let columns = [GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
                            GridItem(.flexible(), spacing: Theme.Layout.gridSpacing)]
@@ -53,7 +55,7 @@ struct PlaylistsView: View {
             .accountToolbar()
             .navigationDestination(for: Playlist.self) { pl in
                 PlaylistDetailView(playlist: pl)
-                    .navigationTransition(.zoom(sourceID: pl.id, in: heroNamespace))
+                    .zoomNavigationTransition(sourceID: pl.id, in: heroNamespace)
             }
             .environment(\.heroNamespace, heroNamespace)
         }
@@ -99,11 +101,16 @@ struct PlaylistsView: View {
 
     private var filteredSmartPlaylists: [SmartPlaylist] {
         let list = smartStore.playlists
-        guard !vm.searchText.isEmpty else { return list }
-        return list.filter {
+        let filtered = vm.searchText.isEmpty ? list : list.filter {
             $0.name.localizedCaseInsensitiveContains(vm.searchText)
             || $0.ruleSummary.localizedCaseInsensitiveContains(vm.searchText)
         }
+        return filtered.enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.pinned != rhs.element.pinned { return lhs.element.pinned }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
 
     private var grid: some View {
@@ -134,6 +141,12 @@ struct PlaylistsView: View {
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
+                        Button {
+                            smartStore.togglePin(smart)
+                        } label: {
+                            Label(smart.pinned ? "Unpin" : "Pin to Top",
+                                  systemImage: smart.pinned ? "pin.slash" : "pin")
+                        }
                         Button(role: .destructive) {
                             pendingSmartDelete = smart
                         } label: {
@@ -183,6 +196,16 @@ struct PlaylistsView: View {
             SmartPlaylistCover(songs: songs)
                 .frame(maxWidth: .infinity)
                 .aspectRatio(1, contentMode: .fit)
+                .overlay(alignment: .topTrailing) {
+                    if smart.pinned {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(6)
+                            .background(.black.opacity(0.45), in: Circle())
+                            .padding(8)
+                    }
+                }
             Text(smart.name)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Theme.primaryText)
@@ -244,6 +267,12 @@ struct PlaylistsView: View {
         }
         .presentationDetents(createKind == .custom ? [.height(260)] : [.large])
         .onAppear { resetCreateDrafts() }
+        .sheet(isPresented: $showSmartArtistPicker) {
+            SmartMultiSelectSheet(title: "Artists", options: vm.smartArtists, selection: $smartDraft.selectedArtists)
+        }
+        .sheet(isPresented: $showSmartAlbumPicker) {
+            SmartMultiSelectSheet(title: "Albums", options: vm.smartAlbums, selection: $smartDraft.selectedAlbums)
+        }
     }
 
     private var createDisabled: Bool {
@@ -272,6 +301,12 @@ struct PlaylistsView: View {
                 TextField("Title, artist, album, genre contains", text: $smartDraft.searchText)
                 TextField("Artist contains", text: $smartDraft.artist)
                 TextField("Album contains", text: $smartDraft.album)
+                Button { showSmartArtistPicker = true } label: {
+                    smartSelectionRow("Artists", values: smartDraft.selectedArtists)
+                }
+                Button { showSmartAlbumPicker = true } label: {
+                    smartSelectionRow("Albums", values: smartDraft.selectedAlbums)
+                }
                 Picker("Genre", selection: $smartDraft.genre) {
                     Text("Any Genre").tag("")
                     ForEach(vm.smartGenres, id: \.self) { Text($0).tag($0) }
@@ -309,6 +344,18 @@ struct PlaylistsView: View {
 
     private var smartPreviewCount: Int {
         smartDraftWithNumbers().resolve(from: vm.smartSourceSongs).count
+    }
+
+    private func smartSelectionRow(_ title: String, values: [String]) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(values.isEmpty ? "Any" : "\(values.count) selected")
+                .foregroundStyle(.secondary)
+            Image(systemName: Symbols.chevron)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func smartDraftWithNumbers() -> SmartPlaylist {
@@ -387,6 +434,70 @@ private struct SmartPlaylistCover: View {
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
         .aspectRatio(1, contentMode: .fit)
+    }
+}
+
+private struct SmartMultiSelectSheet: View {
+    let title: String
+    let options: [String]
+    @Binding var selection: [String]
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    private var filteredOptions: [String] {
+        searchText.isEmpty ? options : options.filter { $0.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    private var selectedSet: Set<String> { Set(selection) }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if !selection.isEmpty {
+                    Section {
+                        Button(role: .destructive) {
+                            selection.removeAll()
+                        } label: {
+                            Label("Clear Selection", systemImage: "xmark.circle")
+                        }
+                    }
+                }
+
+                Section {
+                    ForEach(filteredOptions, id: \.self) { option in
+                        Button { toggle(option) } label: {
+                            HStack {
+                                Text(option)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if selectedSet.contains(option) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(Theme.accent)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Search \(title.lowercased())")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func toggle(_ option: String) {
+        if selection.contains(option) {
+            selection.removeAll { $0 == option }
+        } else {
+            selection.append(option)
+            selection.sort()
+        }
     }
 }
 
@@ -556,6 +667,7 @@ private struct SmartPlaylistDetailView: View {
             }
         }
         .padding(.horizontal, 20)
+        .simultaneousGesture(verticalPlaybackSwipe)
     }
 
     private var footer: some View {
@@ -590,5 +702,23 @@ private struct SmartPlaylistDetailView: View {
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             withAnimation { toastMessage = nil }
         }
+    }
+
+    private var verticalPlaybackSwipe: some Gesture {
+        DragGesture(minimumDistance: 80)
+            .onEnded { value in
+                guard abs(value.translation.height) > 180,
+                      abs(value.translation.width) < 55 else { return }
+                moveWithinSmartPlaylist(delta: value.translation.height < 0 ? 1 : -1)
+            }
+    }
+
+    private func moveWithinSmartPlaylist(delta: Int) {
+        let list = songs
+        guard let current = appState.audioPlayer.currentSong,
+              let currentIndex = list.firstIndex(where: { $0.id == current.id }) else { return }
+        let nextIndex = max(0, min(list.count - 1, currentIndex + delta))
+        guard nextIndex != currentIndex else { return }
+        appState.audioPlayer.playQueue(list, startIndex: nextIndex, source: playlist.name)
     }
 }

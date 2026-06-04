@@ -1,9 +1,6 @@
 import SwiftUI
 import PhotosUI
 
-// one enum drives every sheet on this screen. stacking several `.sheet`
-// modifiers on one view is unreliable (they swallow each other — that was the
-// "pencil does nothing" bug), so they're all funneled through `activeSheet`.
 enum PlaylistSheet: Identifiable {
     case addToPlaylist(Song)
     case album(Album)
@@ -55,8 +52,6 @@ struct PlaylistDetailView: View {
                 }
             }
             .scrollIndicators(.hidden)
-
-            // no back button — swipe from the left edge to go back (SwipeBackEnabler)
 
             if let msg = toastMessage {
                 VStack {
@@ -112,8 +107,6 @@ struct PlaylistDetailView: View {
         }
     }
 
-    // edit name + description + cover in one sheet. name/description go to the
-    // server; the cover is saved locally (Subsonic has no playlist-cover upload).
     private var editSheet: some View {
         NavigationStack {
             Form {
@@ -344,6 +337,7 @@ struct PlaylistDetailView: View {
             }
         }
         .padding(.horizontal, 20)
+        .simultaneousGesture(verticalPlaybackSwipe)
     }
 
     @ViewBuilder
@@ -394,5 +388,22 @@ struct PlaylistDetailView: View {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             withAnimation { toastMessage = nil }
         }
+    }
+
+    private var verticalPlaybackSwipe: some Gesture {
+        DragGesture(minimumDistance: 80)
+            .onEnded { value in
+                guard abs(value.translation.height) > 180,
+                      abs(value.translation.width) < 55 else { return }
+                moveWithinPlaylist(delta: value.translation.height < 0 ? 1 : -1)
+            }
+    }
+
+    private func moveWithinPlaylist(delta: Int) {
+        guard let current = appState.audioPlayer.currentSong,
+              let currentIndex = vm.songs.firstIndex(where: { $0.id == current.id }) else { return }
+        let nextIndex = max(0, min(vm.songs.count - 1, currentIndex + delta))
+        guard nextIndex != currentIndex else { return }
+        appState.audioPlayer.playQueue(vm.songs, startIndex: nextIndex, source: vm.playlist.name, playlist: vm.playlist)
     }
 }

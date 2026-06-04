@@ -18,6 +18,7 @@ enum LibrarySource: String, CaseIterable, Identifiable {
 
 enum LibrarySortOrder: String, CaseIterable, Identifiable {
     case name = "Name"
+    case album = "Album"
     case year = "Year"
     case mostPlayed = "Most Played"
     case recentlyAdded = "Recently Added"
@@ -39,28 +40,52 @@ final class LibraryViewModel {
 
     var searchText: String = ""
 
-    // folder browser: nil = all folders combined (getIndexes without a folder id)
     var selectedFolderID: String? = nil
     var rootFolderSource: FolderSource { .indexes(musicFolderID: selectedFolderID) }
 
-    // section filters / sort (applied to albums & songs)
     var sortOrder: LibrarySortOrder = .name
     var genreFilter: String? = nil
     var neverPlayedOnly = false
 
     var hasActiveFilters: Bool { genreFilter != nil || neverPlayedOnly || sortOrder != .name }
 
-    func setSort(_ o: LibrarySortOrder) { sortOrder = o }
+    init() {
+        sortOrder = Self.sortOrder(from: UserDefaults.standard.string(forKey: "albumSortOrder"))
+    }
+
+    static func sortOrder(from setting: String?) -> LibrarySortOrder {
+        switch setting {
+        case "newest": return .recentlyAdded
+        case "most_played": return .mostPlayed
+        case "year": return .year
+        default: return .name
+        }
+    }
+
+    private static func settingValue(for order: LibrarySortOrder) -> String? {
+        switch order {
+        case .name: return "alphabetical"
+        case .year: return "year"
+        case .mostPlayed: return "most_played"
+        case .recentlyAdded: return "newest"
+        case .album: return nil
+        }
+    }
+
+    func setSort(_ o: LibrarySortOrder) {
+        sortOrder = o
+        if let value = Self.settingValue(for: o) {
+            UserDefaults.standard.set(value, forKey: "albumSortOrder")
+        }
+    }
+
     func setGenreFilter(_ g: String?) { genreFilter = g }
     func clearFilters() { sortOrder = .name; genreFilter = nil; neverPlayedOnly = false }
 
-    // genres available to filter by in the current source
     var availableGenres: [String] { sourceGenres }
 
     // MARK: - Source-aware base sets
 
-    // downloaded songs come straight from the persisted manifest, so they're
-    // accurate offline and independent of whatever random sample loaded.
     private var sourceSongs: [Song] {
         source == .server ? songs : DownloadService.shared.downloadedSongs().sorted { $0.title < $1.title }
     }
@@ -68,7 +93,6 @@ final class LibraryViewModel {
     private var sourceAlbums: [Album] {
         guard source == .downloaded else { return albums }
         let ids = Set(sourceSongs.compactMap { $0.albumId })
-        // prefer rich server album objects; synthesize for anything missing.
         let known = albums.filter { ids.contains($0.id) }
         let knownIDs = Set(known.map { $0.id })
         let synthesized = synthesizedDownloadedAlbums(missing: ids.subtracting(knownIDs))
@@ -84,10 +108,7 @@ final class LibraryViewModel {
         return collapsingComboArtists((known + synthesized).sorted { $0.name < $1.name })
     }
 
-    // drops "A & B" / "A feat. B" combo entries when BOTH halves already exist as
-    // their own artists — server tags featured albums under a combined artist, which
-    // showed up alongside the individuals. kept if a half isn't a separate artist
-    // (so genuine names like "Simon & Garfunkel" survive).
+    // Hide combo artists when both named artists already exist separately.
     private func collapsingComboArtists(_ list: [Artist]) -> [Artist] {
         let names = Set(list.map { $0.name.lowercased().trimmingCharacters(in: .whitespaces) })
         return list.filter { artist in
@@ -147,6 +168,7 @@ final class LibraryViewModel {
     private func sortedAlbums(_ list: [Album]) -> [Album] {
         switch sortOrder {
         case .name:          return list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        case .album:         return list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         case .year:          return list.sorted { ($0.year ?? 0) > ($1.year ?? 0) }
         case .mostPlayed:    return list.sorted { ($0.playCount ?? 0) > ($1.playCount ?? 0) }
         case .recentlyAdded: return list.sorted { ($0.createdDate ?? .distantPast) > ($1.createdDate ?? .distantPast) }
@@ -156,6 +178,15 @@ final class LibraryViewModel {
     private func sortedSongs(_ list: [Song]) -> [Song] {
         switch sortOrder {
         case .name:                 return list.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .album:
+            return list.sorted {
+                let albumCompare = ($0.album ?? "").localizedCaseInsensitiveCompare($1.album ?? "")
+                if albumCompare != .orderedSame { return albumCompare == .orderedAscending }
+                let d0 = $0.discNumber ?? 1
+                let d1 = $1.discNumber ?? 1
+                if d0 != d1 { return d0 < d1 }
+                return ($0.track ?? 0) < ($1.track ?? 0)
+            }
         case .year:                 return list.sorted { ($0.year ?? 0) > ($1.year ?? 0) }
         case .mostPlayed:           return list.sorted { ($0.playCount ?? 0) > ($1.playCount ?? 0) }
         case .recentlyAdded:        return list   // songs carry no created date; keep source order
