@@ -15,6 +15,8 @@ struct MiniPlayerAccessory: View {
 
     private var audio: AudioPlayer { appState.audioPlayer }
 
+    @State private var dragX: CGFloat = 0
+
     private var compact: Bool {
         if case .inline = placement { return true }
         return false
@@ -49,8 +51,29 @@ struct MiniPlayerAccessory: View {
                 }
                 .padding(.horizontal, 12)
                 .frame(maxWidth: .infinity)
+                .offset(x: dragX)
+                .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragX)
             }
             .buttonStyle(.plain)
+            // swipe left → next, swipe right → previous, with a slide animation.
+            // highPriorityGesture (not simultaneous) so an actual swipe pre-empts
+            // the expand tap — otherwise a swipe both skipped AND opened the player,
+            // which then left the open/close state stuck.
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 24)
+                    .onChanged { v in
+                        guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                        dragX = v.translation.width / 2.2   // resistance
+                    }
+                    .onEnded { v in
+                        let w = v.translation.width
+                        if abs(w) > abs(v.translation.height) {
+                            if w < -48 { audio.skipNext() }
+                            else if w > 48 { audio.skipPrevious() }
+                        }
+                        dragX = 0
+                    }
+            )
         }
     }
 

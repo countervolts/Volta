@@ -1,39 +1,16 @@
-# Swift build artifacts
 .build/
 .swiftpm/
-
-# xtool build helper temp files + built .app bundle
 xtool/.xtool-tmp/
 xtool/*.app/
-
-# sourcekit-lsp local toolchain config (machine-specific)
 .sourcekit-lsp/
-
-# Xcode
 xcuserdata/
 *.xcuserstate
 DerivedData/
-
-# macOS
 .DS_Store
-.AppleDouble
-._*
-
-# Debug symbols
 *.dSYM/
 *.dSYM.zip
-
-# Provisioning / certs — never commit
 *.mobileprovision
 *.p12
 *.cer
-
-# Environment / secrets
-.env
-secrets.json
-
-# IDE
 .vscode/
-.idea/
-*.swp
-*~
+CLAUDE.md

@@ -21,13 +21,23 @@ struct SubsonicEnvelope: Decodable, Sendable {
         let artist: Artist?
         let artistInfo2: ArtistInfo?
         let topSongs: SongsContainer?
+        let songsByGenre: SongsContainer?
         let album: Album?
         let starred2: Starred2Container?
         let searchResult3: SearchResult3Container?
         let lyricsList: LyricsList?
         let lyrics: PlainLyricsPayload?
+        let shares: SharesContainer?
+        // folder/directory browsing
+        let musicFolders: MusicFoldersContainer?
+        let indexes: IndexesContainer?
+        let directory: DirectoryContainer?
 
         var isOK: Bool { status == "ok" }
+    }
+
+    struct SharesContainer: Decodable, Sendable {
+        let share: [Share]?
     }
 
     struct ErrorPayload: Decodable, Sendable {

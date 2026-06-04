@@ -1,3 +1,5 @@
 version: 1
 bundleID: com.ayo.music
-infoPlist: Info.plist
+# merge our extra Info.plist keys (background audio, ATS, display name).
+# NOTE: the key is `infoPath` (a path to a plist), not `infoPlist`.
+infoPath: Info.plist

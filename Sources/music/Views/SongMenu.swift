@@ -1,6 +1,11 @@
 import SwiftUI
 import UIKit
 
+enum SongMenuSheet: String, Identifiable {
+    case info, credits
+    var id: String { rawValue }
+}
+
 // Native SwiftUI Menu for song actions. The system renders it as a Liquid Glass
 // contextual menu (same look as the top-right account menu). The Download /
 // Favorite / Share row uses a ControlGroup so the system lays them out as the
@@ -22,10 +27,12 @@ struct SongMenu<Trigger: View>: View {
     @ViewBuilder var label: () -> Trigger
 
     @Environment(AppState.self) private var appState
-    @State private var showSongInfo = false
+    @State private var tasteStore = TasteStore.shared
+    @State private var sheet: SongMenuSheet? = nil
 
     private var audio: AudioPlayer { appState.audioPlayer }
     private var isStarred: Bool { audio.isStarred(song.id) }
+    private var taste: TasteState { tasteStore.state(for: song.id) }
     private var dlState: DownloadState { DownloadService.shared.state(for: song) }
 
     var body: some View {
@@ -39,6 +46,18 @@ struct SongMenu<Trigger: View>: View {
                 } label: {
                     Label(isStarred ? "Unfavorite" : "Favorite",
                           systemImage: isStarred ? Symbols.star : Symbols.starEmpty)
+                }
+                Button {
+                    tasteStore.toggleLove(song.id)
+                } label: {
+                    Label(taste == .loved ? "Unlove" : "Love",
+                          systemImage: taste == .loved ? "heart.fill" : "heart")
+                }
+                Button {
+                    tasteStore.toggleDislike(song.id)
+                } label: {
+                    Label(taste == .disliked ? "Remove Dislike" : "Dislike",
+                          systemImage: taste == .disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                 }
             }
 
@@ -62,7 +81,7 @@ struct SongMenu<Trigger: View>: View {
 
             Section {
                 Button {
-                    showSongInfo = true
+                    sheet = .info
                 } label: {
                     Label("Info", systemImage: Symbols.info)
                 }
@@ -77,9 +96,14 @@ struct SongMenu<Trigger: View>: View {
                     }
                 }
                 Button {
-                    showSongInfo = true
+                    sheet = .credits
                 } label: {
                     Label("View Credits", systemImage: "list.star")
+                }
+                if appState.sharingAvailable {
+                    Button(action: shareSong) {
+                        Label("Share", systemImage: Symbols.share)
+                    }
                 }
             }
 
@@ -93,10 +117,23 @@ struct SongMenu<Trigger: View>: View {
         } label: {
             label()
         }
-        .sheet(isPresented: $showSongInfo) { SongInfoSheet(song: song) }
+        .sheet(item: $sheet) { which in
+            switch which {
+            case .info:    SongInfoSheet(song: song)
+            case .credits: SongCreditsSheet(song: song)
+            }
+        }
     }
 
     // MARK: - Actions
+
+    private func shareSong() {
+        Task {
+            if let url = try? await appState.client?.createShare(id: song.id) {
+                ShareSheet.present([url])
+            }
+        }
+    }
 
     private func toggleDownload() {
         switch dlState {

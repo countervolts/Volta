@@ -42,6 +42,14 @@ struct LyricsViewWithState: View {
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.bottom, isActive ? 28 : 20)
+                            .contentShape(Rectangle())
+                            // tap a synced line to seek playback to that timestamp
+                            .onTapGesture {
+                                let t = lines[idx].time
+                                guard t >= 0 else { return }
+                                audio.seek(to: t)
+                                activeLine = lines[idx].id
+                            }
                             .id(idx)
                     }
                     Color.clear.frame(height: 80)

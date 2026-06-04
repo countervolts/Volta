@@ -54,6 +54,49 @@ struct Song: Codable, Identifiable, Hashable, Sendable {
     let playCount: Int?
     let starred: String?
     let contributes: String?
+    let replayGain: ReplayGain?
+    // OpenSubsonic audio detail fields
+    let samplingRate: Int?
+    let bitDepth: Int?
+    let channelCount: Int?
+    // OpenSubsonic creation credits
+    let displayComposer: String?
+    let contributors: [Contributor]?
+}
+
+// one OpenSubsonic credit: a role (composer / producer / engineer …) + the
+// artist who filled it.
+struct Contributor: Codable, Hashable, Sendable {
+    let role: String?
+    let subRole: String?
+    let artist: ArtistRef?
+}
+
+struct ArtistRef: Codable, Hashable, Sendable {
+    let id: String?
+    let name: String?
+}
+
+extension Song {
+    // lossless if the file format is one of the known lossless container/codecs
+    var isLossless: Bool {
+        guard let s = suffix?.lowercased() else { return false }
+        return ["flac", "wav", "aiff", "aif", "alac", "ape", "wv", "tta"].contains(s)
+    }
+}
+
+// OpenSubsonic replayGain object on a song (values in dB / linear peak)
+struct ReplayGain: Codable, Hashable, Sendable {
+    let trackGain: Double?
+    let albumGain: Double?
+    let trackPeak: Double?
+    let albumPeak: Double?
+}
+
+// a public share returned by createShare
+struct Share: Decodable, Identifiable, Sendable {
+    let id: String
+    let url: String?
 }
 
 struct Playlist: Codable, Identifiable, Hashable, Sendable {

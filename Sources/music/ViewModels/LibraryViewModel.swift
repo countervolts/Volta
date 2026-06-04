@@ -6,12 +6,21 @@ enum LibraryFilter: String, CaseIterable, Identifiable {
     case albums = "Albums"
     case songs = "Songs"
     case genres = "Genres"
+    case folders = "Folders"
     var id: String { rawValue }
 }
 
 enum LibrarySource: String, CaseIterable, Identifiable {
     case server = "Server"
     case downloaded = "Downloaded"
+    var id: String { rawValue }
+}
+
+enum LibrarySortOrder: String, CaseIterable, Identifiable {
+    case name = "Name"
+    case year = "Year"
+    case mostPlayed = "Most Played"
+    case recentlyAdded = "Recently Added"
     var id: String { rawValue }
 }
 
@@ -24,10 +33,29 @@ final class LibraryViewModel {
     private(set) var albums: [Album] = []
     private(set) var songs: [Song] = []
     private(set) var genres: [String] = []
+    private(set) var musicFolders: [MusicFolder] = []
     private(set) var isLoading = false
     private(set) var hasLoaded = false
 
     var searchText: String = ""
+
+    // folder browser: nil = all folders combined (getIndexes without a folder id)
+    var selectedFolderID: String? = nil
+    var rootFolderSource: FolderSource { .indexes(musicFolderID: selectedFolderID) }
+
+    // section filters / sort (applied to albums & songs)
+    var sortOrder: LibrarySortOrder = .name
+    var genreFilter: String? = nil
+    var neverPlayedOnly = false
+
+    var hasActiveFilters: Bool { genreFilter != nil || neverPlayedOnly || sortOrder != .name }
+
+    func setSort(_ o: LibrarySortOrder) { sortOrder = o }
+    func setGenreFilter(_ g: String?) { genreFilter = g }
+    func clearFilters() { sortOrder = .name; genreFilter = nil; neverPlayedOnly = false }
+
+    // genres available to filter by in the current source
+    var availableGenres: [String] { sourceGenres }
 
     // MARK: - Source-aware base sets
 
@@ -48,12 +76,36 @@ final class LibraryViewModel {
     }
 
     private var sourceArtists: [Artist] {
-        guard source == .downloaded else { return artists }
+        guard source == .downloaded else { return collapsingComboArtists(artists) }
         let ids = Set(sourceSongs.compactMap { $0.artistId })
         let known = artists.filter { ids.contains($0.id) }
         let knownIDs = Set(known.map { $0.id })
         let synthesized = synthesizedDownloadedArtists(missing: ids.subtracting(knownIDs))
-        return (known + synthesized).sorted { $0.name < $1.name }
+        return collapsingComboArtists((known + synthesized).sorted { $0.name < $1.name })
+    }
+
+    // drops "A & B" / "A feat. B" combo entries when BOTH halves already exist as
+    // their own artists — server tags featured albums under a combined artist, which
+    // showed up alongside the individuals. kept if a half isn't a separate artist
+    // (so genuine names like "Simon & Garfunkel" survive).
+    private func collapsingComboArtists(_ list: [Artist]) -> [Artist] {
+        let names = Set(list.map { $0.name.lowercased().trimmingCharacters(in: .whitespaces) })
+        return list.filter { artist in
+            let parts = Self.splitArtistName(artist.name)
+            guard parts.count >= 2 else { return true }
+            return !parts.allSatisfy { names.contains($0) }
+        }
+    }
+
+    private static func splitArtistName(_ name: String) -> [String] {
+        var s = name
+        for token in [" featuring ", " feat. ", " feat ", " ft. ", " ft ",
+                      " & ", " x ", " and ", ",", ";", " / ", "/"] {
+            s = s.replacingOccurrences(of: token, with: "|", options: .caseInsensitive)
+        }
+        return s.components(separatedBy: "|")
+            .map { $0.lowercased().trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
 
     private var sourceGenres: [String] {
@@ -66,10 +118,48 @@ final class LibraryViewModel {
         searchText.isEmpty ? sourceArtists : sourceArtists.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
     var filteredAlbums: [Album] {
-        searchText.isEmpty ? sourceAlbums : sourceAlbums.filter { $0.name.localizedCaseInsensitiveContains(searchText) || ($0.artist ?? "").localizedCaseInsensitiveContains(searchText) }
+        var list = sourceAlbums
+        if !searchText.isEmpty {
+            list = list.filter { $0.name.localizedCaseInsensitiveContains(searchText) || ($0.artist ?? "").localizedCaseInsensitiveContains(searchText) }
+        }
+        if let g = genreFilter {
+            list = list.filter { $0.genre?.localizedCaseInsensitiveContains(g) == true }
+        }
+        if neverPlayedOnly {
+            list = list.filter { ($0.playCount ?? 0) == 0 }
+        }
+        return sortedAlbums(list)
     }
     var filteredSongs: [Song] {
-        searchText.isEmpty ? sourceSongs : sourceSongs.filter { $0.title.localizedCaseInsensitiveContains(searchText) || ($0.artist ?? "").localizedCaseInsensitiveContains(searchText) }
+        var list = sourceSongs
+        if !searchText.isEmpty {
+            list = list.filter { $0.title.localizedCaseInsensitiveContains(searchText) || ($0.artist ?? "").localizedCaseInsensitiveContains(searchText) }
+        }
+        if let g = genreFilter {
+            list = list.filter { $0.genre?.localizedCaseInsensitiveContains(g) == true }
+        }
+        if neverPlayedOnly {
+            list = list.filter { ($0.playCount ?? 0) == 0 }
+        }
+        return sortedSongs(list)
+    }
+
+    private func sortedAlbums(_ list: [Album]) -> [Album] {
+        switch sortOrder {
+        case .name:          return list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        case .year:          return list.sorted { ($0.year ?? 0) > ($1.year ?? 0) }
+        case .mostPlayed:    return list.sorted { ($0.playCount ?? 0) > ($1.playCount ?? 0) }
+        case .recentlyAdded: return list.sorted { ($0.createdDate ?? .distantPast) > ($1.createdDate ?? .distantPast) }
+        }
+    }
+
+    private func sortedSongs(_ list: [Song]) -> [Song] {
+        switch sortOrder {
+        case .name:                 return list.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .year:                 return list.sorted { ($0.year ?? 0) > ($1.year ?? 0) }
+        case .mostPlayed:           return list.sorted { ($0.playCount ?? 0) > ($1.playCount ?? 0) }
+        case .recentlyAdded:        return list   // songs carry no created date; keep source order
+        }
     }
     var filteredGenres: [String] {
         searchText.isEmpty ? sourceGenres : sourceGenres.filter { $0.localizedCaseInsensitiveContains(searchText) }
@@ -124,6 +214,23 @@ final class LibraryViewModel {
         let genreSet = Set(al.compactMap { $0.genre })
         genres = genreSet.sorted()
         hasLoaded = true
+
+        // music folders power the optional folder picker (cheap, single request)
+        if musicFolders.isEmpty {
+            musicFolders = (try? await client.musicFolders()) ?? []
+        }
+
+        // optionally warm artist profile photos so opening a profile is instant
+        if UserDefaults.standard.bool(forKey: "prefetchArtistImages") {
+            let toWarm = artists
+            Task.detached(priority: .utility) {
+                for artist in toWarm {
+                    guard let s = artist.artistImageUrl, !s.isEmpty, !s.hasSuffix("/"),
+                          let url = URL(string: s) else { continue }
+                    _ = await ArtworkLoader.shared.image(for: url)
+                }
+            }
+        }
     }
 
     private func loadArtists(client: SubsonicClient) async -> [Artist] {

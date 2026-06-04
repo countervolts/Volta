@@ -6,6 +6,35 @@ extension SubsonicClient {
         _ = try await request("ping")
     }
 
+    // MARK: - Folder / directory browsing
+
+    func musicFolders() async throws -> [MusicFolder] {
+        let body = try await request("getMusicFolders")
+        return body.musicFolders?.musicFolder ?? []
+    }
+
+    // top-level directories within a music folder (nil = all folders combined),
+    // plus any loose songs sitting at the root.
+    func indexes(musicFolderId: String?) async throws -> [BrowseEntry] {
+        var query: [URLQueryItem] = []
+        if let musicFolderId, !musicFolderId.isEmpty {
+            query.append(URLQueryItem(name: "musicFolderId", value: musicFolderId))
+        }
+        let body = try await request("getIndexes", query: query)
+        let dirs  = (body.indexes?.index ?? []).flatMap { $0.artist ?? [] }.map { $0.asBrowseEntry }
+        let songs = (body.indexes?.child ?? []).map { $0.asBrowseEntry }
+        return dirs + songs
+    }
+
+    // contents of one directory: sub-directories first, then songs.
+    func musicDirectory(id: String) async throws -> [BrowseEntry] {
+        let body = try await request("getMusicDirectory", query: [URLQueryItem(name: "id", value: id)])
+        let children = body.directory?.child ?? []
+        let dirs  = children.filter { $0.isDir }.map { $0.asBrowseEntry }
+        let songs = children.filter { !$0.isDir }.map { $0.asBrowseEntry }
+        return dirs + songs
+    }
+
     private func albumList(type: String, size: Int, offset: Int = 0) async throws -> [Album] {
         let body = try await request("getAlbumList2", query: [
             URLQueryItem(name: "type", value: type),
@@ -120,6 +149,15 @@ extension SubsonicClient {
         return body.randomSongs?.song ?? []
     }
 
+    func songsByGenre(_ genre: String, count: Int = 50, offset: Int = 0) async throws -> [Song] {
+        let body = try await request("getSongsByGenre", query: [
+            URLQueryItem(name: "genre", value: genre),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "offset", value: String(offset)),
+        ])
+        return body.songsByGenre?.song ?? []
+    }
+
     func deletePlaylist(id: String) async throws {
         _ = try await request("deletePlaylist", query: [URLQueryItem(name: "id", value: id)])
     }
@@ -135,6 +173,13 @@ extension SubsonicClient {
         _ = try await request("updatePlaylist", query: [
             URLQueryItem(name: "playlistId", value: playlistID),
             URLQueryItem(name: "name", value: name),
+        ])
+    }
+
+    func updatePlaylistComment(playlistID: String, comment: String) async throws {
+        _ = try await request("updatePlaylist", query: [
+            URLQueryItem(name: "playlistId", value: playlistID),
+            URLQueryItem(name: "comment", value: comment),
         ])
     }
 
@@ -163,6 +208,22 @@ extension SubsonicClient {
     func lyricsBySongId(id: String) async throws -> LyricsList? {
         let body = try await request("getLyricsBySongId", query: [URLQueryItem(name: "id", value: id)])
         return body.lyricsList
+    }
+
+    // whether the server has sharing enabled (getShares succeeds). Used to decide
+    // if the Share action should be offered at all.
+    func sharingAvailable() async -> Bool {
+        do { _ = try await request("getShares"); return true }
+        catch { return false }
+    }
+
+    // create a public share link for a song/album/playlist; returns the URL if the
+    // server has sharing enabled, otherwise nil.
+    func createShare(id: String) async throws -> URL? {
+        let body = try await request("createShare", query: [URLQueryItem(name: "id", value: id)])
+        guard let urlString = body.shares?.share?.first?.url,
+              let url = URL(string: urlString) else { return nil }
+        return url
     }
 
     // legacy plain lyrics

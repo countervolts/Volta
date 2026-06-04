@@ -205,10 +205,12 @@ final class StatsViewModel {
         var dur: [String: Int] = [:]
         var meta: [String: (String, String?)] = [:]
         for e in events {
-            let key = e.artist
+            // group by the primary artist so "Artist1, Artist2" features count toward
+            // the lead artist instead of becoming their own bogus artist entry
+            let key = Self.primaryArtist(e.artist)
             plays[key, default: 0] += 1
             dur[key, default: 0] += e.duration
-            if meta[key] == nil { meta[key] = (e.artist, e.coverArt) }
+            if meta[key] == nil { meta[key] = (key, e.coverArt) }
         }
         return plays.sorted { $0.value > $1.value }
             .prefix(limit)
@@ -216,6 +218,19 @@ final class StatsViewModel {
                 guard let m = meta[k] else { return nil }
                 return TopEntry(id: k, title: m.0, subtitle: "", coverArt: m.1, plays: v, totalDuration: dur[k] ?? 0)
             }
+    }
+
+    // the lead artist from a combined credit like "A, B" / "A feat. B" / "A & B"
+    static func primaryArtist(_ s: String) -> String {
+        var name = s
+        let separators = [",", " feat.", " feat ", " ft.", " ft ", " featuring ", " & ", " x ", ";", " with "]
+        for sep in separators {
+            if let r = name.range(of: sep, options: [.caseInsensitive]) {
+                name = String(name[..<r.lowerBound])
+            }
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? s : trimmed
     }
 
     private func topEntriesAlbum(events: [PlayEvent], limit: Int = 15) -> [TopEntry] {

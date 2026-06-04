@@ -17,13 +17,17 @@ enum Theme {
         UserDefaults.standard.string(forKey: "accentColorName") ?? "purple"
     }
 
-    static let accentNames = ["purple", "blue", "pink", "orange", "green"]
+    static let accentNames = ["purple", "blue", "indigo", "teal", "green", "yellow", "orange", "red", "pink"]
 
     static func accentColor(named name: String) -> Color {
         switch name {
         case "blue":   return Color(red: 0.20, green: 0.52, blue: 0.96)
+        case "indigo": return Color(red: 0.35, green: 0.34, blue: 0.84)
+        case "teal":   return Color(red: 0.18, green: 0.68, blue: 0.71)
         case "pink":   return Color(red: 0.96, green: 0.28, blue: 0.62)
         case "orange": return Color(red: 0.98, green: 0.55, blue: 0.20)
+        case "yellow": return Color(red: 0.98, green: 0.78, blue: 0.18)
+        case "red":    return Color(red: 0.94, green: 0.27, blue: 0.27)
         case "green":  return Color(red: 0.20, green: 0.78, blue: 0.45)
         default:       return Color(red: 0.55, green: 0.36, blue: 0.96) // purple
         }

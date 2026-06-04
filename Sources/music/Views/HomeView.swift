@@ -4,6 +4,7 @@ enum HomeRoute: Hashable {
     case album(Album)
     case playlist(Playlist)
     case artist(Artist)
+    case mix(MusicMix)
     case recentlyPlayedAll
     case newReleasesAll
 }
@@ -62,6 +63,8 @@ struct HomeView: View {
                 .navigationTransition(.zoom(sourceID: pl.id, in: heroNamespace))
         case .artist(let artist):
             ArtistDetailView(artist: artist)
+        case .mix(let mix):
+            MixDetailView(mix: mix)
         case .recentlyPlayedAll:
             FullMediaGrid(title: "Recently Played", items: vm.recentlyPlayed) { item in
                 navigate(to: item)
@@ -98,11 +101,11 @@ struct HomeView: View {
                 .padding(.horizontal, pad)
                 .padding(.top, 4)
 
-            if !vm.picks.isEmpty {
+            if !vm.picksFeed.isEmpty {
                 section(title: "Picks for You") {
-                    HorizontalPickRow(albums: vm.picks) { album in
-                        path.append(.album(album))
-                    }
+                    HorizontalPickRow(items: vm.picksFeed,
+                        onSelectAlbum: { path.append(.album($0)) },
+                        onSelectMix: { path.append(.mix($0)) })
                 }
             }
 

@@ -24,7 +24,7 @@ struct QueueView: View {
                        label: audio.repeatMode == .one ? "Repeat 1" : "Repeat",
                        active: audio.repeatMode != .off) { audio.cycleRepeat() }
             autoplayButton
-            modeButton(icon: "arrow.left.arrow.right", label: "Crossfade", active: audio.isCrossfade) { audio.toggleCrossfade() }
+            transitionButton
         }
     }
 
@@ -36,6 +36,14 @@ struct QueueView: View {
         }
         let active = audio.autoplayMode != .off
         return modeButton(icon: icon, label: label, active: active) { audio.cycleAutoplay() }
+    }
+
+    private var transitionButton: some View {
+        modeButton(
+            icon: audio.transitionMode.icon,
+            label: audio.transitionMode.label,
+            active: audio.transitionMode != .off
+        ) { audio.cycleTransitionMode() }
     }
 
     private func modeButton(icon: String, label: String, active: Bool, action: @escaping () -> Void) -> some View {

@@ -109,7 +109,24 @@ struct SubsonicClient: Sendable {
 
     func streamURL(id: String) -> URL? {
         var query = [URLQueryItem(name: "id", value: id)]
-        let bitrate = UserDefaults.standard.integer(forKey: "streamingBitrate")
+        // on cellular use the cellular quality when one is set (>0); otherwise the
+        // Wi-Fi quality. NetworkMonitor mirrors the current type into UserDefaults.
+        let onCellular = UserDefaults.standard.bool(forKey: "networkIsCellular")
+        let cellBitrate = UserDefaults.standard.integer(forKey: "streamingBitrateCell")
+        let wifiBitrate = UserDefaults.standard.integer(forKey: "streamingBitrate")
+        let bitrate = (onCellular && cellBitrate > 0) ? cellBitrate : wifiBitrate
+        if bitrate > 0 {
+            query.append(URLQueryItem(name: "maxBitRate", value: String(bitrate)))
+        }
+        return makeURL(endpoint: "stream", query: query)
+    }
+
+    // URL used for downloads — honours the download bitrate setting, not the
+    // streaming one. When original (0) no transcoding is requested, so the
+    // downloaded size matches the song's reported size and progress is accurate.
+    func downloadURL(id: String) -> URL? {
+        var query = [URLQueryItem(name: "id", value: id)]
+        let bitrate = UserDefaults.standard.integer(forKey: "downloadBitrate")
         if bitrate > 0 {
             query.append(URLQueryItem(name: "maxBitRate", value: String(bitrate)))
         }
