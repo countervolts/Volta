@@ -35,7 +35,14 @@ final class AppLogger: @unchecked Sendable {
     func log(_ message: String, category: LogCategory = .other, level: LogEntry.Level = .info) {
         let verbose = UserDefaults.standard.object(forKey: "developerLogging") as? Bool ?? true
         guard verbose || level != .info else { return }
+        append(message, category: category, level: level)
+    }
 
+    func logAlways(_ message: String, category: LogCategory = .other, level: LogEntry.Level = .info) {
+        append(message, category: category, level: level)
+    }
+
+    private func append(_ message: String, category: LogCategory, level: LogEntry.Level) {
         let entry = LogEntry(timestamp: .now, category: category, level: level, message: message)
         lock.withLock {
             entries.append(entry)

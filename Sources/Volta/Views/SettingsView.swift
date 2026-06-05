@@ -40,6 +40,7 @@ struct SettingsView: View {
     @AppStorage("showLosslessBadge")   private var showLosslessBadge   = true
     @AppStorage("dynamicBackground")   private var dynamicBackground   = true
     @AppStorage("showTrackArtwork")    private var showTrackArtwork    = true
+    @AppStorage("forceLiquidGlassUI")  private var forceLiquidGlassUI  = false
     @AppStorage("accentColorName")     private var accentColorName     = "purple"
     @AppStorage("customAccentRed")      private var customAccentRed     = 0.55
     @AppStorage("customAccentGreen")    private var customAccentGreen   = 0.36
@@ -544,8 +545,8 @@ struct SettingsView: View {
     @ViewBuilder
     private var appearanceSection: some View {
         let s = "Appearance"
-        if sectionVisible(s, [["show lossless badge", "lossless", "badge"], ["live artwork", "animated artwork", "live", "gif", "motion"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["accent color", "accent", "color", "colour", "theme"]]) {
-            Section(s) {
+        if sectionVisible(s, [["show lossless badge", "lossless", "badge"], ["live artwork", "animated artwork", "live", "gif", "motion"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["force liquid glass", "liquid glass", "glass", "restart", "fallback"], ["accent color", "accent", "color", "colour", "theme"]]) {
+            Section {
                 if rowVisible(s, ["show lossless badge", "lossless", "badge"]) {
                     Toggle(isOn: $showLosslessBadge) {
                         Label("Show Lossless Badge", systemImage: "waveform.badge.plus")
@@ -570,6 +571,13 @@ struct SettingsView: View {
                 if rowVisible(s, ["dynamic player background", "dynamic", "background"]) {
                     Toggle(isOn: $dynamicBackground) {
                         Label("Dynamic Player Background", systemImage: "paintpalette")
+                    }
+                    .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["force liquid glass", "liquid glass", "glass", "restart", "fallback"]) {
+                    Toggle(isOn: $forceLiquidGlassUI) {
+                        Label("Force Liquid Glass", systemImage: "sparkles")
                     }
                     .tint(Theme.accent)
                 }
@@ -615,6 +623,10 @@ struct SettingsView: View {
                         )
                     }
                 }
+            } header: {
+                Text(s)
+            } footer: {
+                Text("Force Liquid Glass is read when the app launches. Restart the app after changing it. Unsupported iOS versions still use the fallback UI.")
             }
             .listRowBackground(Theme.secondaryBackground)
         }
@@ -800,12 +812,19 @@ struct SettingsView: View {
     @ViewBuilder
     private var developerSection: some View {
         let s = "Developer"
-        if sectionVisible(s, [["verbose logging", "logging", "export all logs", "clear all logs", "force refresh home", "logged play events", "queue length", "developer"]]) {
+        if sectionVisible(s, [["verbose logging", "logging"], ["log device specs", "device", "specs", "ios", "liquid glass", "diagnostics"], ["export all logs"], ["clear all logs"], ["force refresh home"], ["logged play events"], ["queue length"], ["developer"]]) {
         Section {
             Toggle(isOn: $developerLogging) {
                 Label("Verbose Logging", systemImage: "terminal")
             }
             .tint(Theme.accent)
+
+            Button {
+                AppDiagnostics.logLaunch(context: "manual")
+            } label: {
+                Label("Log Device Specs", systemImage: "iphone")
+            }
+            .foregroundStyle(Theme.primaryText)
 
             Button {
                 exportLogs()

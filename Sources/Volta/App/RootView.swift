@@ -6,6 +6,7 @@ struct RootView: View {
     @AppStorage("customAccentRed") private var customAccentRed = 0.55
     @AppStorage("customAccentGreen") private var customAccentGreen = 0.36
     @AppStorage("customAccentBlue") private var customAccentBlue = 0.96
+    @State private var didLogDiagnostics = false
 
     private var accentRefreshKey: String {
         "\(accentColorName)-\(customAccentRed)-\(customAccentGreen)-\(customAccentBlue)"
@@ -32,6 +33,10 @@ struct RootView: View {
         .animation(.spring(response: 0.55, dampingFraction: 0.9), value: appState.phase)
         .animation(.easeInOut(duration: 0.2), value: accentRefreshKey)
         .task {
+            if !didLogDiagnostics {
+                didLogDiagnostics = true
+                AppDiagnostics.logLaunch()
+            }
             appState.restoreSession()
         }
     }

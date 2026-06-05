@@ -37,6 +37,8 @@ struct HorizontalPickRow: View {
     let items: [PickFeedItem]
     var onSelectAlbum: (Album) -> Void = { _ in }
     var onSelectMix: (MusicMix) -> Void = { _ in }
+    var onSaveMix: (MusicMix) -> Void = { _ in }
+    var isSavingMix: (MusicMix) -> Bool = { _ in false }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -50,6 +52,15 @@ struct HorizontalPickRow: View {
                         case .mix(let mix):
                             PickMixCard(mix: mix)
                                 .onTapGesture { onSelectMix(mix) }
+                                .contextMenu {
+                                    Button {
+                                        onSaveMix(mix)
+                                    } label: {
+                                        Label(isSavingMix(mix) ? "Saving..." : "Save as Playlist",
+                                              systemImage: Symbols.addToPlaylist)
+                                    }
+                                    .disabled(isSavingMix(mix))
+                                }
                         }
                     }
                     .containerRelativeFrame(

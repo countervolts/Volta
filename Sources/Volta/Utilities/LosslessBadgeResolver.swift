@@ -24,15 +24,36 @@ enum LosslessBadgeResolver {
         let hasBlockedRoute = outputs.contains { isLossyOrSystemRoute($0.portType) }
         let sampleRateMatches = song.samplingRate.map { abs($0 - outputRate) <= 1 } ?? false
         let hasFileDepth = song.bitDepth != nil
+        let isHiRes = isHiResLossless(song)
 
         let isTrue = routeCanBeBitPerfect && !hasBlockedRoute && sampleRateMatches && hasFileDepth
         if isTrue {
+            if isHiRes {
+                return LosslessBadgeStatus(
+                    title: "True Hi-Res Lossless",
+                    systemImage: "checkmark.seal",
+                    status: "True Hi-Res Lossless",
+                    output: output,
+                    reason: "Output route reports matching sample rate for hi-res lossless file."
+                )
+            }
+
             return LosslessBadgeStatus(
                 title: "True Lossless",
                 systemImage: "checkmark.seal",
                 status: "True Lossless",
                 output: output,
                 reason: "Output route reports matching sample rate for lossless file."
+            )
+        }
+
+        if isHiRes {
+            return LosslessBadgeStatus(
+                title: "Hi-Res Lossless",
+                systemImage: "waveform",
+                status: "Hi-Res Lossless File",
+                output: output,
+                reason: fallbackReason(song: song, outputRate: outputRate, outputs: outputs)
             )
         }
 
@@ -43,6 +64,15 @@ enum LosslessBadgeResolver {
             output: output,
             reason: fallbackReason(song: song, outputRate: outputRate, outputs: outputs)
         )
+    }
+
+    private static func isHiResLossless(_ song: Song) -> Bool {
+        guard song.isLossless,
+              let bitDepth = song.bitDepth,
+              let samplingRate = song.samplingRate else {
+            return false
+        }
+        return bitDepth >= 24 && samplingRate > 48_000 && samplingRate <= 192_000
     }
 
     private static func isBitPerfectCapableRoute(_ port: AVAudioSession.Port) -> Bool {

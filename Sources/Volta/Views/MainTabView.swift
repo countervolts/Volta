@@ -32,19 +32,44 @@ struct MainTabView: View {
         .animation(.spring(response: 0.42, dampingFraction: 0.85), value: showNowPlaying)
         .animation(.easeInOut(duration: 0.2), value: accentRefreshKey)
         .preferredColorScheme(.dark)
+        .onAppear {
+            AppDiagnostics.logMainTabDecision()
+        }
     }
 
     @ViewBuilder
     private var tabContent: some View {
-        if #available(iOS 26.1, *) {
+        if #available(iOS 26.0, *) {
             modernTabs
         } else {
             legacyTabs
         }
     }
 
-    @available(iOS 26.1, *)
+    @available(iOS 26.0, *)
+    @ViewBuilder
     private var modernTabs: some View {
+        if #available(iOS 26.1, *) {
+            modernTabView
+                .tabViewBottomAccessory(isEnabled: audio.currentSong != nil) {
+                    modernMiniPlayerAccessory
+                }
+        } else {
+            modernTabView
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    legacyMiniPlayer
+                }
+        }
+    }
+
+    private var modernMiniPlayerAccessory: some View {
+        MiniPlayerAccessory(onExpand: { showNowPlaying = true })
+            .padding(.horizontal, 12)
+            .padding(.bottom, 2)
+    }
+
+    @available(iOS 26.0, *)
+    private var modernTabView: some View {
         TabView(selection: $selectedTab) {
             Tab("Home", systemImage: Symbols.home, value: 0) {
                 HomeView(path: $homePath)
@@ -63,46 +88,55 @@ struct MainTabView: View {
             }
         }
         .tabBarMinimizeBehavior(audio.currentSong != nil ? .onScrollDown : .automatic)
-        .tabViewBottomAccessory(isEnabled: audio.currentSong != nil) {
-            MiniPlayerAccessory(onExpand: { showNowPlaying = true })
-        }
         .tint(Theme.accent)
     }
 
     private var legacyTabs: some View {
         TabView(selection: $selectedTab) {
-            HomeView(path: $homePath)
+            legacyTabPage {
+                HomeView(path: $homePath)
+            }
                 .tabItem { Label("Home", systemImage: Symbols.home) }
                 .tag(0)
 
-            LibraryView(path: $libraryPath)
+            legacyTabPage {
+                LibraryView(path: $libraryPath)
+            }
                 .tabItem { Label("Library", systemImage: Symbols.library) }
                 .tag(1)
 
-            PlaylistsView(path: $playlistsPath)
+            legacyTabPage {
+                PlaylistsView(path: $playlistsPath)
+            }
                 .tabItem { Label("Playlists", systemImage: Symbols.playlists) }
                 .tag(2)
 
-            StatsView()
+            legacyTabPage {
+                StatsView()
+            }
                 .tabItem { Label("Stats", systemImage: Symbols.stats) }
                 .tag(3)
 
-            SearchView(path: $searchPath)
+            legacyTabPage {
+                SearchView(path: $searchPath)
+            }
                 .tabItem { Label("Search", systemImage: Symbols.search) }
                 .tag(4)
         }
-        .safeAreaInset(edge: .bottom) {
-            legacyMiniPlayer
-        }
         .tint(Theme.accent)
+    }
+
+    private func legacyTabPage<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                legacyMiniPlayer
+            }
     }
 
     @ViewBuilder
     private var legacyMiniPlayer: some View {
         if audio.currentSong != nil {
             MiniPlayerAccessory(onExpand: { showNowPlaying = true })
-                .padding(.vertical, 8)
-                .glassCard(cornerRadius: 18)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 4)
         }

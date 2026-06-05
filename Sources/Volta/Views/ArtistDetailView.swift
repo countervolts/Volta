@@ -293,33 +293,42 @@ struct ArtistDetailView: View {
 
     private func compactTopSongRow(song: Song, index: Int) -> some View {
         HStack(spacing: 10) {
-            Text("\(index)")
-                .font(.system(size: 12, weight: .regular).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.4))
-                .frame(width: 16, alignment: .center)
+            Button {
+                appState.audioPlayer.play(song: song)
+            } label: {
+                HStack(spacing: 10) {
+                    Text("\(index)")
+                        .font(.system(size: 12, weight: .regular).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.4))
+                        .frame(width: 16, alignment: .center)
 
-            ArtworkView(coverArtID: song.coverArt, size: 80, cornerRadius: 4)
-                .frame(width: 34, height: 34)
+                    ArtworkView(coverArtID: song.coverArt, size: 80, cornerRadius: 4)
+                        .frame(width: 34, height: 34)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(song.title)
-                    .font(.subheadline)
-                    .foregroundStyle(appState.audioPlayer.currentSong?.id == song.id ? Theme.accent : .white)
-                    .lineLimit(1)
-                if let album = song.album {
-                    Text(album)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.45))
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(song.title)
+                            .font(.subheadline)
+                            .foregroundStyle(appState.audioPlayer.currentSong?.id == song.id ? Theme.accent : .white)
+                            .lineLimit(1)
+                        if let album = song.album {
+                            Text(album)
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.45))
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 6)
+
+                    if let dur = song.duration {
+                        Text(String(format: "%d:%02d", dur / 60, dur % 60))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.35))
+                    }
                 }
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 6)
-
-            if let dur = song.duration {
-                Text(String(format: "%d:%02d", dur / 60, dur % 60))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.35))
-            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             SongMenu(
                 song: song,
@@ -334,8 +343,6 @@ struct ArtistDetailView: View {
             }
         }
         .frame(height: Self.rowHeight)
-        .contentShape(Rectangle())
-        .onTapGesture { appState.audioPlayer.play(song: song) }
     }
 
     // MARK: - Albums

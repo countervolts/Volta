@@ -15,6 +15,8 @@ struct HomeView: View {
 
     private var vm: HomeViewModel { appState.homeViewModel }
     @State private var showSettings = false
+    @State private var toastMessage: String?
+    @State private var savingMixIDs = Set<String>()
     @Namespace private var heroNamespace
 
     private let pad = Theme.Layout.screenPadding
@@ -105,7 +107,9 @@ struct HomeView: View {
                 section(title: "Picks for You") {
                     HorizontalPickRow(items: vm.picksFeed,
                         onSelectAlbum: { path.append(.album($0)) },
-                        onSelectMix: { path.append(.mix($0)) })
+                        onSelectMix: { path.append(.mix($0)) },
+                        onSaveMix: { saveMixAsPlaylist($0) },
+                        isSavingMix: { savingMixIDs.contains($0.id) })
                 }
             }
 
@@ -155,6 +159,14 @@ struct HomeView: View {
         }
         .padding(.top, 8)
         .padding(.bottom, 120)
+        .overlay(alignment: .bottom) {
+            if let toastMessage {
+                PlaybackActionToast(message: toastMessage)
+                    .padding(.bottom, 22)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: toastMessage)
     }
 
     @ViewBuilder
@@ -228,5 +240,65 @@ struct HomeView: View {
         .padding(.horizontal, 40)
         .padding(.top, 120)
         .frame(maxWidth: .infinity)
+    }
+
+    private func saveMixAsPlaylist(_ mix: MusicMix) {
+        guard !savingMixIDs.contains(mix.id), let client = appState.client else { return }
+        savingMixIDs.insert(mix.id)
+        showToast("Saving \(mix.title)")
+
+        Task {
+            do {
+                let name = try await uniquePlaylistName(for: mix.title, client: client)
+                guard let playlist = try await client.createPlaylist(name: name) else {
+                    throw MixSaveError.createFailed
+                }
+                for song in mix.songs {
+                    try await client.addToPlaylist(playlistID: playlist.id, songID: song.id)
+                }
+                AppLogger.shared.log("Saved mix '\(mix.title)' as playlist '\(name)' (\(mix.songs.count) songs)", category: .other)
+                await MainActor.run {
+                    savingMixIDs.remove(mix.id)
+                    showToast("Saved to \(name)")
+                }
+            } catch {
+                AppLogger.shared.log("Failed saving mix '\(mix.title)' as playlist: \(error.localizedDescription)", category: .other, level: .error)
+                await MainActor.run {
+                    savingMixIDs.remove(mix.id)
+                    showToast("Couldn't save mix")
+                }
+            }
+        }
+    }
+
+    private func uniquePlaylistName(for title: String, client: SubsonicClient) async throws -> String {
+        let base = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Saved Mix" : title
+        let existing = Set((try await client.playlists()).map { $0.name.lowercased() })
+        guard existing.contains(base.lowercased()) else { return base }
+        for index in 2...99 {
+            let candidate = "\(base) \(index)"
+            if !existing.contains(candidate.lowercased()) {
+                return candidate
+            }
+        }
+        return "\(base) \(Date().formatted(date: .numeric, time: .shortened))"
+    }
+
+    private func showToast(_ message: String) {
+        withAnimation { toastMessage = message }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await MainActor.run {
+                withAnimation { toastMessage = nil }
+            }
+        }
+    }
+}
+
+private enum MixSaveError: LocalizedError {
+    case createFailed
+
+    var errorDescription: String? {
+        "The server did not return a playlist."
     }
 }

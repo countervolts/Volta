@@ -37,7 +37,9 @@ struct MiniPlayerAccessory: View {
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
                 .offset(x: dragX)
                 .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragX)
             }
