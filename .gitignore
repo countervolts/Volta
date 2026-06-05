@@ -5,6 +5,7 @@ xtool/*.app/
 .sourcekit-lsp/
 xcuserdata/
 *.xcuserstate
+.devcontainer
 DerivedData/
 .DS_Store
 *.dSYM/

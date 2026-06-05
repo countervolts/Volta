@@ -63,25 +63,14 @@ xtool devices
 xtool dev run --udid <DEVICE_UDID>
 ```
 
-With Xcode, open `Package.swift` and run the `music` target on a device or simulator.
+With Xcode, open `Package.swift` and run the `Volta` target on a device or simulator.
 
 Codespaces can inspect and edit the package, run manifest checks, and use SourceKit-LSP. iOS app builds still need an Apple SDK environment.
-
-## GitHub Auth In VS Code
-
-Use GitHub CLI as Git’s credential helper:
-
-```bash
-gh auth setup-git
-git remote set-url origin https://github.com/countervolts/Volta.git
-```
-
-More detail: [docs/vscode-gh-auth.md](docs/vscode-gh-auth.md).
 
 ## Project Layout
 
 ```text
-Sources/music/
+Sources/Volta/
   App/           app entry and root view
   Components/    reusable SwiftUI controls
   Intents/       Siri / App Intents

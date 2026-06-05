@@ -15,6 +15,7 @@ struct NowPlayingScreen: View {
     @State private var dragThrottler: VSyncThrottler?
     @State private var infoSheet: SongMenuSheet? = nil
     @State private var showLosslessInfo = false
+    @State private var showAudioSignalPath = false
     // scrub state lifted out of ScrubBar so the time labels share it (so the bar,
     // elapsed and remaining all read one snapshot and can't drift apart)
     @State private var scrubbing = false
@@ -87,6 +88,9 @@ struct NowPlayingScreen: View {
             case .info:    SongInfoSheet(song: audio.currentSong)
             case .credits: SongCreditsSheet(song: audio.currentSong)
             }
+        }
+        .sheet(isPresented: $showAudioSignalPath) {
+            AudioSignalPathSheet(song: audio.currentSong)
         }
         .sheet(item: $albumToShow) { album in
             NavigationStack {
@@ -498,7 +502,13 @@ struct NowPlayingScreen: View {
                         }
                         .buttonStyle(.plain)
                         .popover(isPresented: $showLosslessInfo) {
-                            LosslessInfoPopover(song: audio.currentSong)
+                            LosslessInfoPopover(song: audio.currentSong) {
+                                showLosslessInfo = false
+                                Task { @MainActor in
+                                    try? await Task.sleep(nanoseconds: 180_000_000)
+                                    showAudioSignalPath = true
+                                }
+                            }
                                 .presentationCompactAdaptation(.popover)
                         }
                     }
@@ -698,8 +708,9 @@ private struct SystemVolumeSlider: UIViewRepresentable {
         v.setVolumeThumbImage(blank, for: .normal)
         v.setVolumeThumbImage(blank, for: .highlighted)
         context.coordinator.volumeView = v
-        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handle(_:)))
-        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handle(_:)))
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        tap.require(toFail: pan)
         v.addGestureRecognizer(pan)
         v.addGestureRecognizer(tap)
         return v
@@ -708,17 +719,33 @@ private struct SystemVolumeSlider: UIViewRepresentable {
 
     final class Coordinator: NSObject {
         weak var volumeView: MPVolumeView?
+        private var panStartVolume: Float = 0
 
         private var slider: UISlider? {
             volumeView?.subviews.compactMap { $0 as? UISlider }.first
         }
 
-        @objc func handle(_ g: UIGestureRecognizer) {
+        @objc func handleTap(_ g: UITapGestureRecognizer) {
             guard let v = volumeView, let slider, v.bounds.width > 0 else { return }
             let x = g.location(in: v).x
             let frac = Float(max(0, min(1, x / v.bounds.width)))
             slider.setValue(frac, animated: false)
             slider.sendActions(for: .valueChanged)
+        }
+
+        @objc func handlePan(_ g: UIPanGestureRecognizer) {
+            guard let v = volumeView, let slider, v.bounds.width > 0 else { return }
+            switch g.state {
+            case .began:
+                panStartVolume = slider.value
+            case .changed:
+                let delta = Float(g.translation(in: v).x / v.bounds.width)
+                let frac = max(0, min(1, panStartVolume + delta))
+                slider.setValue(frac, animated: false)
+                slider.sendActions(for: .valueChanged)
+            default:
+                panStartVolume = slider.value
+            }
         }
     }
 }
@@ -814,6 +841,7 @@ struct SongInfoSheet: View {
 
 private struct LosslessInfoPopover: View {
     let song: Song?
+    var onOpenSignalPath: () -> Void
     private var status: LosslessBadgeStatus? { LosslessBadgeResolver.status(for: song) }
 
     var body: some View {
@@ -834,6 +862,16 @@ private struct LosslessInfoPopover: View {
                 detailRow("Sample Rate", String(format: "%.1f kHz", Double(sr) / 1000))
             }
             if let bd = song?.bitDepth { detailRow("Bit Depth", "\(bd)-bit") }
+
+            Divider().padding(.vertical, 2)
+
+            Button(action: onOpenSignalPath) {
+                Label("Audio Signal Path", systemImage: "point.3.connected.trianglepath.dotted")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.accent)
         }
         .padding(16)
         .frame(minWidth: 220)
@@ -852,5 +890,94 @@ private struct LosslessInfoPopover: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .font(.subheadline)
+    }
+}
+
+// MARK: - Audio signal path
+
+private struct AudioSignalPathSheet: View {
+    let song: Song?
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("streamingBitrate") private var streamingBitrate = 0
+    @AppStorage("streamingBitrateCell") private var streamingBitrateCell = 0
+    @AppStorage("transcodingFormat") private var transcodingFormat = "raw"
+    @AppStorage("replayGainMode") private var replayGainMode = "off"
+
+    private var status: LosslessBadgeStatus? { LosslessBadgeResolver.status(for: song) }
+    private var session: AVAudioSession { AVAudioSession.sharedInstance() }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Source File") {
+                    row("Title", song?.title)
+                    row("Format", fileFormat)
+                    row("Bitrate", song?.bitRate.map { "\($0) kbps" })
+                    row("Sample Rate", song?.samplingRate.map(formatSampleRate))
+                    row("Bit Depth", song?.bitDepth.map { "\($0)-bit" })
+                    row("Lossless", song?.isLossless == true ? "Yes" : "No")
+                }
+
+                Section("Server Stream") {
+                    row("Transcoding", transcodingFormat == "raw" ? "Original" : transcodingFormat.uppercased())
+                    row("Wi-Fi Quality", bitrateLabel(streamingBitrate))
+                    row("Cellular Quality", streamingBitrateCell == 0 ? "Same as Wi-Fi" : bitrateLabel(streamingBitrateCell))
+                }
+
+                Section("App Processing") {
+                    row("Volume Normalization", replayGainMode.capitalized)
+                    row("Equalizer", EqualizerEngine.shared.isEnabled ? "On" : "Off")
+                }
+
+                Section("Output Route") {
+                    row("Route", outputName)
+                    row("Port Type", outputPortTypes)
+                    row("Output Sample Rate", session.sampleRate > 0 ? formatSampleRate(Int(session.sampleRate.rounded())) : nil)
+                    row("Output Channels", session.outputNumberOfChannels > 0 ? "\(session.outputNumberOfChannels)" : nil)
+                }
+
+                Section("Result") {
+                    row("Badge", status?.status ?? "Not lossless")
+                    row("Why", status?.reason)
+                }
+            }
+            .navigationTitle("Audio Signal Path")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var fileFormat: String? {
+        song?.suffix?.uppercased() ?? song?.contentType
+    }
+
+    private var outputName: String {
+        let names = session.currentRoute.outputs.map(\.portName).filter { !$0.isEmpty }
+        return names.isEmpty ? "System Output" : names.joined(separator: ", ")
+    }
+
+    private var outputPortTypes: String {
+        let types = session.currentRoute.outputs.map { $0.portType.rawValue }.filter { !$0.isEmpty }
+        return types.isEmpty ? "Unknown" : types.joined(separator: ", ")
+    }
+
+    private func bitrateLabel(_ value: Int) -> String {
+        value == 0 ? "Original" : "\(value) kbps"
+    }
+
+    private func formatSampleRate(_ value: Int) -> String {
+        String(format: "%.1f kHz", Double(value) / 1000)
+    }
+
+    @ViewBuilder
+    private func row(_ label: String, _ value: String?) -> some View {
+        if let value, !value.isEmpty {
+            LabeledContent(label, value: value)
+        }
     }
 }

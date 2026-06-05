@@ -23,6 +23,7 @@ stuff that needs to be done
 - [x] album about text and playlist descriptions show below the action row with More/Less expansion
 - [x] lyric translation button uses Apple's Translation framework on supported iOS versions
 - [x] volume slider supports tap or drag from anywhere on the bar
+- [x] Lossless badge popover now opens an Audio Signal Path sheet showing source format, server stream settings, app processing, output route and result
 
 ### Library & Navigation
 - [x] fix song view in the library tab because currently it shows nothing
@@ -88,6 +89,7 @@ stuff that needs to be done
 - [x] fix foreground progress bar detaching when moving player up/down (fg+bg share one geometry/origin)
 - [x] fix accent colour picker showing all purple circles (custom Circle swatch row instead of tinted SF Symbols)
 - [x] tapping the Lossless badge opens a popover with format, bitrate, sample rate and bit depth
+- [x] Lossless badge now shows Hi-Res Lossless for 24-bit+ tracks above 48 kHz up to 192 kHz, with True Hi-Res Lossless when output is verified
 - [x] song detail sheet (Info) now shows bitrate, sample/bit, format, file size, server path and play count
 - [x] artist profile no longer flashes an album cover as the profile picture before the real photo loads (waits for artwork lookup)
 - [x] artist profile "Appeared On" section showing albums they're featured on (excludes their own discography)
@@ -115,6 +117,12 @@ stuff that needs to be done
 - [x] fix issue when making player smaller the frame rate will be very low (player dismiss drag updates throttled to vsync)
 - [x] fix the search bar on artists in the library tab again to just be exactly like how it works on albums/genres (artist rows use native NavigationLink push)
 - [x] when using airpods and going next at the end of a album while using autoplay or algorithm it will just repeat the same song (autoplay/algorithm now preloads before queue end so remote next advances)
+- [x] fix bug on iOS versions that support liquid glass not using it and instead falling back onto the fallback (modern tabs start on iOS 26.0; tab accessory is only applied on iOS 26.1+; stale disable pref ignored)
+  - [x] because of this issue there are numorus issues on the iphone that supports liquid glass
+  - [x] also becasue of this add a setting that will attempt to force liquid glass (Appearance → Force Liquid Glass; restart required)
+- [x] when pressing the 3 dots it shouldnt play the song it should just open the menu (song rows now keep the menu outside the play tap target)
+- [x] when using the fallback ui the miniplayer will overlap the bottom tab bar (fallback miniplayer inset now lives inside each tab page)
+- [x] still cannot make a song play next with swiping on songs make this doable while still allowing users to scroll on the songs (song rows now use an axis-locked right swipe that coexists with vertical scrolling)
 
 ### UI
 - [x] do slight redesign for the Picks for you section text panel uses album dominant color
@@ -147,9 +155,15 @@ stuff that needs to be done
 - [x] mix song rows now have Go to Album / Go to Artist in the 3-dot menu
 - [x] add live artwork support — animated cover art (GIF/APNG) plays in the full player only (miniplayer + lock screen keep the still frame; native lock-screen video isn't exposed by MediaPlayer). Toggle in Appearance → Live Artwork; original cover fetched (unscaled) so the server can't flatten the animation
 - [x] add live artwork support for webp, also add lock screen support (uses WebP frame timing + MPMediaItemAnimatedArtwork video cache)
+- [x] holding a Picks for You mix can save it as a new 1:1 playlist
 
 ### Playlists
 - [x] add the ability to edit playlists remove songs via 3-dot menu, delete playlist via long-press context menu
 - [x] show the artist name under the song title in playlists (TrackRow showArtist)
 - [x] add/edit playlist descriptions (pencil button → edit sheet) and pin playlists to the top of the playlists tab (long-press → Pin)
 - [x] playlist detail action row now matches albums (shuffle circle · white Play · download)
+
+### Misc
+- [x] rename project to Volta instead of music (Swift package, target, source folder, and app entry point)
+
+

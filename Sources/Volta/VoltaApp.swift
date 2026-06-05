@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct musicApp: App {
+struct VoltaApp: App {
     @State private var appState = AppState()
 
     var body: some Scene {
