@@ -6,6 +6,7 @@ struct LoginView: View {
     @State private var vm = LoginViewModel()
     @State private var appeared = false
     @State private var showHTTPWarning = false
+    @State private var isPasswordVisible = false
 
     var body: some View {
         @Bindable var vm = vm
@@ -44,6 +45,7 @@ struct LoginView: View {
                             isError: vm.credentialsError != nil,
                             shake: vm.credentialsShake,
                             isSecure: true,
+                            isPasswordVisible: $isPasswordVisible,
                             errorText: vm.credentialsError
                         )
                     }
@@ -57,7 +59,7 @@ struct LoginView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 24)
         .onAppear {
@@ -137,6 +139,7 @@ struct LoginView: View {
         isError: Bool,
         shake: Int,
         isSecure: Bool = false,
+        isPasswordVisible: Binding<Bool>? = nil,
         keyboard: UIKeyboardType = .default,
         errorText: String? = nil
     ) -> some View {
@@ -149,7 +152,13 @@ struct LoginView: View {
 
                 Group {
                     if isSecure {
-                        SecureField(placeholder, text: text)
+                        if isPasswordVisible?.wrappedValue == true {
+                            TextField(placeholder, text: text)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        } else {
+                            SecureField(placeholder, text: text)
+                        }
                     } else {
                         TextField(placeholder, text: text)
                             .keyboardType(keyboard)
@@ -158,6 +167,17 @@ struct LoginView: View {
                     }
                 }
                 .foregroundStyle(Theme.primaryText)
+
+                if isSecure, let isPasswordVisible {
+                    Button {
+                        isPasswordVisible.wrappedValue.toggle()
+                    } label: {
+                        Image(systemName: isPasswordVisible.wrappedValue ? "eye.slash" : "eye")
+                            .font(.system(size: 16))
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 15)

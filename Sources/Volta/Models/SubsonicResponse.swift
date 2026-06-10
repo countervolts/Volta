@@ -23,6 +23,7 @@ struct SubsonicEnvelope: Decodable, Sendable {
         let topSongs: SongsContainer?
         let songsByGenre: SongsContainer?
         let album: Album?
+        let song: Song?
         let starred2: Starred2Container?
         let searchResult3: SearchResult3Container?
         let lyricsList: LyricsList?

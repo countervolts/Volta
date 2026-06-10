@@ -34,8 +34,6 @@ enum AppDiagnostics {
             "processOS=\(ProcessInfo.processInfo.operatingSystemVersionString)",
             "ios26=\(availability26())",
             "ios261=\(availability261())",
-            "forceLiquidGlassAtLaunch=\(LiquidGlassRuntime.forceEnabledAtLaunch)",
-            "forceLiquidGlassNow=\(UserDefaults.standard.bool(forKey: "forceLiquidGlassUI"))",
             "reduceTransparency=\(UIAccessibility.isReduceTransparencyEnabled)",
             "reduceMotion=\(UIAccessibility.isReduceMotionEnabled)",
             "darkerColors=\(UIAccessibility.isDarkerSystemColorsEnabled)"

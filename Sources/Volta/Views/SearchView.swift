@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SearchView: View {
     @State private var searchText = ""
+    @State private var isSearchActive = false
 
     @Environment(AppState.self) private var appState
     @State private var vm = SearchViewModel()
@@ -14,30 +15,36 @@ struct SearchView: View {
                 Theme.background.ignoresSafeArea()
 
                 Group {
-                    if vm.query.isEmpty {
-                        if vm.recentSearches.isEmpty { emptyPrompt } else { recentSearchesView }
+                    if vm.query.isEmpty && isSearchActive && !vm.recentSearches.isEmpty {
+                        recentSearchesView
+                    } else if vm.query.isEmpty {
+                        browseLanding
                     } else if vm.isSearching {
                         ProgressView()
                             .controlSize(.large)
                             .tint(Theme.accent)
-                    } else if vm.hasSearched && vm.artists.isEmpty && vm.albums.isEmpty && vm.songs.isEmpty && vm.genres.isEmpty {
+                    } else if vm.hasSearched && vm.artists.isEmpty && vm.albums.isEmpty && vm.songs.isEmpty && vm.genres.isEmpty && vm.lyricHits.isEmpty {
                         noResults
                     } else {
                         results
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(SearchActiveReader(isActive: $isSearchActive))
             }
             .navigationTitle("Search")
             .accountToolbar()
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Albums, Artists, Songs")
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Albums, Artists, Songs, Lyrics")
+            .onSubmit(of: .search) {
+                vm.saveSearch(searchText)
+            }
             .navigationDestination(for: SearchRoute.self) { route in
                 searchDestination(route)
             }
             .environment(\.heroNamespace, heroNamespace)
         }
         .tint(Theme.accent)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .onAppear {
             if let client = appState.client { vm.bind(client: client) }
         }
@@ -59,25 +66,116 @@ struct SearchView: View {
         case .artist(let artist):
             ArtistDetailView(artist: artist)
         case .genre(let genre):
-            FullMediaGrid(title: genre.name, items: genre.albums.map(MediaItem.init(album:))) { item in
-                if let album = item.albumRef {
-                    path.append(.album(album))
-                }
-            }
+            GenreHomeView(
+                genre: genre,
+                onAlbum: { path.append(.album($0)) },
+                onArtist: { path.append(.artist($0)) },
+                onMix: { path.append(.mix($0)) }
+            )
+        case .mix(let mix):
+            MixDetailView(mix: mix)
         }
     }
 
     // MARK: - Empty / no-results states
 
-    private var emptyPrompt: some View {
-        VStack(spacing: 10) {
-            Image(systemName: Symbols.search)
-                .font(.system(size: 44, weight: .ultraLight))
-                .foregroundStyle(Theme.secondaryText)
-            Text("Search your library")
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
+    private var browseLanding: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 28) {
+                if !vm.installedGenres.isEmpty {
+                    browseSection(title: "Browse Genres") {
+                        let columns = [
+                            GridItem(.flexible(), spacing: 12),
+                            GridItem(.flexible(), spacing: 12)
+                        ]
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(vm.installedGenres) { genre in
+                                Button {
+                                    path.append(.genre(genre))
+                                } label: {
+                                    genreBrowseCard(genre)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                } else if vm.isLoadingBrowseGenres {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(Theme.accent)
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: Symbols.search)
+                            .font(.system(size: 44, weight: .ultraLight))
+                            .foregroundStyle(Theme.secondaryText)
+                        Text("Search your library")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 260)
+                }
+
+                Color.clear.frame(height: 80)
+            }
+            .padding(.top, 16)
         }
+    }
+
+    private func browseSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.title3.bold())
+                .foregroundStyle(Theme.primaryText)
+                .padding(.horizontal, 20)
+            content()
+        }
+    }
+
+    private func genreBrowseCard(_ genre: GenreSearchResult) -> some View {
+        let style = genreStyle(for: genre.name)
+        return HStack(spacing: 12) {
+            Image(systemName: style.symbol)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(genre.name)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text("\(genre.albums.count) album\(genre.albums.count == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.78))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(minHeight: 76)
+        .background(style.color, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
+        )
+    }
+
+    private func genreStyle(for name: String) -> (symbol: String, color: Color) {
+        let lower = name.lowercased()
+        if lower.contains("rock") { return ("bolt.fill", .red.opacity(0.82)) }
+        if lower.contains("pop") { return ("sparkles", .pink.opacity(0.82)) }
+        if lower.contains("hip") || lower.contains("rap") { return ("mic.fill", .orange.opacity(0.82)) }
+        if lower.contains("jazz") { return ("saxophone", .blue.opacity(0.82)) }
+        if lower.contains("elect") || lower.contains("dance") { return ("waveform.path.ecg", .cyan.opacity(0.82)) }
+        if lower.contains("classical") { return ("pianokeys", .indigo.opacity(0.82)) }
+        if lower.contains("metal") { return ("flame.fill", .gray.opacity(0.86)) }
+        if lower.contains("country") || lower.contains("folk") { return ("guitars", .green.opacity(0.80)) }
+        if lower.contains("r&b") || lower.contains("soul") { return ("heart.fill", .purple.opacity(0.80)) }
+        return (Symbols.genres, Theme.accent.opacity(0.80))
     }
 
     private var recentSearchesView: some View {
@@ -96,30 +194,8 @@ struct SearchView: View {
                 .padding(.top, 16)
                 .padding(.bottom, 12)
 
-                ForEach(vm.recentSearches, id: \.self) { term in
-                    HStack(spacing: 12) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Theme.secondaryText)
-                        Text(term)
-                            .font(.body)
-                            .foregroundStyle(Theme.primaryText)
-                        Spacer()
-                        Button { vm.removeRecentSearch(term) } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Theme.secondaryText)
-                                .padding(6)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        searchText = term
-                        vm.query = term
-                    }
+                ForEach(vm.recentSearches) { item in
+                    recentSearchRow(item)
                     Divider().background(Theme.secondaryText.opacity(0.12)).padding(.leading, 52)
                 }
                 Color.clear.frame(height: 80)
@@ -169,7 +245,10 @@ struct SearchView: View {
                         let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
                         LazyVGrid(columns: columns, spacing: 16) {
                             ForEach(vm.albums) { album in
-                                NavigationLink(value: SearchRoute.album(album)) {
+                                Button {
+                                    vm.saveSelectedAlbum(album, typedQuery: searchText)
+                                    path.append(.album(album))
+                                } label: {
                                     MediaCard(item: MediaItem(album: album))
                                         .heroSource(id: album.id)
                                 }
@@ -186,9 +265,23 @@ struct SearchView: View {
                             .font(.title3.bold())
                             .foregroundStyle(Theme.primaryText)
                             .padding(.horizontal, 20)
-                            .padding(.bottom, 12)
+                        .padding(.bottom, 12)
                         ForEach(Array(vm.songs.enumerated()), id: \.element.id) { i, song in
                             searchSongRow(song)
+                            Divider().background(Theme.secondaryText.opacity(0.2)).padding(.leading, 72)
+                        }
+                    }
+                }
+
+                if !vm.lyricHits.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("From Lyrics")
+                            .font(.title3.bold())
+                            .foregroundStyle(Theme.primaryText)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
+                        ForEach(vm.lyricHits) { hit in
+                            lyricHitRow(hit)
                             Divider().background(Theme.secondaryText.opacity(0.2)).padding(.leading, 72)
                         }
                     }
@@ -200,9 +293,11 @@ struct SearchView: View {
                             .font(.title3.bold())
                             .foregroundStyle(Theme.primaryText)
                             .padding(.horizontal, 20)
-                            .padding(.bottom, 12)
+                        .padding(.bottom, 12)
                         ForEach(vm.genres) { genre in
-                            NavigationLink(value: SearchRoute.genre(genre)) {
+                            Button {
+                                path.append(.genre(genre))
+                            } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: Symbols.genres)
                                         .font(.system(size: 18))
@@ -238,8 +333,71 @@ struct SearchView: View {
         }
     }
 
+    private func recentSearchRow(_ item: SearchHistoryItem) -> some View {
+        HStack(spacing: 12) {
+            recentSearchArtwork(item)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.body)
+                    .foregroundStyle(Theme.primaryText)
+                    .lineLimit(1)
+                Text(item.subtitle ?? item.kind.label)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button { vm.removeRecentSearch(item) } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.secondaryText)
+                    .padding(6)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            openRecentSearch(item)
+        }
+    }
+
+    @ViewBuilder
+    private func recentSearchArtwork(_ item: SearchHistoryItem) -> some View {
+        switch item.kind {
+        case .artist:
+            ArtworkView(coverArtID: item.coverArt, size: 160, cornerRadius: 22)
+                .frame(width: 44, height: 44)
+                .clipShape(Circle())
+        case .album, .song, .lyric:
+            ArtworkView(coverArtID: item.coverArt, size: 160, cornerRadius: 6)
+                .frame(width: 44, height: 44)
+        case .genre, .query:
+            Image(systemName: recentSearchSymbol(for: item.kind))
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(item.kind == .genre ? Theme.accent : Theme.secondaryText)
+                .frame(width: 44, height: 44)
+                .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
+    private func recentSearchSymbol(for kind: SearchHistoryKind) -> String {
+        switch kind {
+        case .artist: return "music.mic"
+        case .album: return "square.stack"
+        case .song: return Symbols.songs
+        case .lyric: return "quote.bubble"
+        case .genre: return Symbols.genres
+        case .query: return Symbols.search
+        }
+    }
+
     private func artistCell(_ artist: Artist) -> some View {
-        Button { path.append(SearchRoute.artist(artist)) } label: {
+        Button {
+            vm.saveSelectedArtist(artist, typedQuery: searchText)
+            path.append(SearchRoute.artist(artist))
+        } label: {
             VStack(spacing: 8) {
                 ArtworkView(coverArtID: artist.coverArt, size: 200, cornerRadius: 50)
                     .frame(width: 80, height: 80)
@@ -253,6 +411,95 @@ struct SearchView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private func lyricHitRow(_ hit: LyricSearchHit) -> some View {
+        let song = vm.lyricSong(for: hit)
+        return Button {
+            playLyricHit(hit, song: song)
+        } label: {
+            HStack(spacing: 12) {
+                ArtworkView(coverArtID: song?.coverArt, size: 80, cornerRadius: 6)
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(hit.title).font(.body).foregroundStyle(Theme.primaryText).lineLimit(1)
+                    if let artist = song?.artist ?? hit.artist {
+                        Text(artist)
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                            .lineLimit(1)
+                    }
+                    Text("“\(hit.snippet)”")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if let song, song.albumId != nil {
+                Button {
+                    goToAlbum(song)
+                } label: {
+                    Label("Go to Album", systemImage: "square.stack")
+                }
+            }
+            if let song, song.artistId != nil {
+                Button {
+                    goToArtist(song)
+                } label: {
+                    Label("Go to Artist", systemImage: "music.mic")
+                }
+            }
+        }
+    }
+
+    private func playLyricHit(_ hit: LyricSearchHit, song resolvedSong: Song?) {
+        if let resolvedSong {
+            appState.audioPlayer.play(song: resolvedSong)
+            return
+        }
+        guard let client = appState.client else { return }
+        Task {
+            if let song = try? await client.song(id: hit.id) {
+                appState.audioPlayer.play(song: song)
+            } else {
+                VoltaNotificationCenter.shared.post("Couldn't load \(hit.title)", tone: .error)
+            }
+        }
+    }
+
+    private func goToAlbum(_ song: Song) {
+        guard let id = song.albumId, let client = appState.client else { return }
+        Task {
+            if let album = try? await client.album(id: id) {
+                await MainActor.run {
+                    vm.saveSelectedAlbum(album, typedQuery: searchText)
+                    path.append(.album(album))
+                }
+            } else {
+                VoltaNotificationCenter.shared.post("Couldn't load album", tone: .error)
+            }
+        }
+    }
+
+    private func goToArtist(_ song: Song) {
+        guard let id = song.artistId, let client = appState.client else { return }
+        Task {
+            if let artist = try? await client.artist(id: id) {
+                await MainActor.run {
+                    vm.saveSelectedArtist(artist, typedQuery: searchText)
+                    path.append(.artist(artist))
+                }
+            } else {
+                VoltaNotificationCenter.shared.post("Couldn't load artist", tone: .error)
+            }
+        }
     }
 
     private func searchSongRow(_ song: Song) -> some View {
@@ -274,6 +521,76 @@ struct SearchView: View {
         }
         .buttonStyle(.plain)
     }
+
+    private func openRecentSearch(_ item: SearchHistoryItem) {
+        switch item.kind {
+        case .artist:
+            openRecentArtist(item)
+        case .album:
+            openRecentAlbum(item)
+        case .song, .lyric, .genre, .query:
+            searchText = item.query
+            vm.query = item.query
+        }
+    }
+
+    private func openRecentArtist(_ item: SearchHistoryItem) {
+        guard let id = targetID(for: item, prefix: "artist-"), let client = appState.client else {
+            searchText = item.query
+            vm.query = item.query
+            return
+        }
+
+        Task {
+            if let artist = try? await client.artist(id: id) {
+                await MainActor.run { path.append(.artist(artist)) }
+            } else {
+                await MainActor.run {
+                    searchText = item.query
+                    vm.query = item.query
+                }
+            }
+        }
+    }
+
+    private func openRecentAlbum(_ item: SearchHistoryItem) {
+        guard let id = targetID(for: item, prefix: "album-"), let client = appState.client else {
+            searchText = item.query
+            vm.query = item.query
+            return
+        }
+
+        Task {
+            if let album = try? await client.album(id: id) {
+                await MainActor.run { path.append(.album(album)) }
+            } else {
+                await MainActor.run {
+                    searchText = item.query
+                    vm.query = item.query
+                }
+            }
+        }
+    }
+
+    private func targetID(for item: SearchHistoryItem, prefix: String) -> String? {
+        if let targetID = item.targetID { return targetID }
+        guard item.id.hasPrefix(prefix) else { return nil }
+        return String(item.id.dropFirst(prefix.count))
+    }
+}
+
+private struct SearchActiveReader: View {
+    @Environment(\.isSearching) private var isSearching
+    @Binding var isActive: Bool
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear { isActive = isSearching }
+            .onChange(of: isSearching) { _, newValue in
+                isActive = newValue
+            }
+    }
 }
 
 enum SearchRoute: Hashable {
@@ -281,4 +598,255 @@ enum SearchRoute: Hashable {
     case playlist(Playlist)
     case artist(Artist)
     case genre(GenreSearchResult)
+    case mix(MusicMix)
+}
+
+private struct GenreHomeView: View {
+    let genre: GenreSearchResult
+    var onAlbum: (Album) -> Void
+    var onArtist: (Artist) -> Void
+    var onMix: (MusicMix) -> Void
+
+    @Environment(AppState.self) private var appState
+    @State private var genreMix: MusicMix?
+    @State private var isLoadingMix = false
+    @State private var savingMixIDs = Set<String>()
+    @State private var toastMessage: String?
+
+    private var albumsNewestFirst: [Album] {
+        genre.albums.sorted {
+            let lhs = ($0.year ?? Int.min, $0.createdDate ?? .distantPast, $0.name)
+            let rhs = ($1.year ?? Int.min, $1.createdDate ?? .distantPast, $1.name)
+            return lhs > rhs
+        }
+    }
+
+    private var pickAlbums: [Album] {
+        Array(discoverAlbums.prefix(5))
+    }
+
+    private var discoverAlbums: [Album] {
+        var rng = SeededRNG(seed: genreSeed &+ SeededRNG.daySeed())
+        return albumsNewestFirst.shuffled(using: &rng)
+    }
+
+    private var artists: [Artist] {
+        var counts: [String: Int] = [:]
+        var byID: [String: Artist] = [:]
+        for album in genre.albums {
+            guard let id = album.artistId, let name = album.artist else { continue }
+            counts[id, default: 0] += 1
+            if byID[id] == nil {
+                byID[id] = Artist(
+                    id: id,
+                    name: name,
+                    coverArt: album.coverArt,
+                    albumCount: nil,
+                    artistImageUrl: nil,
+                    starred: nil,
+                    album: nil
+                )
+            }
+        }
+        return byID.values
+            .map { artist in
+                Artist(
+                    id: artist.id,
+                    name: artist.name,
+                    coverArt: artist.coverArt,
+                    albumCount: counts[artist.id],
+                    artistImageUrl: artist.artistImageUrl,
+                    starred: artist.starred,
+                    album: nil
+                )
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var pickFeed: [PickFeedItem] {
+        var items = pickAlbums.map(PickFeedItem.album)
+        if let genreMix { items.insert(.mix(genreMix), at: 0) }
+        return items
+    }
+
+    private var genreSeed: UInt64 {
+        UInt64(String(Crypto.md5Hex(genre.name).prefix(16)), radix: 16) ?? 0
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
+                    header
+
+                    if !pickFeed.isEmpty {
+                        section(title: "\(genre.name) Picks for You") {
+                            HorizontalPickRow(
+                                items: pickFeed,
+                                onSelectAlbum: onAlbum,
+                                onSelectMix: onMix,
+                                onSaveMix: { saveMixAsPlaylist($0) },
+                                isSavingMix: { savingMixIDs.contains($0.id) }
+                            )
+                        }
+                    } else if isLoadingMix {
+                        loadingSection(title: "\(genre.name) Picks for You")
+                    }
+
+                    if !discoverAlbums.isEmpty {
+                        section(title: "Discover") {
+                            HorizontalMediaRow(items: Array(discoverAlbums.prefix(18)).map(MediaItem.init(album:))) { item in
+                                if let album = item.albumRef { onAlbum(album) }
+                            }
+                        }
+                    }
+
+                    if !albumsNewestFirst.isEmpty {
+                        section(title: "Albums") {
+                            HorizontalMediaRow(items: albumsNewestFirst.map(MediaItem.init(album:))) { item in
+                                if let album = item.albumRef { onAlbum(album) }
+                            }
+                        }
+                    }
+
+                    if !artists.isEmpty {
+                        section(title: "Artists") {
+                            SearchArtistScrollRow(artists: artists, onTap: onArtist)
+                        }
+                    }
+
+                    Color.clear.frame(height: 90)
+                }
+                .padding(.top, 4)
+            }
+            if let toastMessage {
+                VStack {
+                    Spacer()
+                    PlaybackActionToast(message: toastMessage)
+                        .padding(.bottom, 78)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: toastMessage)
+        .navigationTitle(genre.name)
+        .navigationBarTitleDisplayMode(.large)
+        .preferredColorScheme(Theme.colorScheme)
+        .task(id: genre.id) { await loadGenreMix() }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(genre.albums.count) album\(genre.albums.count == 1 ? "" : "s") in your library")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .padding(.horizontal, Theme.Layout.screenPadding)
+    }
+
+    private func section<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeaderView(title)
+                .padding(.horizontal, Theme.Layout.screenPadding)
+            content()
+        }
+    }
+
+    private func loadingSection(title: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeaderView(title)
+                .padding(.horizontal, Theme.Layout.screenPadding)
+            ProgressView()
+                .tint(Theme.accent)
+                .frame(maxWidth: .infinity, minHeight: 120)
+        }
+    }
+
+    private func loadGenreMix() async {
+        guard genreMix == nil, let client = appState.client else { return }
+        isLoadingMix = true
+        defer { isLoadingMix = false }
+
+        let songs = (try? await client.songsByGenre(genre.name, count: 100)) ?? []
+        var seen = Set<String>()
+        let unique = songs.filter { seen.insert($0.id).inserted }
+        guard !unique.isEmpty else { return }
+
+        var rng = SeededRNG(seed: genreSeed &+ SeededRNG.daySeed() &+ 0xC0FFEE)
+        let shuffled = unique.shuffled(using: &rng)
+        let count = min(shuffled.count, max(20, min(50, shuffled.count)))
+        let selected = Array(shuffled.prefix(count))
+        genreMix = MusicMix(
+            id: "genre-\(genre.id)-\(SeededRNG.daySeed())",
+            title: "\(genre.name) Mix",
+            subtitle: "Made from \(genre.name.lowercased()) songs",
+            coverArt: selected.first(where: { $0.coverArt != nil })?.coverArt,
+            songs: selected
+        )
+    }
+
+    private func saveMixAsPlaylist(_ mix: MusicMix) {
+        guard !savingMixIDs.contains(mix.id), let client = appState.client else { return }
+        savingMixIDs.insert(mix.id)
+        showToast("Saving \(mix.title)")
+        Task {
+            do {
+                let name = try await PlaylistWriter.saveMixAsPlaylist(mix, client: client)
+                await MainActor.run {
+                    savingMixIDs.remove(mix.id)
+                    showToast("Saved to \(name)")
+                }
+            } catch {
+                AppLogger.shared.log("Failed saving search genre mix '\(mix.title)' as playlist: \(error.localizedDescription)", category: .other, level: .error)
+                await MainActor.run {
+                    savingMixIDs.remove(mix.id)
+                    showToast("Couldn't save mix")
+                }
+            }
+        }
+    }
+
+    private func showToast(_ message: String) {
+        withAnimation { toastMessage = message }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await MainActor.run {
+                withAnimation { toastMessage = nil }
+            }
+        }
+    }
+}
+
+private struct SearchArtistScrollRow: View {
+    let artists: [Artist]
+    var onTap: (Artist) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 18) {
+                ForEach(artists) { artist in
+                    Button { onTap(artist) } label: {
+                        VStack(spacing: 8) {
+                            ArtworkView(coverArtID: artist.coverArt, size: 200, cornerRadius: 44)
+                                .frame(width: 80, height: 80)
+                                .clipShape(Circle())
+                                .overlay(Circle().strokeBorder(.white.opacity(0.08), lineWidth: 1))
+                            Text(artist.name)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Theme.primaryText)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                                .frame(width: 80)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, Theme.Layout.screenPadding)
+        }
+    }
 }

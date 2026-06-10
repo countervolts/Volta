@@ -22,14 +22,17 @@ struct LibraryView: View {
         NavigationStack(path: $path) {
             ZStack {
                 Theme.background.ignoresSafeArea()
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        sourcePicker
-                        filterPicker
-                        Divider().background(Theme.secondaryText.opacity(0.15))
-                        content
+                GeometryReader { geo in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            sourcePicker
+                            filterPicker
+                            Divider().background(Theme.secondaryText.opacity(0.15))
+                            content
+                        }
+                        .frame(minHeight: geo.size.height + 160, alignment: .top)
+                        .padding(.bottom, 80)
                     }
-                    .padding(.bottom, 80)
                 }
             }
             .navigationTitle("Library")
@@ -58,14 +61,14 @@ struct LibraryView: View {
             }
         }
         .tint(Theme.accent)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .task(id: appState.currentServer?.id) {
             if let client = appState.client { await vm.load(client: client) }
         }
     }
 
     private var searchPrompt: String {
-        "Search \(vm.filter.rawValue.lowercased())"
+        "Search Library"
     }
 
     @ViewBuilder
@@ -103,7 +106,11 @@ struct LibraryView: View {
     private var sourcePicker: some View {
         Picker("Source", selection: Binding(
             get: { vm.source },
-            set: { s in withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { vm.setSource(s) } }
+            set: { s in
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { vm.setSource(s) }
+            }
         )) {
             ForEach(LibrarySource.allCases) { s in
                 Text(s.rawValue).tag(s)
@@ -122,7 +129,7 @@ struct LibraryView: View {
                 HStack(spacing: 10) {
                     ForEach(LibraryFilter.allCases) { f in
                         Button {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                            withAnimation(.easeOut(duration: 0.12)) {
                                 vm.setFilter(f)
                             }
                         } label: {
@@ -566,11 +573,14 @@ struct LibraryView: View {
     private var genresList: some View {
         LazyVStack(spacing: 0) {
             ForEach(vm.filteredGenres, id: \.self) { genre in
+                let albumCount = vm.albumsForGenre(genre).count
                 NavigationLink(value: LibraryRoute.genreAlbums(genre)) {
                     HStack {
                         Text(genre).font(.body).foregroundStyle(Theme.primaryText)
                         Spacer()
-                        Text("\(vm.albumsForGenre(genre).count)").font(.caption).foregroundStyle(Theme.secondaryText)
+                        Text("\(albumCount) Album\(albumCount == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
                         Image(systemName: Symbols.chevron).font(.caption).foregroundStyle(Theme.secondaryText)
                     }
                     .padding(.horizontal, Theme.Layout.screenPadding)
@@ -661,6 +671,7 @@ struct AddSongsToPlaylistSheet: View {
             for song in songs {
                 try? await client.addToPlaylist(playlistID: pl.id, songID: song.id)
             }
+            await PlaylistBackupStore.shared.backup(playlistID: pl.id, client: client)
             await MainActor.run {
                 onAdded(pl.name, songs.count)
                 dismiss()

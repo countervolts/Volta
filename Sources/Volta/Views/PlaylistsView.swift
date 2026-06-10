@@ -3,6 +3,7 @@ import SwiftUI
 private enum PlaylistCreateKind: String, CaseIterable, Identifiable {
     case custom = "Custom"
     case smart = "Smart"
+    case folder = "Folder"
     var id: String { rawValue }
 }
 
@@ -10,8 +11,10 @@ struct PlaylistsView: View {
     @Environment(AppState.self) private var appState
     @State private var vm = PlaylistsViewModel()
     @State private var smartStore = SmartPlaylistStore.shared
+    @State private var folderStore = PlaylistFolderStore.shared
     @State private var pendingDelete: Playlist?
     @State private var pendingSmartDelete: SmartPlaylist?
+    @State private var pendingFolderDelete: PlaylistFolder?
     @Binding var path: [Playlist]
     @Namespace private var heroNamespace
 
@@ -23,6 +26,7 @@ struct PlaylistsView: View {
     @State private var maxPlayText = ""
     @State private var showSmartArtistPicker = false
     @State private var showSmartAlbumPicker = false
+    @State private var duplicateCreateMessage: String?
 
     private let columns = [GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
                            GridItem(.flexible(), spacing: Theme.Layout.gridSpacing)]
@@ -33,7 +37,7 @@ struct PlaylistsView: View {
                 Theme.background.ignoresSafeArea()
                 if vm.isLoading && !vm.hasLoaded {
                     ProgressView().controlSize(.large).tint(Theme.accent)
-                } else if vm.filtered.isEmpty && filteredSmartPlaylists.isEmpty && vm.hasLoaded {
+                } else if rootPlaylists.isEmpty && rootSmartPlaylists.isEmpty && visibleFolders.isEmpty && vm.hasLoaded {
                     emptyState
                 } else {
                     grid
@@ -60,7 +64,7 @@ struct PlaylistsView: View {
             .environment(\.heroNamespace, heroNamespace)
         }
         .tint(Theme.accent)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .sheet(isPresented: $vm.showCreateSheet) {
             createSheet
         }
@@ -94,6 +98,20 @@ struct PlaylistsView: View {
         } message: { smart in
             Text("“\(smart.name)” will be removed from this device.")
         }
+        .confirmationDialog(
+            "Delete Folder?",
+            isPresented: Binding(get: { pendingFolderDelete != nil },
+                                 set: { if !$0 { pendingFolderDelete = nil } }),
+            presenting: pendingFolderDelete
+        ) { folder in
+            Button("Delete “\(folder.name)”", role: .destructive) {
+                folderStore.delete(folder)
+                pendingFolderDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingFolderDelete = nil }
+        } message: { folder in
+            Text("“\(folder.name)” will be removed. Playlists inside it will stay intact.")
+        }
         .task(id: appState.currentServer?.id) {
             if let client = appState.client { await vm.load(client: client) }
         }
@@ -113,13 +131,49 @@ struct PlaylistsView: View {
             .map(\.element)
     }
 
+    private var visibleFolders: [PlaylistFolder] {
+        let folders = folderStore.folders.sorted { $0.createdAt < $1.createdAt }
+        guard !vm.searchText.isEmpty else { return folders }
+        return folders.filter { $0.name.localizedCaseInsensitiveContains(vm.searchText) }
+    }
+
+    private var rootPlaylists: [Playlist] {
+        vm.filtered.filter { vm.searchText.isEmpty ? !folderStore.containsPlaylist(id: $0.id) : true }
+    }
+
+    private var rootSmartPlaylists: [SmartPlaylist] {
+        filteredSmartPlaylists.filter { vm.searchText.isEmpty ? !folderStore.containsSmartPlaylist(id: $0.id) : true }
+    }
+
     private var grid: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: Theme.Layout.gridSpacing) {
-                ForEach(vm.filtered) { pl in
+                ForEach(visibleFolders) { folder in
+                    NavigationLink {
+                        PlaylistFolderDetailView(
+                            folderID: folder.id,
+                            serverPlaylists: vm.playlists,
+                            smartPlaylists: smartStore.playlists,
+                            smartSourceSongs: vm.smartSourceSongs
+                        )
+                    } label: {
+                        playlistFolderCard(folder)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            pendingFolderDelete = folder
+                        } label: {
+                            Label("Delete Folder", systemImage: Symbols.trash)
+                        }
+                    }
+                }
+
+                ForEach(rootPlaylists) { pl in
                     NavigationLink(value: pl) { serverPlaylistCard(pl) }
                     .buttonStyle(.plain)
                     .contextMenu {
+                        folderActions(for: pl)
                         Button {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { vm.togglePin(pl) }
                         } label: {
@@ -133,7 +187,7 @@ struct PlaylistsView: View {
                         }
                     }
                 }
-                ForEach(filteredSmartPlaylists) { smart in
+                ForEach(rootSmartPlaylists) { smart in
                     NavigationLink {
                         SmartPlaylistDetailView(playlist: smart, sourceSongs: vm.smartSourceSongs)
                     } label: {
@@ -141,6 +195,7 @@ struct PlaylistsView: View {
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
+                        folderActions(for: smart)
                         Button {
                             smartStore.togglePin(smart)
                         } label: {
@@ -158,6 +213,87 @@ struct PlaylistsView: View {
             .padding(.horizontal, Theme.Layout.screenPadding)
             .padding(.vertical, 12)
             .padding(.bottom, 80)
+        }
+    }
+
+    private func playlistFolderCard(_ folder: PlaylistFolder) -> some View {
+        let count = folder.playlistIDs.count + folder.smartPlaylistIDs.count
+        return VStack(alignment: .leading, spacing: 6) {
+            ZStack {
+                RoundedRectangle(cornerRadius: Theme.Layout.cardCorner, style: .continuous)
+                    .fill(Theme.secondaryBackground)
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 56, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Text("\(count)")
+                            .font(.caption.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(.black.opacity(0.42), in: Capsule())
+                            .padding(10)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .aspectRatio(1, contentMode: .fit)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Layout.cardCorner, style: .continuous)
+                    .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
+            )
+
+            Text(folder.name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.primaryText)
+                .lineLimit(1)
+            Text("\(count) playlist\(count == 1 ? "" : "s")")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func folderActions(for playlist: Playlist) -> some View {
+        if !folderStore.folders.isEmpty {
+            Menu("Add to Folder", systemImage: "folder.badge.plus") {
+                ForEach(folderStore.folders) { folder in
+                    Button(folder.name) {
+                        folderStore.addPlaylist(id: playlist.id, to: folder)
+                    }
+                }
+            }
+        }
+        if folderStore.containsPlaylist(id: playlist.id) {
+            Button {
+                folderStore.removePlaylist(id: playlist.id)
+            } label: {
+                Label("Remove from Folder", systemImage: "folder.badge.minus")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func folderActions(for smart: SmartPlaylist) -> some View {
+        if !folderStore.folders.isEmpty {
+            Menu("Add to Folder", systemImage: "folder.badge.plus") {
+                ForEach(folderStore.folders) { folder in
+                    Button(folder.name) {
+                        folderStore.addSmartPlaylist(id: smart.id, to: folder)
+                    }
+                }
+            }
+        }
+        if folderStore.containsSmartPlaylist(id: smart.id) {
+            Button {
+                folderStore.removeSmartPlaylist(id: smart.id)
+            } label: {
+                Label("Remove from Folder", systemImage: "folder.badge.minus")
+            }
         }
     }
 
@@ -241,6 +377,10 @@ struct PlaylistsView: View {
                     Section {
                         TextField("Playlist name", text: $vm.newPlaylistName)
                     }
+                } else if createKind == .folder {
+                    Section {
+                        TextField("Folder name", text: $vm.newPlaylistName)
+                    }
                 } else {
                     smartPlaylistForm
                 }
@@ -253,25 +393,30 @@ struct PlaylistsView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") {
-                        if createKind == .custom {
-                            if let client = appState.client {
-                                Task { await vm.createPlaylist(client: client) }
-                            }
-                        } else {
-                            createSmartPlaylist()
-                        }
+                        createCurrentDraft()
                     }
                     .disabled(createDisabled)
                 }
             }
         }
-        .presentationDetents(createKind == .custom ? [.height(260)] : [.large])
-        .onAppear { resetCreateDrafts() }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .onAppear {
+            resetCreateDrafts()
+        }
         .sheet(isPresented: $showSmartArtistPicker) {
             SmartMultiSelectSheet(title: "Artists", options: vm.smartArtists, selection: $smartDraft.selectedArtists)
         }
         .sheet(isPresented: $showSmartAlbumPicker) {
             SmartMultiSelectSheet(title: "Albums", options: vm.smartAlbums, selection: $smartDraft.selectedAlbums)
+        }
+        .alert("Name Already Exists", isPresented: Binding(
+            get: { duplicateCreateMessage != nil },
+            set: { if !$0 { duplicateCreateMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { duplicateCreateMessage = nil }
+        } message: {
+            Text(duplicateCreateMessage ?? "")
         }
     }
 
@@ -279,6 +424,8 @@ struct PlaylistsView: View {
         switch createKind {
         case .custom:
             return vm.newPlaylistName.trimmingCharacters(in: .whitespaces).isEmpty || vm.isCreating
+        case .folder:
+            return vm.newPlaylistName.trimmingCharacters(in: .whitespaces).isEmpty
         case .smart:
             return smartDraft.name.trimmingCharacters(in: .whitespaces).isEmpty
         }
@@ -324,6 +471,14 @@ struct PlaylistsView: View {
                     .keyboardType(.numberPad)
                 Toggle("Never Played Only", isOn: $smartDraft.neverPlayedOnly)
                 Toggle("Lossless Only", isOn: $smartDraft.onlyLossless)
+                    .onChange(of: smartDraft.onlyLossless) { _, enabled in
+                        if !enabled { smartDraft.onlyHiResLossless = false }
+                    }
+                Toggle("Hi-Res Lossless Only", isOn: $smartDraft.onlyHiResLossless)
+                    .onChange(of: smartDraft.onlyHiResLossless) { _, enabled in
+                        if enabled { smartDraft.onlyLossless = true }
+                    }
+                .disabled(!smartDraft.onlyLossless)
                 Toggle("Downloaded Only", isOn: $smartDraft.onlyDownloaded)
                 Picker("Taste", selection: $smartDraft.taste) {
                     ForEach(SmartTasteFilter.allCases) { Text($0.rawValue).tag($0) }
@@ -374,6 +529,44 @@ struct PlaylistsView: View {
         closeCreateSheet()
     }
 
+    private func createCurrentDraft() {
+        if let message = duplicateMessageForCurrentDraft() {
+            duplicateCreateMessage = message
+            return
+        }
+        if createKind == .custom {
+            if let client = appState.client {
+                Task { await vm.createPlaylist(client: client) }
+            }
+        } else if createKind == .folder {
+            folderStore.create(name: vm.newPlaylistName)
+            closeCreateSheet()
+        } else {
+            createSmartPlaylist()
+        }
+    }
+
+    private func duplicateMessageForCurrentDraft() -> String? {
+        switch createKind {
+        case .custom:
+            let name = normalizedCreateName(vm.newPlaylistName)
+            guard vm.playlists.contains(where: { normalizedCreateName($0.name) == name }) else { return nil }
+            return "A playlist named “\(vm.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines))” already exists."
+        case .smart:
+            let name = normalizedCreateName(smartDraft.name)
+            guard smartStore.playlists.contains(where: { normalizedCreateName($0.name) == name }) else { return nil }
+            return "A smart playlist named “\(smartDraft.name.trimmingCharacters(in: .whitespacesAndNewlines))” already exists."
+        case .folder:
+            let name = normalizedCreateName(vm.newPlaylistName)
+            guard folderStore.folders.contains(where: { normalizedCreateName($0.name) == name }) else { return nil }
+            return "A folder named “\(vm.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines))” already exists."
+        }
+    }
+
+    private func normalizedCreateName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
     private func closeCreateSheet() {
         vm.showCreateSheet = false
         resetCreateDrafts()
@@ -381,11 +574,135 @@ struct PlaylistsView: View {
 
     private func resetCreateDrafts() {
         createKind = .custom
+        vm.newPlaylistName = ""
         smartDraft = SmartPlaylist(name: "")
         minYearText = ""
         maxYearText = ""
         minPlayText = ""
         maxPlayText = ""
+    }
+}
+
+private struct PlaylistFolderDetailView: View {
+    let folderID: String
+    let serverPlaylists: [Playlist]
+    let smartPlaylists: [SmartPlaylist]
+    let smartSourceSongs: [Song]
+
+    @State private var folderStore = PlaylistFolderStore.shared
+
+    private let columns = [GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
+                           GridItem(.flexible(), spacing: Theme.Layout.gridSpacing)]
+
+    private var folder: PlaylistFolder? {
+        folderStore.folder(id: folderID)
+    }
+
+    private var containedPlaylists: [Playlist] {
+        guard let folder else { return [] }
+        return folder.playlistIDs.compactMap { id in
+            serverPlaylists.first { $0.id == id }
+        }
+    }
+
+    private var containedSmartPlaylists: [SmartPlaylist] {
+        guard let folder else { return [] }
+        return folder.smartPlaylistIDs.compactMap { id in
+            smartPlaylists.first { $0.id == id }
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
+            if containedPlaylists.isEmpty && containedSmartPlaylists.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 40, weight: .ultraLight))
+                        .foregroundStyle(Theme.secondaryText)
+                    Text("Empty Folder")
+                        .font(.headline)
+                        .foregroundStyle(Theme.primaryText)
+                }
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: Theme.Layout.gridSpacing) {
+                        ForEach(containedPlaylists) { playlist in
+                            NavigationLink {
+                                PlaylistDetailView(playlist: playlist)
+                            } label: {
+                                folderPlaylistCard(playlist)
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button {
+                                    folderStore.removePlaylist(id: playlist.id)
+                                } label: {
+                                    Label("Remove from Folder", systemImage: "folder.badge.minus")
+                                }
+                            }
+                        }
+
+                        ForEach(containedSmartPlaylists) { smart in
+                            NavigationLink {
+                                SmartPlaylistDetailView(playlist: smart, sourceSongs: smartSourceSongs)
+                            } label: {
+                                folderSmartCard(smart)
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button {
+                                    folderStore.removeSmartPlaylist(id: smart.id)
+                                } label: {
+                                    Label("Remove from Folder", systemImage: "folder.badge.minus")
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, Theme.Layout.screenPadding)
+                    .padding(.vertical, 12)
+                    .padding(.bottom, 90)
+                }
+            }
+        }
+        .navigationTitle(folder?.name ?? "Folder")
+        .navigationBarTitleDisplayMode(.large)
+        .preferredColorScheme(Theme.colorScheme)
+    }
+
+    private func folderPlaylistCard(_ playlist: Playlist) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            PlaylistCover(playlist: playlist, size: 400)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
+            Text(playlist.name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.primaryText)
+                .lineLimit(1)
+            if let count = playlist.songCount {
+                Text("\(count) songs")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func folderSmartCard(_ smart: SmartPlaylist) -> some View {
+        let songs = smart.resolve(from: smartSourceSongs)
+        return VStack(alignment: .leading, spacing: 6) {
+            SmartPlaylistCover(songs: songs)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
+            Text(smart.name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.primaryText)
+                .lineLimit(1)
+            Text("\(songs.count) songs")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .contentShape(Rectangle())
     }
 }
 
@@ -537,7 +854,7 @@ private struct SmartPlaylistDetailView: View {
             }
         }
         .navigationBarHidden(true)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .background(SwipeBackEnabler())
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -552,7 +869,7 @@ private struct SmartPlaylistDetailView: View {
                             }
                         }
                 }
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(Theme.colorScheme)
             case .artist(let artist):
                 NavigationStack {
                     ArtistDetailView(artist: artist)
@@ -562,7 +879,7 @@ private struct SmartPlaylistDetailView: View {
                             }
                         }
                 }
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(Theme.colorScheme)
             case .edit:
                 EmptyView()
             }
@@ -667,7 +984,7 @@ private struct SmartPlaylistDetailView: View {
             }
         }
         .padding(.horizontal, 20)
-        .simultaneousGesture(verticalPlaybackSwipe)
+        .overlay(alignment: .leading) { playbackSwipeGutter }
     }
 
     private var footer: some View {
@@ -711,6 +1028,13 @@ private struct SmartPlaylistDetailView: View {
                       abs(value.translation.width) < 55 else { return }
                 moveWithinSmartPlaylist(delta: value.translation.height < 0 ? 1 : -1)
             }
+    }
+
+    private var playbackSwipeGutter: some View {
+        Color.clear
+            .frame(width: 56)
+            .contentShape(Rectangle())
+            .gesture(verticalPlaybackSwipe)
     }
 
     private func moveWithinSmartPlaylist(delta: Int) {

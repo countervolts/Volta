@@ -5,8 +5,10 @@ struct ServerRecord: Codable, Identifiable, Hashable {
     var displayName: String
     var urlString: String
     // optional alternate base URL used while on cellular (e.g. a public address when
-    // the primary urlString is a LAN-only one). nil/blank → always use urlString.
+    // the primary urlString is a LAN-only one). nil/blank > always use urlString.
     var cellularURLString: String?
+    // optional alternate username used while on cellular. nil/blank > use username.
+    var cellularUsername: String?
     var username: String
     var isCurrent: Bool
     var addedAt: Date
@@ -15,6 +17,7 @@ struct ServerRecord: Codable, Identifiable, Hashable {
          displayName: String,
          urlString: String,
          cellularURLString: String? = nil,
+         cellularUsername: String? = nil,
          username: String,
          isCurrent: Bool = false,
          addedAt: Date = .now) {
@@ -22,6 +25,7 @@ struct ServerRecord: Codable, Identifiable, Hashable {
         self.displayName = displayName
         self.urlString = urlString
         self.cellularURLString = cellularURLString
+        self.cellularUsername = cellularUsername
         self.username = username
         self.isCurrent = isCurrent
         self.addedAt = addedAt

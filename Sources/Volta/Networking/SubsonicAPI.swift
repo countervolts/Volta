@@ -1,9 +1,30 @@
 import Foundation
 
+struct ServerHealthSnapshot: Sendable {
+    let status: String
+    let apiVersion: String?
+    let serverType: String?
+    let latencyMS: Int
+    let checkedAt: Date
+}
+
 extension SubsonicClient {
 
     func ping() async throws {
         _ = try await request("ping")
+    }
+
+    func serverHealth() async throws -> ServerHealthSnapshot {
+        let start = Date()
+        let body = try await request("ping")
+        let latency = max(0, Int(Date().timeIntervalSince(start) * 1000))
+        return ServerHealthSnapshot(
+            status: body.status ?? "unknown",
+            apiVersion: body.version,
+            serverType: body.type,
+            latencyMS: latency,
+            checkedAt: Date()
+        )
     }
 
     // MARK: - Folder / directory browsing
@@ -79,6 +100,18 @@ extension SubsonicClient {
         return body.playlist
     }
 
+    // create a playlist seeded with an ordered list of songs (used by the AI
+    // playlist maker). Subsonic's createPlaylist accepts repeated songId items.
+    func createPlaylist(name: String, songIDs: [String]) async throws -> Playlist? {
+        var query = [URLQueryItem(name: "name", value: name)]
+        query.append(contentsOf: songIDs.map { URLQueryItem(name: "songId", value: $0) })
+        let body = try await request("createPlaylist", query: query)
+        if let pl = body.playlist { return pl }
+        // some servers return an empty body on createPlaylist; fall back to
+        // locating the newly created playlist by name so the caller still gets it.
+        return try? await playlists().first { $0.name == name }
+    }
+
     func addToPlaylist(playlistID: String, songID: String) async throws {
         _ = try await request("updatePlaylist", query: [
             URLQueryItem(name: "playlistId", value: playlistID),
@@ -108,6 +141,11 @@ extension SubsonicClient {
     func album(id: String) async throws -> Album? {
         let body = try await request("getAlbum", query: [URLQueryItem(name: "id", value: id)])
         return body.album
+    }
+
+    func song(id: String) async throws -> Song? {
+        let body = try await request("getSong", query: [URLQueryItem(name: "id", value: id)])
+        return body.song
     }
 
     func songsForArtist(id: String) async throws -> [Song] {

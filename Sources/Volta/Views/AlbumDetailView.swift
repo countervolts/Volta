@@ -1,6 +1,12 @@
 import SwiftUI
 import UIKit
 
+enum iPadDetailPanel: String, CaseIterable {
+    case songs = "Songs"
+    case lyrics = "Lyrics"
+    case queue = "Queue"
+}
+
 struct AlbumDetailView: View {
     @Environment(AppState.self) private var appState
     @State private var vm: AlbumDetailViewModel
@@ -8,8 +14,11 @@ struct AlbumDetailView: View {
     @State private var toastMessage: String? = nil
     @State private var drillAlbum: Album? = nil
     @State private var drillArtist: Artist? = nil
+    @State private var showAlbumLosslessInfo = false
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var iPadPanel: iPadDetailPanel = .songs
 
     init(album: Album) {
         _vm = State(wrappedValue: AlbumDetailViewModel(album: album))
@@ -29,21 +38,11 @@ struct AlbumDetailView: View {
     var body: some View {
         ZStack(alignment: .top) {
             bg.ignoresSafeArea()
-
-            ScrollView {
-                VStack(spacing: 0) {
-                    artworkSection
-                    infoSection
-                    actionRow
-                    descriptionSection
-                    trackList
-                    footer
-                    moreBySameArtist
-                    Color.clear.frame(height: 120)
-                }
+            if sizeClass == .regular {
+                iPadLayout
+            } else {
+                phoneScrollView
             }
-            .scrollIndicators(.hidden)
-
             if let msg = toastMessage {
                 VStack {
                     Spacer()
@@ -54,7 +53,7 @@ struct AlbumDetailView: View {
             }
         }
         .navigationBarHidden(true)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .background(SwipeBackEnabler())
         .navigationDestination(item: $drillArtist) { artist in
             ArtistDetailView(artist: artist)
@@ -71,6 +70,73 @@ struct AlbumDetailView: View {
             })
         }
         .task { if let c = appState.client { await vm.load(client: c) } }
+    }
+
+    private var phoneScrollView: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                artworkSection
+                infoSection
+                actionRow
+                descriptionSection
+                trackList
+                footer
+                moreBySameArtist
+                Color.clear.frame(height: 120)
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var iPadLayout: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    artworkSection
+                    infoSection
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .scrollIndicators(.hidden)
+            .frame(width: 340)
+
+            Rectangle()
+                .fill(.white.opacity(0.10))
+                .frame(width: 0.5)
+
+            VStack(spacing: 0) {
+                actionRow
+
+                Picker("", selection: $iPadPanel) {
+                    ForEach(iPadDetailPanel.allCases, id: \.self) {
+                        Text($0.rawValue).tag($0)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+
+                Divider().overlay(.white.opacity(0.12))
+
+                switch iPadPanel {
+                case .songs:
+                    ScrollView {
+                        descriptionSection
+                        trackList
+                        footer
+                        moreBySameArtist
+                        Color.clear.frame(height: 100)
+                    }
+                    .scrollIndicators(.hidden)
+                case .lyrics:
+                    LyricsViewWithState()
+                case .queue:
+                    QueueView()
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Artwork
@@ -119,10 +185,17 @@ struct AlbumDetailView: View {
                 }
                 if !vm.songs.isEmpty {
                     Text("·").foregroundStyle(.white.opacity(0.3))
-                    Label(vm.isLossless ? "Lossless" : "Lossy",
-                          systemImage: vm.isLossless ? "waveform" : "music.note")
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(.white.opacity(0.55))
+                    Button { showAlbumLosslessInfo = true } label: {
+                        Label(vm.isLossless ? "Lossless" : "Lossy",
+                              systemImage: vm.isLossless ? "waveform" : "music.note")
+                            .labelStyle(.titleAndIcon)
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showAlbumLosslessInfo) {
+                        AlbumQualityInsightPopover(songs: vm.songs)
+                            .presentationCompactAdaptation(.popover)
+                    }
                 }
             }
             .font(.footnote)
@@ -221,7 +294,7 @@ struct AlbumDetailView: View {
             }
         }
         .padding(.horizontal, 20)
-        .simultaneousGesture(verticalPlaybackSwipe)
+        .overlay(alignment: .leading) { playbackSwipeGutter }
     }
 
     private func discHeader(_ disc: Int) -> some View {
@@ -345,6 +418,13 @@ struct AlbumDetailView: View {
             }
     }
 
+    private var playbackSwipeGutter: some View {
+        Color.clear
+            .frame(width: 56)
+            .contentShape(Rectangle())
+            .gesture(verticalPlaybackSwipe)
+    }
+
     private func moveWithinAlbum(delta: Int) {
         guard let current = appState.audioPlayer.currentSong,
               let currentIndex = vm.songs.firstIndex(where: { $0.id == current.id }) else { return }
@@ -460,9 +540,14 @@ struct AddToPlaylistSheet: View {
                 Button("Add") {
                     if let pl = confirming, let client = appState.client {
                         Task {
-                            try? await client.addToPlaylist(playlistID: pl.id, songID: song.id)
-                            onAdded(pl.name)
-                            dismiss()
+                            do {
+                                try await client.addToPlaylist(playlistID: pl.id, songID: song.id)
+                                await PlaylistBackupStore.shared.backup(playlistID: pl.id, client: client)
+                                onAdded(pl.name)
+                                dismiss()
+                            } catch {
+                                AppLogger.shared.log("Add to playlist failed: \(error.localizedDescription)", category: .other, level: .error)
+                            }
                         }
                     }
                 }
@@ -477,5 +562,81 @@ struct AddToPlaylistSheet: View {
             }
             isLoading = false
         }
+    }
+}
+
+// MARK: - Album quality insight popover
+
+private struct AlbumQualityInsightPopover: View {
+    let songs: [Song]
+
+    private var losslessCount: Int { songs.filter(\.isLossless).count }
+    private var hiResCount: Int { songs.filter(\.isHiResLossless).count }
+    private var formats: [String] {
+        let suffixes = songs.compactMap { $0.suffix?.uppercased() }
+        return Array(Set(suffixes)).sorted()
+    }
+    private var sampleRates: [Int] {
+        Array(Set(songs.compactMap(\.samplingRate))).sorted()
+    }
+    private var bitDepths: [Int] {
+        Array(Set(songs.compactMap(\.bitDepth))).sorted()
+    }
+
+    private var headline: String {
+        if losslessCount == 0 { return "Lossy Album" }
+        if losslessCount == songs.count {
+            return hiResCount == songs.count ? "Hi-Res Lossless Album" : "Lossless Album"
+        }
+        return "Mixed Quality Album"
+    }
+
+    private var summary: String {
+        if losslessCount == 0 {
+            return "All \(songs.count) tracks use a lossy format."
+        }
+        if losslessCount == songs.count {
+            return hiResCount == songs.count
+                ? "All \(songs.count) tracks are hi-res lossless."
+                : "All \(songs.count) tracks are lossless."
+        }
+        return "\(losslessCount) of \(songs.count) tracks are lossless; the rest use a lossy format."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: losslessCount == songs.count ? "waveform" : "music.note")
+                Text(headline).font(.headline)
+            }
+            .padding(.bottom, 2)
+
+            Text(summary)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !formats.isEmpty { detailRow("Formats", formats.joined(separator: ", ")) }
+            if !sampleRates.isEmpty {
+                detailRow("Sample Rates", sampleRates.map { String(format: "%.1f kHz", Double($0) / 1000) }.joined(separator: ", "))
+            }
+            if !bitDepths.isEmpty {
+                detailRow("Bit Depths", bitDepths.map { "\($0)-bit" }.joined(separator: ", "))
+            }
+            if hiResCount > 0 { detailRow("Hi-Res Tracks", "\(hiResCount) of \(songs.count)") }
+        }
+        .padding(16)
+        .frame(minWidth: 240)
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label).foregroundStyle(.secondary)
+            Spacer(minLength: 24)
+            Text(value).fontWeight(.medium)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.subheadline)
     }
 }

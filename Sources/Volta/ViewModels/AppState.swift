@@ -48,11 +48,16 @@ final class AppState {
         phase = .authenticated
     }
 
-    // persist a cellular-only URL for the current server and apply it immediately
-    // if it changes which URL we should be using right now.
-    func updateCellularURL(_ urlString: String?) {
+    // persist cellular-only URL/login details for the current server and apply
+    // them immediately if they change the connection we should be using now.
+    func updateCellularConnection(urlString: String?, username: String?, password: String?) {
         guard let record = currentServer else { return }
-        currentServer = store.setCellularURL(urlString, for: record)
+        currentServer = store.setCellularConnection(
+            urlString: urlString,
+            username: username,
+            password: password,
+            for: record
+        )
         reapplyNetworkURL()
     }
 
@@ -66,12 +71,13 @@ final class AppState {
               let config = store.config(for: record, cellular: activeIsCellular) else { return }
         // only rebuild the client when the effective base URL actually changed —
         // avoids re-probing sharing + reloading home on every harmless path update.
-        guard config.baseURL != client?.config.baseURL else { return }
+        guard config != client?.config else { return }
         AppLogger.shared.log("🔀 Switching to \(activeIsCellular ? "cellular" : "Wi-Fi") URL: \(config.baseURL.absoluteString)", category: .networking)
         activate(config: config, record: record)
     }
 
     func logout() {
+        audioPlayer.stopAndClear()
         store.clearCurrent()
         client = nil
         currentServer = nil

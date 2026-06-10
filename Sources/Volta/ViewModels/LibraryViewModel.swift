@@ -129,6 +129,22 @@ final class LibraryViewModel {
             .filter { !$0.isEmpty }
     }
 
+    private static func primaryArtistName(_ name: String?) -> String {
+        guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "Unknown Artist"
+        }
+        var earliest = name.endIndex
+        for token in [" featuring ", " feat. ", " feat ", " ft. ", " ft ",
+                      " & ", " x ", " and ", ",", ";", " / ", "/"] {
+            if let range = name.range(of: token, options: .caseInsensitive),
+               range.lowerBound < earliest {
+                earliest = range.lowerBound
+            }
+        }
+        let primary = String(name[..<earliest]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return primary.isEmpty ? name : primary
+    }
+
     private var sourceGenres: [String] {
         source == .server ? genres : Set(sourceSongs.compactMap { $0.genre }).sorted()
     }
@@ -222,7 +238,7 @@ final class LibraryViewModel {
         for song in sourceSongs {
             guard let aid = song.artistId, ids.contains(aid), byID[aid] == nil else { continue }
             byID[aid] = Artist(
-                id: aid, name: song.artist ?? "Unknown Artist", coverArt: song.coverArt,
+                id: aid, name: Self.primaryArtistName(song.artist), coverArt: song.coverArt,
                 albumCount: nil, artistImageUrl: nil, starred: nil, album: nil
             )
         }
@@ -252,7 +268,7 @@ final class LibraryViewModel {
         }
 
         // optionally warm artist profile photos so opening a profile is instant
-        if UserDefaults.standard.bool(forKey: "prefetchArtistImages") {
+        if UserDefaults.standard.bool(forKey: "prefetchArtistImages"), !PerformanceMode.disablePrefetch {
             let toWarm = artists
             Task.detached(priority: .utility) {
                 for artist in toWarm {

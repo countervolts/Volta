@@ -49,7 +49,10 @@ final class AppLogger: @unchecked Sendable {
             if entries.count > maxEntries { entries.removeFirst(entries.count - maxEntries) }
         }
         DispatchQueue.main.async {
-            NotificationCenter.default.post(name: .logEntryAdded, object: nil)
+            NotificationCenter.default.post(name: .logEntryAdded, object: entry)
+            if level != .info {
+                VoltaNotificationCenter.shared.postLog(entry)
+            }
         }
     }
 

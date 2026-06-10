@@ -27,6 +27,8 @@ struct PlaylistDetailView: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var pickedCover: UIImage?
     @AppStorage("showTrackArtwork") private var showTrackArtwork = true
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var iPadPanel: iPadDetailPanel = .songs
 
     init(playlist: Playlist) {
         _vm = State(wrappedValue: PlaylistDetailViewModel(playlist: playlist))
@@ -39,20 +41,11 @@ struct PlaylistDetailView: View {
     var body: some View {
         ZStack(alignment: .top) {
             bg.ignoresSafeArea()
-
-            ScrollView {
-                VStack(spacing: 0) {
-                    artworkSection
-                    infoSection
-                    actionRow
-                    descriptionSection
-                    trackList
-                    footer
-                    Color.clear.frame(height: 120)
-                }
+            if sizeClass == .regular {
+                iPadLayout
+            } else {
+                phoneScrollView
             }
-            .scrollIndicators(.hidden)
-
             if let msg = toastMessage {
                 VStack {
                     Spacer()
@@ -63,12 +56,89 @@ struct PlaylistDetailView: View {
             }
         }
         .navigationBarHidden(true)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .background(SwipeBackEnabler())
         .sheet(item: $activeSheet) { sheet in
             sheetContent(sheet)
         }
         .task { if let c = appState.client { await vm.load(client: c) } }
+    }
+
+    private var phoneScrollView: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                artworkSection
+                infoSection
+                actionRow
+                descriptionSection
+                trackList
+                footer
+                Color.clear.frame(height: 120)
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var iPadArtworkSection: some View {
+        PlaylistCover(playlist: vm.playlist, size: 800, cornerRadius: 14,
+                      onImageLoaded: { image in
+                          let color = ColorExtractor.dominantColor(from: image)
+                          vm.setDominantColor(color)
+                      })
+            .aspectRatio(1, contentMode: .fit)
+            .padding(.horizontal, 36)
+            .shadow(color: .black.opacity(0.45), radius: 28, x: 0, y: 10)
+            .padding(.top, 32)
+    }
+
+    private var iPadLayout: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    iPadArtworkSection
+                    infoSection
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .scrollIndicators(.hidden)
+            .frame(width: 340)
+
+            Rectangle()
+                .fill(.white.opacity(0.10))
+                .frame(width: 0.5)
+
+            VStack(spacing: 0) {
+                actionRow
+
+                Picker("", selection: $iPadPanel) {
+                    ForEach(iPadDetailPanel.allCases, id: \.self) {
+                        Text($0.rawValue).tag($0)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+
+                Divider().overlay(.white.opacity(0.12))
+
+                switch iPadPanel {
+                case .songs:
+                    ScrollView {
+                        descriptionSection
+                        trackList
+                        footer
+                        Color.clear.frame(height: 100)
+                    }
+                    .scrollIndicators(.hidden)
+                case .lyrics:
+                    LyricsViewWithState()
+                case .queue:
+                    QueueView()
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -91,7 +161,7 @@ struct PlaylistDetailView: View {
                         }
                     }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(Theme.colorScheme)
         case .artist(let artist):
             NavigationStack {
                 ArtistDetailView(artist: artist)
@@ -101,7 +171,7 @@ struct PlaylistDetailView: View {
                         }
                     }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(Theme.colorScheme)
         case .edit:
             editSheet
         }
@@ -160,7 +230,7 @@ struct PlaylistDetailView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .presentationDetents([.large])
     }
 
@@ -337,7 +407,7 @@ struct PlaylistDetailView: View {
             }
         }
         .padding(.horizontal, 20)
-        .simultaneousGesture(verticalPlaybackSwipe)
+        .overlay(alignment: .leading) { playbackSwipeGutter }
     }
 
     @ViewBuilder
@@ -397,6 +467,13 @@ struct PlaylistDetailView: View {
                       abs(value.translation.width) < 55 else { return }
                 moveWithinPlaylist(delta: value.translation.height < 0 ? 1 : -1)
             }
+    }
+
+    private var playbackSwipeGutter: some View {
+        Color.clear
+            .frame(width: 56)
+            .contentShape(Rectangle())
+            .gesture(verticalPlaybackSwipe)
     }
 
     private func moveWithinPlaylist(delta: Int) {

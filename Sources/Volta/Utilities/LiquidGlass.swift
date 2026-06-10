@@ -1,9 +1,5 @@
 import SwiftUI
 
-enum LiquidGlassRuntime {
-    static let forceEnabledAtLaunch = UserDefaults.standard.bool(forKey: "forceLiquidGlassUI")
-}
-
 extension View {
     @ViewBuilder
     func glassCard(cornerRadius: CGFloat = 16) -> some View {

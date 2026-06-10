@@ -31,15 +31,36 @@ struct StatsView: View {
             .navigationTitle("Stats")
             .navigationBarTitleDisplayMode(.large)
             .accountToolbar()
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        exportStats()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .tint(Theme.accent)
+                }
+            }
         }
         .tint(Theme.accent)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .onChange(of: vm.period) { _, _ in vm.offset = 0; vm.recompute() }
         .onChange(of: vm.offset) { _, _ in vm.recompute() }
         .task { vm.recompute() }
         .onAppear { vm.recompute() }
         .onReceive(NotificationCenter.default.publisher(for: .playEventRecorded)) { _ in
             vm.recompute()
+        }
+    }
+
+    private func exportStats() {
+        do {
+            let urls = try StatsExporter.exportURLs()
+            VoltaNotificationCenter.shared.post("Stats exported", tone: .success)
+            ShareSheet.present(urls)
+        } catch {
+            AppLogger.shared.log("Stats export failed: \(error.localizedDescription)", category: .other, level: .error)
+            VoltaNotificationCenter.shared.post("Stats export failed", tone: .error)
         }
     }
 

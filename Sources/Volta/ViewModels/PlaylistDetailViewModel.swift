@@ -30,6 +30,7 @@ final class PlaylistDetailViewModel {
         guard index >= 0, index < songs.count else { return }
         songs.remove(at: index)
         try? await client.removeFromPlaylist(playlistID: playlist.id, index: index)
+        await PlaylistBackupStore.shared.backup(playlistID: playlist.id, client: client)
     }
 
     // edit sheet: name + description in one go (the cover is stored locally by the
@@ -43,6 +44,7 @@ final class PlaylistDetailViewModel {
             try? await client.updatePlaylistComment(playlistID: playlist.id, comment: comment)
         }
         await load(client: client)
+        PlaylistBackupStore.shared.backup(playlist: playlist, client: client)
     }
 
     func setDominantColor(_ color: UIColor) { dominantColor = color }

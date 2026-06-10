@@ -29,6 +29,7 @@ final class HomeViewModel {
 
     private(set) var isLoading = false
     private(set) var hasLoaded = false
+    private(set) var serverUnavailable = false
     private var loadedServerID: String?
     private var didFetch = false
 
@@ -46,8 +47,11 @@ final class HomeViewModel {
 
         // hydrate from the on-disk snapshot for instant content while the
         // network refresh runs underneath.
+        let todaySeed = SeededRNG.daySeed()
+        let cachedSnapshot = DiskCache.load(HomeSnapshot.self, key: Self.cacheKey(serverID))
+        let cachedRandomSectionsAreFresh = cachedSnapshot?.generatedDaySeed == todaySeed
         if !hasLoaded || serverChanged,
-           let snapshot = DiskCache.load(HomeSnapshot.self, key: Self.cacheKey(serverID)) {
+           let snapshot = cachedSnapshot {
             apply(snapshot)
             hasLoaded = true
         }
@@ -55,10 +59,17 @@ final class HomeViewModel {
         isLoading = true
         defer { isLoading = false }
 
+        guard (try? await client.ping()) != nil else {
+            serverUnavailable = true
+            hasLoaded = true
+            return
+        }
+        serverUnavailable = false
+
         // each section loads independently; a failure leaves that section empty
         // rather than failing the whole screen.
-        async let picksResult       = loadPicks(client: client)
-        async let mixesResult       = loadMixes(client: client)
+        async let picksResult       = cachedRandomSectionsAreFresh && !force ? picks : loadPicks(client: client)
+        async let mixesResult       = cachedRandomSectionsAreFresh && !force ? mixes : loadMixes(client: client)
         async let recentResult      = loadRecentlyPlayed(client: client)
         async let moreLikeResult    = loadMoreLike(client: client)
         async let discoverResult    = loadDiscover(client: client, serverID: serverID, store: appState.store)
@@ -89,6 +100,7 @@ final class HomeViewModel {
         var discover: [Album]
         var newReleases: [Album]
         var topArtists: [Artist]
+        var generatedDaySeed: UInt64?
     }
 
     private static func cacheKey(_ serverID: String) -> String {
@@ -108,7 +120,8 @@ final class HomeViewModel {
     private func saveSnapshot(serverID: String) {
         let snapshot = HomeSnapshot(
             picks: picks, mixes: mixes, recentlyPlayed: recentlyPlayed, moreLike: moreLike,
-            discover: discover, newReleases: newReleases, topArtists: topArtists
+            discover: discover, newReleases: newReleases, topArtists: topArtists,
+            generatedDaySeed: SeededRNG.daySeed()
         )
         let key = Self.cacheKey(serverID)
         Task.detached(priority: .utility) {

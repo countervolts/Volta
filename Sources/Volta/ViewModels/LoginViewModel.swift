@@ -58,10 +58,12 @@ final class LoginViewModel {
     private func failServer() {
         serverError = "Could not reach the server."
         serverShake += 1
+        VoltaNotificationCenter.shared.post("Could not reach the server", tone: .error)
     }
 
     private func failCredentials() {
         credentialsError = "Incorrect username or password."
         credentialsShake += 1
+        VoltaNotificationCenter.shared.post("Incorrect username or password", tone: .error)
     }
 }

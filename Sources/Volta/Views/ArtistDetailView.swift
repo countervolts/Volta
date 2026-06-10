@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 
 struct ArtistDetailView: View {
     @Environment(AppState.self) private var appState
@@ -6,14 +7,12 @@ struct ArtistDetailView: View {
     @State private var drillAlbum: Album?
     @State private var addToPlaylistSong: Song? = nil
     @State private var toastMessage: String? = nil
+    @State private var showBioSheet = false
     // local mirror of the VM's profile photo. updating @State guarantees a body
     // re-render (so the picture appears as soon as it loads, without needing the
     // user to interact with the page first).
     @State private var profileImage: UIImage? = nil
-    // header drives off the live scroll offset: 0 at top, >0 scrolled up, <0 pulled down
-    @State private var scrollY: CGFloat = 0
-    @State private var pendingScrollY: CGFloat = 0
-    @State private var scrollThrottler: VSyncThrottler?
+    @State private var scrollState = ArtistProfileScrollState()
 
     init(artist: Artist) {
         _vm = State(wrappedValue: ArtistDetailViewModel(artist: artist))
@@ -28,43 +27,25 @@ struct ArtistDetailView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let width   = proxy.size.width
-            let stretch = max(0, -scrollY)                    // pull-down grows the photo
-            let shift   = max(0, scrollY)                     // scroll-up slides it away
-            let headerH = Self.headerHeight + stretch
+            let width = proxy.size.width
+            let headerHeight = Self.headerHeight + proxy.safeAreaInsets.top
 
             ZStack(alignment: .top) {
                 bg.ignoresSafeArea()
 
-                // stretchy header. it RESPECTS the top safe area (no ignoresSafeArea)
-                // exactly like the album/playlist screens — that inset is what keeps the
-                // parent library's `.searchable` bar from overlapping the photo on
-                // swipe-back. bg fills behind the status bar; the photo starts at the
-                // safe-area top. lives OUTSIDE the ScrollView so it can parallax.
-                ZStack(alignment: .bottomLeading) {
-                    headerImage
-                        .frame(width: width, height: headerH)
-                        .clipped()
-                        .overlay {
-                            LinearGradient(
-                                colors: [.clear, bg.opacity(0.6), bg],
-                                startPoint: .init(x: 0.5, y: 0.35),
-                                endPoint: .bottom
-                            )
-                        }
+                ArtistProfileHeader(
+                    width: width,
+                    baseHeight: headerHeight,
+                    bg: bg,
+                    artistName: vm.displayArtist.name,
+                    profileImage: profileImage ?? vm.artistImage,
+                    fallbackAlbum: vm.artworkResolved ? vm.albums.first : nil,
+                    dominantColor: vm.dominantColor,
+                    scrollState: scrollState,
+                    onFallbackImageLoaded: { vm.setDominantColor(ColorExtractor.dominantColor(from: $0)) }
+                )
 
-                    Text(vm.displayArtist.name)
-                        .font(.system(size: 36, weight: .bold))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.4), radius: 4, x: 0, y: 2)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 20)
-                }
-                .frame(width: width, height: headerH, alignment: .bottom)
-                .offset(y: -shift)
-                .allowsHitTesting(false)
-
-                artistScroll
+                artistScroll(headerHeight: headerHeight)
 
                 if vm.isLoading && vm.albums.isEmpty {
                     ProgressView()
@@ -76,29 +57,23 @@ struct ArtistDetailView: View {
                 if let msg = toastMessage {
                     VStack {
                         Spacer()
-                        Text(msg)
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 16).padding(.vertical, 10)
-                            .background(.ultraThinMaterial, in: Capsule())
+                        PlaybackActionToast(message: msg)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                             .padding(.bottom, 100)
                     }
                 }
             }
         }
+        .ignoresSafeArea(edges: .top)
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .background(SwipeBackEnabler())
         .onAppear {
-            scrollThrottler = VSyncThrottler {
-                scrollY = pendingScrollY
-            }
+            scrollState.start()
         }
         .onDisappear {
-            scrollThrottler?.invalidate()
-            scrollThrottler = nil
+            scrollState.stop()
         }
         .onChange(of: vm.artistImage) { _, img in profileImage = img }
         .navigationDestination(item: $drillAlbum) { album in
@@ -113,20 +88,26 @@ struct ArtistDetailView: View {
                 }
             })
         }
+        .sheet(isPresented: $showBioSheet) {
+            ArtistBioSheet(
+                artistName: vm.displayArtist.name,
+                biography: vm.biography ?? ""
+            )
+        }
         .task { if let c = appState.client { await vm.load(client: c) } }
     }
 
     @ViewBuilder
-    private var artistScroll: some View {
+    private func artistScroll(headerHeight: CGFloat) -> some View {
         if #available(iOS 18.0, *) {
-            scrollContent(includeLegacyOffsetProbe: false)
+            scrollContent(headerHeight: headerHeight, includeLegacyOffsetProbe: false)
                 .onScrollGeometryChange(for: CGFloat.self) { geo in
                     geo.contentOffset.y + geo.contentInsets.top
                 } action: { _, newValue in
                     updateScrollOffset(newValue)
                 }
         } else {
-            scrollContent(includeLegacyOffsetProbe: true)
+            scrollContent(headerHeight: headerHeight, includeLegacyOffsetProbe: true)
                 .coordinateSpace(name: Self.legacyScrollSpace)
                 .onPreferenceChange(ArtistScrollOffsetPreferenceKey.self) { newValue in
                     updateScrollOffset(newValue)
@@ -134,7 +115,7 @@ struct ArtistDetailView: View {
         }
     }
 
-    private func scrollContent(includeLegacyOffsetProbe: Bool) -> some View {
+    private func scrollContent(headerHeight: CGFloat, includeLegacyOffsetProbe: Bool) -> some View {
         ScrollView {
             if includeLegacyOffsetProbe {
                 GeometryReader { geo in
@@ -147,7 +128,7 @@ struct ArtistDetailView: View {
             }
 
             VStack(spacing: 0) {
-                Color.clear.frame(height: Self.headerHeight)   // sits over the header
+                Color.clear.frame(height: headerHeight)   // sits over the header
                 artistActionRow
                 topSongsSection
                 albumsSection
@@ -162,42 +143,7 @@ struct ArtistDetailView: View {
     }
 
     private func updateScrollOffset(_ newValue: CGFloat) {
-        guard abs(newValue - pendingScrollY) > 0.5 else { return }
-        pendingScrollY = newValue
-        if let scrollThrottler {
-            scrollThrottler.schedule()
-        } else {
-            scrollY = newValue
-        }
-    }
-
-    // MARK: - Header image
-
-    @ViewBuilder
-    private var headerImage: some View {
-        if let ui = profileImage ?? vm.artistImage {
-            Image(uiImage: ui)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-        } else if vm.artworkResolved, let firstAlbum = vm.albums.first {
-            // only fall back to an album cover once the real artist photo lookup
-            // has finished — prevents flashing an album cover as the profile picture
-            ArtworkView(
-                coverArtID: firstAlbum.coverArt,
-                size: 800,
-                cornerRadius: 0,
-                onImageLoaded: { vm.setDominantColor(ColorExtractor.dominantColor(from: $0)) }
-            )
-            .aspectRatio(1, contentMode: .fill)
-        } else {
-            Rectangle()
-                .fill(Color(vm.dominantColor).opacity(0.3))
-                .overlay {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 80, weight: .light))
-                        .foregroundStyle(.white.opacity(0.3))
-                }
-        }
+        scrollState.update(newValue)
     }
 
     // MARK: - Play / shuffle this artist
@@ -479,11 +425,10 @@ struct ArtistDetailView: View {
                     Text(bio)
                         .font(.footnote)
                         .foregroundStyle(.white.opacity(0.65))
-                        .lineLimit(vm.isDescriptionExpanded ? nil : 4)
-                        .animation(.easeInOut(duration: 0.3), value: vm.isDescriptionExpanded)
+                        .lineLimit(4)
 
-                    Button { vm.toggleBio() } label: {
-                        Text(vm.isDescriptionExpanded ? "Less" : "More")
+                    Button { showBioSheet = true } label: {
+                        Text("More")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(Theme.accent)
                     }
@@ -570,6 +515,111 @@ struct ArtistDetailView: View {
     }
 }
 
+@MainActor
+@Observable
+private final class ArtistProfileScrollState {
+    var offsetY: CGFloat = 0
+
+    @ObservationIgnored private var pendingOffsetY: CGFloat = 0
+    @ObservationIgnored private var throttler: VSyncThrottler?
+
+    func start() {
+        guard throttler == nil else { return }
+        throttler = VSyncThrottler { [weak self] in
+            guard let self else { return }
+            offsetY = Self.pixelAligned(pendingOffsetY)
+        }
+    }
+
+    func stop() {
+        throttler?.invalidate()
+        throttler = nil
+    }
+
+    func update(_ newValue: CGFloat) {
+        guard abs(newValue - pendingOffsetY) > 0.5 else { return }
+        pendingOffsetY = newValue
+        if let throttler {
+            throttler.schedule()
+        } else {
+            offsetY = Self.pixelAligned(newValue)
+        }
+    }
+
+    private static func pixelAligned(_ value: CGFloat) -> CGFloat {
+        let scale = UIScreen.main.scale
+        return (value * scale).rounded() / scale
+    }
+}
+
+private struct ArtistProfileHeader: View {
+    let width: CGFloat
+    let baseHeight: CGFloat
+    let bg: Color
+    let artistName: String
+    let profileImage: UIImage?
+    let fallbackAlbum: Album?
+    let dominantColor: UIColor
+    let scrollState: ArtistProfileScrollState
+    let onFallbackImageLoaded: (UIImage) -> Void
+
+    var body: some View {
+        let stretch = max(0, -scrollState.offsetY)
+        let shift = max(0, scrollState.offsetY)
+        let headerHeight = baseHeight + stretch
+
+        // Lives outside the ScrollView so only this small header redraws on scroll.
+        ZStack(alignment: .bottomLeading) {
+            headerImage
+                .frame(width: width, height: headerHeight)
+                .clipped()
+                .overlay {
+                    LinearGradient(
+                        colors: [.clear, bg.opacity(0.6), bg],
+                        startPoint: .init(x: 0.5, y: 0.35),
+                        endPoint: .bottom
+                    )
+                }
+
+            Text(artistName)
+                .font(.system(size: 36, weight: .bold))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.4), radius: 4, x: 0, y: 2)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+        }
+        .frame(width: width, height: headerHeight, alignment: .bottom)
+        .offset(y: -shift)
+        .transaction { $0.animation = nil }
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var headerImage: some View {
+        if let profileImage {
+            Image(uiImage: profileImage)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else if let fallbackAlbum {
+            ArtworkView(
+                coverArtID: fallbackAlbum.coverArt,
+                size: 800,
+                cornerRadius: 0,
+                onImageLoaded: onFallbackImageLoaded
+            )
+            .aspectRatio(1, contentMode: .fill)
+        } else {
+            Rectangle()
+                .fill(Color(dominantColor).opacity(0.3))
+                .overlay {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 80, weight: .light))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+        }
+    }
+}
+
 private struct ArtistScrollOffsetPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
 
@@ -578,10 +628,39 @@ private struct ArtistScrollOffsetPreferenceKey: PreferenceKey {
     }
 }
 
+private struct ArtistBioSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let artistName: String
+    let biography: String
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(biography)
+                    .font(.body)
+                    .foregroundStyle(Theme.primaryText)
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+            }
+            .background(Theme.background.ignoresSafeArea())
+            .navigationTitle("About \(artistName)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+        }
+        .preferredColorScheme(Theme.colorScheme)
+    }
+}
+
 // MARK: - HTML stripper
 
 extension String {
-    // lightweight HTML → plain text. deliberately avoids NSAttributedString's
+    // lightweight HTML > plain text. deliberately avoids NSAttributedString's
     // WebKit-backed parser: it's main-thread only and spins a nested run loop, so
     // calling it during a SwiftUI view update re-enters the AttributeGraph and
     // aborts the app (that was the artist-page crash).

@@ -10,6 +10,10 @@ final class SmartPlaylistStore {
     private(set) var playlists: [SmartPlaylist] = []
 
     private init() {
+        reload()
+    }
+
+    func reload() {
         guard let data = UserDefaults.standard.data(forKey: Self.key),
               let decoded = try? JSONDecoder().decode([SmartPlaylist].self, from: data) else {
             playlists = []

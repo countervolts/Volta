@@ -49,7 +49,7 @@ struct MixDetailView: View {
             }
         }
         .navigationBarHidden(true)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .background(SwipeBackEnabler())
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -64,7 +64,7 @@ struct MixDetailView: View {
                             Button("Done") { activeSheet = nil }.foregroundStyle(Theme.accent)
                         } }
                 }
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(Theme.colorScheme)
             case .artist(let artist):
                 NavigationStack {
                     ArtistDetailView(artist: artist)
@@ -72,7 +72,7 @@ struct MixDetailView: View {
                             Button("Done") { activeSheet = nil }.foregroundStyle(Theme.accent)
                         } }
                 }
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(Theme.colorScheme)
             }
         }
     }

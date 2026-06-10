@@ -22,6 +22,7 @@ struct PickCard: View {
                                 accentColor = Color(ColorExtractor.dominantColor(from: image))
                             })
                     .frame(width: geo.size.width, height: geo.size.width)
+                    .scaleEffect(1.02)
                     .clipped()
             }
             .aspectRatio(1, contentMode: .fit)
@@ -29,15 +30,21 @@ struct PickCard: View {
             .clipped()
 
             VStack(alignment: .leading, spacing: 4) {
-                if let label = topLabel {
-                    Text(label)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.75))
-                }
+                // always reserve the caption line (a blank space when there's no
+                // genre/year) so every pick card — albums and mixes alike — has
+                // an identical three-line text block and the same overall height.
+                Text(topLabel ?? " ")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(1)
+                // single line + tail truncation keeps every card the same height
+                // so a long title can't make this card taller than its neighbours
+                // (which is what left the squished art / side black bar).
                 Text(album.name)
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text(album.displayArtist)
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.85))
