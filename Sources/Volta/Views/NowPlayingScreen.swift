@@ -16,6 +16,7 @@ struct NowPlayingScreen: View {
     @State private var infoSheet: SongMenuSheet? = nil
     @State private var showLosslessInfo = false
     @State private var showAudioSignalPath = false
+    @State private var showVisualizer = false
     // scrub state lifted out of ScrubBar so the time labels share it (so the bar,
     // elapsed and remaining all read one snapshot and can't drift apart)
     @State private var scrubbing = false
@@ -27,35 +28,29 @@ struct NowPlayingScreen: View {
     @State private var tasteStore = TasteStore.shared
     @AppStorage("showLosslessBadge") private var showLosslessBadge = true
     @AppStorage("artworkAnimation") private var artworkAnimation = true
+    @AppStorage("dynamicBackground") private var dynamicBackground = true
     // observe accent so player controls retint live on change
     @AppStorage("accentColorName") private var accentColorName = "purple"
 
     // skip/prev nudge animation
     @State private var skipNudge: CGFloat = 0
     @State private var prevNudge: CGFloat = 0
+    @State private var playerBackground = Color(white: 0.08)
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var audio: AudioPlayer { appState.audioPlayer }
     private var currentTaste: TasteState {
         audio.currentSong.map { tasteStore.state(for: $0.id) } ?? .neutral
     }
 
-    private var bg: Color {
-        if let image = audio.currentArtwork {
-            return ColorExtractor.backgroundSwiftUI(from: image)
-        }
-        return Color(white: 0.08)
-    }
-
     var body: some View {
         ZStack {
-            bg.ignoresSafeArea()
-                .animation(.easeInOut(duration: 0.6), value: audio.currentSong?.id)
+            playerBackground.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                dragHandle
-                tabContent
-                Spacer(minLength: 0).frame(maxHeight: 40)
-                controls
+            if sizeClass == .regular {
+                iPadLayout
+            } else {
+                phoneLayout
             }
         }
         .gesture(
@@ -92,6 +87,9 @@ struct NowPlayingScreen: View {
         .sheet(isPresented: $showAudioSignalPath) {
             AudioSignalPathSheet(song: audio.currentSong)
         }
+        .fullScreenCover(isPresented: $showVisualizer) {
+            AudioVisualizerScreen(audio: audio)
+        }
         .sheet(item: $albumToShow) { album in
             NavigationStack {
                 AlbumDetailView(album: album)
@@ -102,7 +100,7 @@ struct NowPlayingScreen: View {
                         }
                     }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(Theme.colorScheme)
         }
         .sheet(item: $artistToShow) { artist in
             NavigationStack {
@@ -114,18 +112,75 @@ struct NowPlayingScreen: View {
                         }
                     }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(Theme.colorScheme)
         }
         .onAppear {
             dragThrottler = VSyncThrottler {
                 dragOffset = pendingDragOffset
             }
+            refreshPlayerBackground(animated: false)
         }
         .onDisappear {
             dragThrottler?.invalidate()
             dragThrottler = nil
         }
-        .preferredColorScheme(.dark)
+        .onChange(of: audio.currentSong?.id) { _, _ in
+            refreshPlayerBackground(animated: true)
+        }
+        .onChange(of: audio.currentArtwork == nil) { _, _ in
+            refreshPlayerBackground(animated: true)
+        }
+        .onChange(of: dynamicBackground) { _, _ in
+            refreshPlayerBackground(animated: true)
+        }
+        .preferredColorScheme(Theme.colorScheme)
+    }
+
+    private var phoneLayout: some View {
+        VStack(spacing: 0) {
+            dragHandle
+            tabContent
+            Spacer(minLength: 0).frame(maxHeight: 40)
+            controls
+        }
+    }
+
+    @ViewBuilder
+    private var iPadLayout: some View {
+        if activeTab != .nowPlaying {
+            HStack(alignment: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    dragHandle
+                    nowPlayingContent
+                    Spacer(minLength: 0).frame(maxHeight: 40)
+                    controls
+                }
+                .frame(width: 420)
+
+                Rectangle()
+                    .fill(.white.opacity(0.10))
+                    .frame(width: 0.5)
+
+                if activeTab == .lyrics {
+                    LyricsViewWithState()
+                        .frame(maxWidth: .infinity)
+                } else {
+                    QueueView()
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .transition(.opacity)
+        } else {
+            VStack(spacing: 0) {
+                dragHandle
+                nowPlayingContent
+                Spacer(minLength: 0).frame(maxHeight: 40)
+                controls
+            }
+            .frame(maxWidth: 480)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .transition(.opacity)
+        }
     }
 
     // MARK: - Share / sleep helpers
@@ -357,7 +412,7 @@ struct NowPlayingScreen: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .aspectRatio(1, contentMode: .fit)
-        .scaleEffect(artworkAnimation ? (audio.isPlaying ? 1.0 : 0.88) : 1.0)
+        .scaleEffect((artworkAnimation && !PerformanceMode.reduceAnimations) ? (audio.isPlaying ? 1.0 : 0.88) : 1.0)
         .animation(.spring(response: 0.5, dampingFraction: 0.75), value: audio.isPlaying)
         .id(audio.currentSong?.id)
         .transition(.asymmetric(
@@ -369,6 +424,19 @@ struct NowPlayingScreen: View {
     private var trackInfo: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 5) {
+                if audio.isMixing && audio.transitionMode == .automix {
+                    HStack(spacing: 5) {
+                        Image(systemName: "waveform.path")
+                            .symbolEffect(.variableColor.iterative, options: .repeating)
+                        Text("Mixing")
+                    }
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Theme.accent.opacity(0.16)))
+                    .transition(.opacity.combined(with: .scale))
+                }
                 Text(audio.currentSong?.title ?? " ")
                     .font(.title2.bold())
                     .foregroundStyle(.white)
@@ -599,9 +667,20 @@ struct NowPlayingScreen: View {
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity)
 
-                AirPlayButton()
+                OutputRouteButton()
                     .frame(width: 44, height: 44)
                     .frame(maxWidth: .infinity)
+
+                Button {
+                    showVisualizer = true
+                } label: {
+                    Image(systemName: Symbols.visualizer)
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
 
                 sleepTimerMenu
 
@@ -635,10 +714,177 @@ struct NowPlayingScreen: View {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.65).delay(0.1)) { prevNudge = 0 }
     }
 
+    private func refreshPlayerBackground(animated: Bool) {
+        guard dynamicBackground, !PerformanceMode.disableDynamicBackground else {
+            let fallback = Color(white: 0.08)
+            if animated {
+                withAnimation(.easeInOut(duration: 0.2)) { playerBackground = fallback }
+            } else {
+                playerBackground = fallback
+            }
+            return
+        }
+        guard let image = audio.currentArtwork else { return }
+        let next = ColorExtractor.backgroundSwiftUI(from: image)
+        if animated {
+            withAnimation(.easeInOut(duration: 0.55)) { playerBackground = next }
+        } else {
+            playerBackground = next
+        }
+    }
+
     private func formatTime(_ t: TimeInterval) -> String {
         guard t.isFinite, t >= 0 else { return "0:00" }
         let s = Int(t)
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+private struct AudioVisualizerScreen: View {
+    let audio: AudioPlayer
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !audio.isPlaying)) { timeline in
+                Canvas { context, size in
+                    drawVoltaVisual(context: &context, size: size, date: timeline.date)
+                }
+            }
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.white.opacity(0.14), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 18)
+
+                Spacer()
+
+                VStack(spacing: 8) {
+                    Text(audio.currentSong?.title ?? "Not Playing")
+                        .font(.title2.bold())
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(audio.currentSong?.artist ?? " ")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 28)
+                .padding(.bottom, 24)
+
+                HStack(spacing: 36) {
+                    Button { audio.skipPrevious() } label: {
+                        Image(systemName: Symbols.previous)
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 58, height: 58)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { audio.togglePlayPause() } label: {
+                        Image(systemName: audio.isPlaying ? Symbols.pause : Symbols.play)
+                            .font(.system(size: 38, weight: .bold))
+                            .foregroundStyle(.black)
+                            .frame(width: 78, height: 78)
+                            .background(.white, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { audio.skipNext() } label: {
+                        Image(systemName: Symbols.next)
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 58, height: 58)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.bottom, 44)
+            }
+        }
+        .preferredColorScheme(Theme.colorScheme)
+    }
+
+    private func drawVoltaVisual(context: inout GraphicsContext, size: CGSize, date: Date) {
+        let center = CGPoint(x: size.width / 2, y: size.height * 0.43)
+        let side = min(size.width, size.height)
+        let baseRadius = side * 0.18
+        let liveTime = audio.liveTime()
+        let clock = date.timeIntervalSinceReferenceDate + liveTime
+        let seed = Double(abs(audio.currentSong?.id.hashValue ?? 13) % 997) / 97.0
+        let energy = audio.isPlaying ? 1.0 : 0.18
+
+        let glowRect = CGRect(x: center.x - side * 0.46, y: center.y - side * 0.46, width: side * 0.92, height: side * 0.92)
+        context.fill(
+            Path(ellipseIn: glowRect),
+            with: .radialGradient(
+                Gradient(colors: [Theme.accent.opacity(0.34 * energy), .clear]),
+                center: center,
+                startRadius: 0,
+                endRadius: side * 0.46
+            )
+        )
+
+        for ring in 0..<5 {
+            let progress = Double(ring) / 4.0
+            let pulse = 0.5 + 0.5 * sin(clock * (1.2 + progress) + seed + progress * 4.0)
+            let radius = baseRadius + CGFloat(ring) * side * 0.052 + CGFloat(pulse * energy) * 18
+            let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+            let path = Path(ellipseIn: rect)
+            let dash = [CGFloat(5 + ring * 3), CGFloat(8 + ring * 2)]
+            context.stroke(
+                path,
+                with: .linearGradient(
+                    Gradient(colors: [Theme.accent.opacity(0.85), .white.opacity(0.55), .cyan.opacity(0.55)]),
+                    startPoint: CGPoint(x: rect.minX, y: rect.minY),
+                    endPoint: CGPoint(x: rect.maxX, y: rect.maxY)
+                ),
+                style: StrokeStyle(lineWidth: CGFloat(1.4 + progress * 2.2), lineCap: .round, dash: dash, dashPhase: CGFloat(clock * (18 + progress * 20)))
+            )
+        }
+
+        let spokeCount = 72
+        for i in 0..<spokeCount {
+            let p = Double(i) / Double(spokeCount)
+            let phase = clock * (1.6 + p * 2.0) + p * .pi * 8 + seed
+            let wave = abs(sin(phase) * 0.6 + sin(phase * 0.37 + seed) * 0.4)
+            let angle = p * .pi * 2 + clock * 0.18
+            let inner = baseRadius * 0.82 + CGFloat(wave * 16 * energy)
+            let outer = inner + CGFloat(18 + wave * 72 * energy)
+            let a = CGFloat(angle)
+            let p1 = CGPoint(x: center.x + cos(a) * inner, y: center.y + sin(a) * inner)
+            let p2 = CGPoint(x: center.x + cos(a) * outer, y: center.y + sin(a) * outer)
+            var path = Path()
+            path.move(to: p1)
+            path.addLine(to: p2)
+            context.stroke(path, with: .color(.white.opacity(0.18 + wave * 0.72)), lineWidth: CGFloat(1.0 + wave * 2.4))
+        }
+
+        for i in 0..<18 {
+            let p = Double(i) / 18.0
+            let angle = clock * (0.35 + p * 0.18) + p * .pi * 2 + seed
+            let radius = baseRadius * 1.55 + CGFloat(sin(clock + p * 5) * 20)
+            let dot = CGPoint(x: center.x + cos(CGFloat(angle)) * radius, y: center.y + sin(CGFloat(angle)) * radius)
+            let size = CGFloat(3 + (sin(clock * 2 + p * 8) + 1) * 3 * energy)
+            context.fill(
+                Path(ellipseIn: CGRect(x: dot.x - size / 2, y: dot.y - size / 2, width: size, height: size)),
+                with: .color(Theme.accent.opacity(0.35 + 0.55 * energy))
+            )
+        }
     }
 }
 
@@ -674,9 +920,6 @@ private struct ScrubBar: View {
                     }
                     .frame(maxHeight: .infinity, alignment: .center)
             }
-            // only the bar's thickness animates (Apple Music feel); the fill itself
-            // is frame-accurate, not animated
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: scrubbing)
             .contentShape(Rectangle())
             .gesture(
                 // minimumDistance > 0 so parent vertical swipe doesn't activate scrubber
@@ -789,14 +1032,36 @@ private struct AnimatedImageView: UIViewRepresentable {
 
 // MARK: - AirPlay button
 
+// the underlying route picker is kept for its tap-to-open behaviour but its own
+// glyph is hidden (clear tint) so a dynamic icon can be overlaid on top.
 private struct AirPlayButton: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let v = AVRoutePickerView()
-        v.tintColor = UIColor.white.withAlphaComponent(0.6)
-        v.activeTintColor = .white
+        v.tintColor = .clear
+        v.activeTintColor = .clear
+        v.prioritizesVideoDevices = false
         return v
     }
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+}
+
+// route picker that shows the active output device (AirPods / headphones / car /
+// speaker). The AirPlay picker sits behind a non-interactive dynamic icon.
+private struct OutputRouteButton: View {
+    @StateObject private var route = OutputRouteMonitor.shared
+
+    var body: some View {
+        ZStack {
+            AirPlayButton()
+            Image(systemName: route.iconName)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(route.isExternal ? Theme.accent : .white.opacity(0.6))
+                .allowsHitTesting(false)
+                .id(route.iconName)
+                .transition(.scale.combined(with: .opacity))
+        }
+        .animation(.spring(response: 0.32, dampingFraction: 0.7), value: route.iconName)
+    }
 }
 
 // MARK: - Song info sheet
@@ -949,7 +1214,7 @@ private struct AudioSignalPathSheet: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
     }
 
     private var fileFormat: String? {

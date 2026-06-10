@@ -31,16 +31,33 @@ final class ServerStore {
         // on cellular, prefer the per-connection URL when one is set; otherwise fall
         // back to the primary URL so behaviour is unchanged for single-URL servers.
         let chosen = (cellular ? record.cellularURLString?.nonBlank : nil) ?? record.urlString
+        let username = cellular ? (record.cellularUsername?.nonBlank ?? record.username) : record.username
         guard let url = URL(string: chosen),
-              let password = KeychainService.password(for: record.id) else { return nil }
-        return SubsonicConfig(baseURL: url, username: record.username, password: password)
+              let mainPassword = KeychainService.password(for: record.id) else { return nil }
+        let password = cellular ? (cellularPassword(for: record) ?? mainPassword) : mainPassword
+        return SubsonicConfig(baseURL: url, username: username, password: password)
     }
 
-    // updates the cellular-only URL for a record and returns the updated record.
+    func cellularPassword(for record: ServerRecord) -> String? {
+        KeychainService.password(for: Self.cellularAccount(for: record.id))
+    }
+
+    // updates the cellular-only URL/login for a record and returns the updated record.
     @discardableResult
-    func setCellularURL(_ urlString: String?, for record: ServerRecord) -> ServerRecord {
+    func setCellularConnection(
+        urlString: String?,
+        username: String?,
+        password: String?,
+        for record: ServerRecord
+    ) -> ServerRecord {
         guard let idx = servers.firstIndex(where: { $0.id == record.id }) else { return record }
         servers[idx].cellularURLString = urlString?.nonBlank
+        servers[idx].cellularUsername = username?.nonBlank
+        if let password = password?.nonBlank {
+            KeychainService.save(password: password, for: Self.cellularAccount(for: record.id))
+        } else {
+            KeychainService.delete(for: Self.cellularAccount(for: record.id))
+        }
         save()
         return servers[idx]
     }
@@ -74,6 +91,7 @@ final class ServerStore {
 
     func remove(_ record: ServerRecord) {
         KeychainService.delete(for: record.id)
+        KeychainService.delete(for: Self.cellularAccount(for: record.id))
         servers.removeAll { $0.id == record.id }
         save()
     }
@@ -110,6 +128,10 @@ final class ServerStore {
         if let data = try? JSONEncoder().encode(servers) {
             try? data.write(to: serversURL, options: .atomic)
         }
+    }
+
+    private static func cellularAccount(for id: String) -> String {
+        "\(id).cellular"
     }
 }
 

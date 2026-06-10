@@ -29,6 +29,33 @@ final class EqualizerEngine {
 
     var isEnabled: Bool { UserDefaults.standard.bool(forKey: "equalizerEnabled") }
 
+    // cached audio-effect flags, read on the audio thread via snapshot()
+    private(set) var eqEnabled = UserDefaults.standard.bool(forKey: "equalizerEnabled")
+    private(set) var monoEnabled = UserDefaults.standard.bool(forKey: "monoAudio")
+    private(set) var spatialEnabled = UserDefaults.standard.bool(forKey: "spatialWidener")
+    private(set) var spatialAmount = (UserDefaults.standard.object(forKey: "spatialWidenerAmount") as? Double) ?? 0.65
+
+    // true whenever any DSP effect needs the processing tap attached
+    var isAnyEffectActive: Bool {
+        refreshEffectFlags()
+        return eqEnabled || monoEnabled || spatialEnabled
+    }
+
+    // re-reads the effect toggles from defaults; bumps generation when changed so a
+    // running tap re-snapshots. Call on the main thread after toggling a setting.
+    func refreshEffectFlags() {
+        let eq = UserDefaults.standard.bool(forKey: "equalizerEnabled")
+        let mono = UserDefaults.standard.bool(forKey: "monoAudio")
+        let spatial = UserDefaults.standard.bool(forKey: "spatialWidener")
+        let amount = (UserDefaults.standard.object(forKey: "spatialWidenerAmount") as? Double) ?? 0.65
+        os_unfair_lock_lock(&lock)
+        if eq != eqEnabled || mono != monoEnabled || spatial != spatialEnabled || amount != spatialAmount {
+            eqEnabled = eq; monoEnabled = mono; spatialEnabled = spatial; spatialAmount = amount
+            generation &+= 1
+        }
+        os_unfair_lock_unlock(&lock)
+    }
+
     init() { loadGains() }
 
     // MARK: - Gains
@@ -65,11 +92,11 @@ final class EqualizerEngine {
         }
     }
 
-    // snapshot used by a tap when (re)computing coefficients
-    func snapshot() -> (gains: [Double], generation: UInt64) {
+    // snapshot used by a tap when (re)computing coefficients + effect state
+    func snapshot() -> (gains: [Double], generation: UInt64, eqEnabled: Bool, mono: Bool, spatial: Bool, spatialAmount: Double) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
-        return (gains, generation)
+        return (gains, generation, eqEnabled, monoEnabled, spatialEnabled, spatialAmount)
     }
 
     // MARK: - Tap creation
@@ -91,7 +118,7 @@ final class EqualizerEngine {
         let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
                                                 kMTAudioProcessingTapCreationFlag_PostEffects, &tap)
         guard status == noErr, let tap else {
-            // creation failed → balance the retain we handed to clientInfo
+            // creation failed > balance the retain we handed to clientInfo
             Unmanaged<TapContext>.fromOpaque(clientInfo).release()
             return nil
         }
@@ -106,6 +133,12 @@ private final class TapContext {
     var sampleRate: Double = 44_100
     var channels: Int = 2
     var generation: UInt64 = .max   // force first compute
+
+    // cached effect flags (refreshed inside recomputeIfNeeded)
+    private var eqEnabled = false
+    private var mono = false
+    private var spatial = false
+    private var spatialAmount = 0.65
 
     // coefficients per band: b0, b1, b2, a1, a2  (a0 normalized to 1)
     private var coeffs = [[Double]](repeating: [1, 0, 0, 0, 0], count: EqualizerEngine.bandCount)
@@ -129,6 +162,10 @@ private final class TapContext {
         guard EqualizerEngine.shared.generation != generation else { return }
         let snap = EqualizerEngine.shared.snapshot()
         generation = snap.generation
+        eqEnabled = snap.eqEnabled
+        mono = snap.mono
+        spatial = snap.spatial
+        spatialAmount = snap.spatialAmount
         let q = 1.4
         for b in 0..<EqualizerEngine.bandCount {
             let f0 = EqualizerEngine.frequencies[b]
@@ -154,25 +191,56 @@ private final class TapContext {
         guard frames > 0, !state.isEmpty else { return }
 
         let abl = UnsafeMutableAudioBufferListPointer(bufferList)
-        for (ch, buffer) in abl.enumerated() {
-            guard ch < channels, let raw = buffer.mData else { continue }
-            let n = min(frames, Int(buffer.mDataByteSize) / MemoryLayout<Float>.size)
-            let samples = raw.assumingMemoryBound(to: Float.self)
 
-            for i in 0..<n {
-                var x = Double(samples[i])
-                // cascade the band biquads (in-place index mutation → no per-sample
-                // array copies/allocations on the audio thread)
-                for b in 0..<EqualizerEngine.bandCount {
-                    let x1 = state[ch][b][0], x2 = state[ch][b][1]
-                    let y1 = state[ch][b][2], y2 = state[ch][b][3]
-                    let y = coeffs[b][0] * x + coeffs[b][1] * x1 + coeffs[b][2] * x2
-                            - coeffs[b][3] * y1 - coeffs[b][4] * y2
-                    state[ch][b][1] = x1; state[ch][b][0] = x
-                    state[ch][b][3] = y1; state[ch][b][2] = y
-                    x = y
+        // 1) graphic EQ per channel (skipped entirely when the EQ is off so a
+        // mono/spatial-only tap costs almost nothing)
+        if eqEnabled {
+            for (ch, buffer) in abl.enumerated() {
+                guard ch < channels, let raw = buffer.mData else { continue }
+                let n = min(frames, Int(buffer.mDataByteSize) / MemoryLayout<Float>.size)
+                let samples = raw.assumingMemoryBound(to: Float.self)
+
+                for i in 0..<n {
+                    var x = Double(samples[i])
+                    // cascade the band biquads (in-place index mutation > no per-sample
+                    // array copies/allocations on the audio thread)
+                    for b in 0..<EqualizerEngine.bandCount {
+                        let x1 = state[ch][b][0], x2 = state[ch][b][1]
+                        let y1 = state[ch][b][2], y2 = state[ch][b][3]
+                        let y = coeffs[b][0] * x + coeffs[b][1] * x1 + coeffs[b][2] * x2
+                                - coeffs[b][3] * y1 - coeffs[b][4] * y2
+                        state[ch][b][1] = x1; state[ch][b][0] = x
+                        state[ch][b][3] = y1; state[ch][b][2] = y
+                        x = y
+                    }
+                    samples[i] = Float(x)
                 }
-                samples[i] = Float(x)
+            }
+        }
+
+        // 2) stereo-image effects — mono downmix wins over spatial widening.
+        guard abl.count >= 2, (mono || spatial),
+              let lRaw = abl[0].mData, let rRaw = abl[1].mData else { return }
+        let lSamples = lRaw.assumingMemoryBound(to: Float.self)
+        let rSamples = rRaw.assumingMemoryBound(to: Float.self)
+        let nL = min(frames, Int(abl[0].mDataByteSize) / MemoryLayout<Float>.size)
+        let nR = min(frames, Int(abl[1].mDataByteSize) / MemoryLayout<Float>.size)
+        let n = min(nL, nR)
+        if mono {
+            for i in 0..<n {
+                let m = (lSamples[i] + rSamples[i]) * 0.5
+                lSamples[i] = m
+                rSamples[i] = m
+            }
+        } else {
+            // mid/side widen: side gain 1…2, clamped so widening can't clip
+            let w = Float(1.0 + max(0.0, min(1.0, spatialAmount)))
+            for i in 0..<n {
+                let l = lSamples[i], r = rSamples[i]
+                let mid = (l + r) * 0.5
+                let side = (l - r) * 0.5 * w
+                lSamples[i] = max(-1.0, min(1.0, mid + side))
+                rSamples[i] = max(-1.0, min(1.0, mid - side))
             }
         }
     }

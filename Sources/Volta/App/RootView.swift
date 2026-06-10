@@ -6,6 +6,7 @@ struct RootView: View {
     @AppStorage("customAccentRed") private var customAccentRed = 0.55
     @AppStorage("customAccentGreen") private var customAccentGreen = 0.36
     @AppStorage("customAccentBlue") private var customAccentBlue = 0.96
+    @AppStorage("themeMode") private var themeMode = "dark"
     @State private var didLogDiagnostics = false
 
     private var accentRefreshKey: String {
@@ -26,8 +27,12 @@ struct RootView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             case .authenticated:
                 MainTabView()
+                    .id(themeMode)   // rebuild on dark/amoled switch (light handled by colorScheme)
                     .transition(.opacity.combined(with: .scale(scale: 1.02)))
             }
+
+            VoltaNotificationHost()
+                .zIndex(100)
         }
         .tint(Theme.accent)
         .animation(.spring(response: 0.55, dampingFraction: 0.9), value: appState.phase)

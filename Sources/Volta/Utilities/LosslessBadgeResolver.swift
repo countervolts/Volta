@@ -24,7 +24,7 @@ enum LosslessBadgeResolver {
         let hasBlockedRoute = outputs.contains { isLossyOrSystemRoute($0.portType) }
         let sampleRateMatches = song.samplingRate.map { abs($0 - outputRate) <= 1 } ?? false
         let hasFileDepth = song.bitDepth != nil
-        let isHiRes = isHiResLossless(song)
+        let isHiRes = song.isHiResLossless
 
         let isTrue = routeCanBeBitPerfect && !hasBlockedRoute && sampleRateMatches && hasFileDepth
         if isTrue {
@@ -64,15 +64,6 @@ enum LosslessBadgeResolver {
             output: output,
             reason: fallbackReason(song: song, outputRate: outputRate, outputs: outputs)
         )
-    }
-
-    private static func isHiResLossless(_ song: Song) -> Bool {
-        guard song.isLossless,
-              let bitDepth = song.bitDepth,
-              let samplingRate = song.samplingRate else {
-            return false
-        }
-        return bitDepth >= 24 && samplingRate > 48_000 && samplingRate <= 192_000
     }
 
     private static func isBitPerfectCapableRoute(_ port: AVAudioSession.Port) -> Bool {

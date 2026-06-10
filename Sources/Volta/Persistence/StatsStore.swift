@@ -83,6 +83,16 @@ final class StatsStore {
         return attrs?[.size] as? Int ?? 0
     }
 
+    func clearAll() {
+        queue.sync {
+            events.removeAll()
+            save()
+        }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .playEventRecorded, object: nil)
+        }
+    }
+
     func events(from start: Date, to end: Date) -> [PlayEvent] {
         queue.sync { events.filter { $0.timestamp >= start && $0.timestamp <= end } }
     }

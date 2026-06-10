@@ -23,8 +23,13 @@ actor ArtworkLoader {
     private let prepareImages: Bool
 
     init() {
-        let imageMode = UserDefaults.standard.string(forKey: "imageLoadMode") ?? "balanced"
-        let cacheMode = UserDefaults.standard.string(forKey: "cacheMode") ?? "balanced"
+        // Performance Mode forces the lightest image profile (overrides the user pick)
+        let imageMode = PerformanceMode.reduceImageQuality
+            ? "conservative"
+            : (UserDefaults.standard.string(forKey: "imageLoadMode") ?? "balanced")
+        let cacheMode = PerformanceMode.reduceImageQuality
+            ? "light"
+            : (UserDefaults.standard.string(forKey: "cacheMode") ?? "balanced")
 
         let config = URLSessionConfiguration.default
         config.requestCachePolicy = .returnCacheDataElseLoad

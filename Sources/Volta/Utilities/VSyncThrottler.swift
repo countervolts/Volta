@@ -12,6 +12,7 @@ final class VSyncThrottler: NSObject {
     func schedule() {
         guard displayLink == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(tick))
+        FrameRateGovernor.apply(to: link)   // half-vsync cap in Performance Mode
         link.add(to: .main, forMode: .common)
         displayLink = link
     }

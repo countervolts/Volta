@@ -84,7 +84,7 @@ struct Child: Decodable, Sendable {
              artistId: artistId, coverArt: coverArt, duration: duration, track: track,
              discNumber: discNumber, year: year, genre: genre, size: size,
              contentType: contentType, suffix: suffix, bitRate: bitRate, path: path,
-             playCount: playCount, starred: starred, contributes: nil, replayGain: nil,
+             playCount: playCount, bpm: nil, starred: starred, contributes: nil, replayGain: nil,
              samplingRate: nil, bitDepth: nil, channelCount: nil, displayComposer: nil,
              contributors: nil)
     }

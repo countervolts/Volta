@@ -65,20 +65,26 @@ final class PlaylistsViewModel {
         playlists = (try? await playlistsTask) ?? []
         smartSourceSongs = (try? await songsTask) ?? []
         hasLoaded = true
+        if PlaylistBackupStore.shared.isEnabled {
+            Task { await PlaylistBackupStore.shared.backupAll(client: client) }
+        }
     }
 
     func createPlaylist(client: SubsonicClient) async {
-        guard !newPlaylistName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        let trimmed = newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
         isCreating = true
         defer { isCreating = false }
-        if let pl = try? await client.createPlaylist(name: newPlaylistName) {
+        if let pl = try? await client.createPlaylist(name: trimmed) {
             playlists.append(pl)
+            PlaylistBackupStore.shared.backup(playlist: pl, client: client)
         }
         newPlaylistName = ""
         showCreateSheet = false
     }
 
     func deletePlaylist(_ playlist: Playlist, client: SubsonicClient) async {
+        await PlaylistBackupStore.shared.markDeleted(playlist, client: client)
         playlists.removeAll { $0.id == playlist.id }
         try? await client.deletePlaylist(id: playlist.id)
     }

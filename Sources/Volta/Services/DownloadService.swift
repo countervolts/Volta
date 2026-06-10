@@ -20,6 +20,14 @@ private actor ByteCounter {
 
 private enum SegmentError: Error { case rangeNotSupported, badResponse }
 
+private struct PendingDownloadResume {
+    let song: Song
+    let url: URL
+    let dest: URL
+    let manifestURL: URL
+    let resumeData: Data?
+}
+
 @MainActor
 @Observable
 final class DownloadService {
@@ -30,6 +38,9 @@ final class DownloadService {
     private var observations: [String: NSKeyValueObservation] = [:]
     private var segmentTasks: [String: Task<Void, Never>] = [:]
     private var startTimes: [String: Date] = [:]
+    private var lastProgress: [String: Double] = [:]
+    private var pendingResumes: [String: PendingDownloadResume] = [:]
+    private var userCancelledDownloads: Set<String> = []
     private var client: SubsonicClient?
 
     private var pinnedCovers: Set<String> = []
@@ -46,6 +57,10 @@ final class DownloadService {
         manifestURL = directory.appendingPathComponent("manifest.json")
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         loadManifest()
+        NetworkMonitor.shared.onConnectionChange { [weak self] conn in
+            guard conn != .none else { return }
+            self?.resumePendingDownloads()
+        }
     }
 
     func updateClient(_ client: SubsonicClient?) {
@@ -63,12 +78,18 @@ final class DownloadService {
     }
 
     func download(song: Song) {
+        if pendingResumes[song.id] != nil {
+            resumePendingDownload(id: song.id)
+            return
+        }
         guard case .notDownloaded = state(for: song) else { return }
         guard let client,
               let streamURL = client.downloadURL(id: song.id) else { return }
 
         states[song.id] = .downloading(progress: 0)
         startTimes[song.id] = Date()
+        lastProgress[song.id] = 0
+        userCancelledDownloads.remove(song.id)
         prefetchArtwork(for: song)
 
         let songID   = song.id
@@ -94,8 +115,12 @@ final class DownloadService {
                     AppLogger.shared.log("✗ \(title) — cancelled", category: .other)
                     fail(songID, removing: destURL)
                 } catch {
-                    AppLogger.shared.log("⚠ \(title) — segmented failed (\(error.localizedDescription)), falling back to single", category: .other, level: .warning)
-                    startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL)
+                    if DownloadService.isTransientNetworkError(error) {
+                        pauseForResume(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, resumeData: nil)
+                    } else {
+                        AppLogger.shared.log("⚠ \(title) — segmented failed (\(error.localizedDescription)), falling back to single", category: .other, level: .warning)
+                        startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL)
+                    }
                 }
             }
             segmentTasks[songID] = task
@@ -107,17 +132,24 @@ final class DownloadService {
 
     func cancelDownload(for song: Song) {
         AppLogger.shared.log("✗ \(song.title) — download cancelled", category: .other)
+        if case .downloading = state(for: song) {
+            VoltaNotificationCenter.shared.post("Download cancelled", tone: .warning)
+        }
+        userCancelledDownloads.insert(song.id)
         activeTasks[song.id]?.cancel()
         segmentTasks[song.id]?.cancel()
         activeTasks.removeValue(forKey: song.id)
         observations.removeValue(forKey: song.id)
         segmentTasks.removeValue(forKey: song.id)
         startTimes.removeValue(forKey: song.id)
+        lastProgress.removeValue(forKey: song.id)
+        pendingResumes.removeValue(forKey: song.id)
         states[song.id] = .notDownloaded
     }
 
     func removeDownload(for song: Song) {
         AppLogger.shared.log("🗑 \(song.title) — download removed", category: .other)
+        VoltaNotificationCenter.shared.post("Download removed", tone: .info)
         cancelDownload(for: song)
         if let rec = manifest[song.id] {
             try? FileManager.default.removeItem(atPath: rec.path)
@@ -150,12 +182,36 @@ final class DownloadService {
         return "\(clean(id)).\(clean(suffix))"
     }
 
+    private nonisolated static func resumeData(from error: Error?) -> Data? {
+        guard let error else { return nil }
+        let ns = error as NSError
+        return ns.userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+    }
+
+    private nonisolated static func isTransientNetworkError(_ error: Error?) -> Bool {
+        guard let error else { return false }
+        let ns = error as NSError
+        guard ns.domain == NSURLErrorDomain else { return false }
+        switch URLError.Code(rawValue: ns.code) {
+        case .networkConnectionLost, .notConnectedToInternet, .timedOut,
+             .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+            return true
+        default:
+            return false
+        }
+    }
+
     // MARK: - Single-threaded transfer (also the multi fallback)
 
     private func startSingle(song: Song, url: URL, dest: URL, manifestURL: URL) {
+        startSingle(song: song, url: url, dest: dest, manifestURL: manifestURL, resumeData: nil)
+    }
+
+    private func startSingle(song: Song, url: URL, dest: URL, manifestURL: URL, resumeData: Data?) {
         let songID = song.id
         let title = song.title
-        let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, _, error in
+        let task: URLSessionDownloadTask
+        let completion: @Sendable (URL?, URLResponse?, Error?) -> Void = { [weak self] tempURL, _, error in
             guard let self else { return }
             if let tempURL, error == nil {
                 try? FileManager.default.removeItem(at: dest)
@@ -171,10 +227,25 @@ final class DownloadService {
             } else {
                 let msg = error?.localizedDescription ?? "unknown error"
                 Task { @MainActor in
-                    AppLogger.shared.log("✗ \(title) — download failed: \(msg)", category: .other, level: .error)
-                    self.fail(songID, removing: dest)
+                    if self.userCancelledDownloads.remove(songID) != nil {
+                        AppLogger.shared.log("✗ \(title) — cancelled", category: .other)
+                        self.fail(songID, removing: dest)
+                        return
+                    }
+                    let resumeData = DownloadService.resumeData(from: error)
+                    if resumeData != nil || DownloadService.isTransientNetworkError(error) {
+                        self.pauseForResume(song: song, url: url, dest: dest, manifestURL: manifestURL, resumeData: resumeData)
+                    } else {
+                        AppLogger.shared.log("✗ \(title) — download failed: \(msg)", category: .other, level: .error)
+                        self.fail(songID, removing: dest)
+                    }
                 }
             }
+        }
+        if let resumeData {
+            task = URLSession.shared.downloadTask(withResumeData: resumeData, completionHandler: completion)
+        } else {
+            task = URLSession.shared.downloadTask(with: url, completionHandler: completion)
         }
 
         let obs = task.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
@@ -185,6 +256,50 @@ final class DownloadService {
         observations[songID] = obs
         activeTasks[songID] = task
         task.resume()
+    }
+
+    private func pauseForResume(song: Song, url: URL, dest: URL, manifestURL: URL, resumeData: Data?) {
+        let songID = song.id
+        activeTasks.removeValue(forKey: songID)
+        observations.removeValue(forKey: songID)
+        segmentTasks.removeValue(forKey: songID)
+        pendingResumes[songID] = PendingDownloadResume(
+            song: song,
+            url: url,
+            dest: dest,
+            manifestURL: manifestURL,
+            resumeData: resumeData
+        )
+        let progress = lastProgress[songID] ?? 0
+        states[songID] = .downloading(progress: progress)
+        AppLogger.shared.log("⏸ \(song.title) — connection lost, will resume when network returns", category: .other, level: .warning)
+        if NetworkMonitor.shared.connection != .none {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                self?.resumePendingDownload(id: songID)
+            }
+        }
+    }
+
+    private func resumePendingDownloads() {
+        for id in pendingResumes.keys.sorted() {
+            resumePendingDownload(id: id)
+        }
+    }
+
+    private func resumePendingDownload(id: String) {
+        guard activeTasks[id] == nil,
+              segmentTasks[id] == nil,
+              let pending = pendingResumes.removeValue(forKey: id) else { return }
+        if startTimes[id] == nil { startTimes[id] = Date() }
+        AppLogger.shared.log("↻ \(pending.song.title) — resuming download", category: .other)
+        startSingle(
+            song: pending.song,
+            url: pending.url,
+            dest: pending.dest,
+            manifestURL: pending.manifestURL,
+            resumeData: pending.resumeData
+        )
     }
 
     // MARK: - Multithreaded (segmented) transfer
@@ -267,7 +382,9 @@ final class DownloadService {
 
     private func report(_ songID: String, _ progress: Double) {
         if case .downloading = states[songID] {
-            states[songID] = .downloading(progress: min(1.0, progress))
+            let clamped = min(1.0, max(0, progress))
+            lastProgress[songID] = clamped
+            states[songID] = .downloading(progress: clamped)
         }
     }
 
@@ -277,6 +394,9 @@ final class DownloadService {
         activeTasks.removeValue(forKey: songID)
         observations.removeValue(forKey: songID)
         segmentTasks.removeValue(forKey: songID)
+        pendingResumes.removeValue(forKey: songID)
+        lastProgress.removeValue(forKey: songID)
+        userCancelledDownloads.remove(songID)
         saveManifest(to: manifestURL)
         enforceStorageCap(keeping: songID)
 
@@ -289,6 +409,7 @@ final class DownloadService {
         } else {
             AppLogger.shared.log("✓ \(song.title) — complete (\(method), \(sizeStr))", category: .other)
         }
+        VoltaNotificationCenter.shared.post("Downloaded \(song.title)", tone: .success)
     }
 
     private func prefetchArtwork(for song: Song) {
@@ -316,6 +437,9 @@ final class DownloadService {
         observations.removeValue(forKey: songID)
         segmentTasks.removeValue(forKey: songID)
         startTimes.removeValue(forKey: songID)
+        pendingResumes.removeValue(forKey: songID)
+        lastProgress.removeValue(forKey: songID)
+        userCancelledDownloads.remove(songID)
         try? FileManager.default.removeItem(at: dest)
     }
 
@@ -367,6 +491,7 @@ final class DownloadService {
             states[id] = .notDownloaded
             total -= size
             AppLogger.shared.log("🗑 Evicted '\(rec.song?.title ?? id)' to stay under \(capMB)MB cap", category: .other)
+            VoltaNotificationCenter.shared.post("Evicted old download", tone: .info)
         }
         saveManifest(to: manifestURL)
     }

@@ -52,6 +52,9 @@ struct Song: Codable, Identifiable, Hashable, Sendable {
     let bitRate: Int?
     let path: String?
     let playCount: Int?
+    // beats-per-minute from OpenSubsonic metadata (when the server/file exposes
+    // it). Lets AutoMix tempo-match streaming tracks without a local file.
+    let bpm: Int?
     let starred: String?
     let contributes: String?
     let replayGain: ReplayGain?
@@ -82,6 +85,15 @@ extension Song {
     var isLossless: Bool {
         guard let s = suffix?.lowercased() else { return false }
         return ["flac", "wav", "aiff", "aif", "alac", "ape", "wv", "tta"].contains(s)
+    }
+
+    var isHiResLossless: Bool {
+        guard isLossless,
+              let bitDepth,
+              let samplingRate else {
+            return false
+        }
+        return bitDepth >= 24 && samplingRate > 48_000 && samplingRate <= 192_000
     }
 }
 
@@ -153,7 +165,7 @@ struct LyricsList: Decodable, Sendable {
 }
 
 // parsed lyric line for display
-struct LyricLine: Identifiable, Hashable, Sendable {
+struct LyricLine: Identifiable, Hashable, Codable, Sendable {
     let id: Int
     let time: TimeInterval   // seconds; < 0 means unsynced
     let text: String

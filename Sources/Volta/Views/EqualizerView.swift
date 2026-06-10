@@ -48,7 +48,7 @@ struct EqualizerView: View {
                     .foregroundStyle(Theme.accent)
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .background(SwipeBackEnabler())
     }
 

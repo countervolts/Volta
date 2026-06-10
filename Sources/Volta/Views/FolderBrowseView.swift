@@ -22,6 +22,8 @@ struct FolderBrowseView: View {
     @State private var entries: [BrowseEntry] = []
     @State private var isLoading = true
     @State private var addToPlaylistSong: Song? = nil
+    @State private var albumToShow: Album? = nil
+    @State private var artistToShow: Artist? = nil
 
     private var directories: [BrowseEntry] { filtered.filter(\.isDirectory) }
     private var songEntries: [BrowseEntry] { filtered.filter { !$0.isDirectory } }
@@ -57,6 +59,30 @@ struct FolderBrowseView: View {
         .task(id: source) { await load() }
         .sheet(item: $addToPlaylistSong) { song in
             AddToPlaylistSheet(song: song, onAdded: { _ in })
+        }
+        .sheet(item: $albumToShow) { album in
+            NavigationStack {
+                AlbumDetailView(album: album)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { albumToShow = nil }
+                                .foregroundStyle(Theme.accent)
+                        }
+                    }
+            }
+            .preferredColorScheme(Theme.colorScheme)
+        }
+        .sheet(item: $artistToShow) { artist in
+            NavigationStack {
+                ArtistDetailView(artist: artist)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { artistToShow = nil }
+                                .foregroundStyle(Theme.accent)
+                        }
+                    }
+            }
+            .preferredColorScheme(Theme.colorScheme)
         }
     }
 
@@ -135,10 +161,22 @@ struct FolderBrowseView: View {
         ) {
             SongMenu(
                 song: song,
+                onGoToAlbum: song.albumId == nil ? nil : { goToAlbum(song) },
+                onGoToArtist: song.artistId == nil ? nil : { goToArtist(song) },
                 onAddToPlaylist: { addToPlaylistSong = song }
             )
         }
         .padding(.horizontal, Theme.Layout.screenPadding)
+    }
+
+    private func goToAlbum(_ song: Song) {
+        guard let id = song.albumId, let client = appState.client else { return }
+        Task { albumToShow = try? await client.album(id: id) }
+    }
+
+    private func goToArtist(_ song: Song) {
+        guard let id = song.artistId, let client = appState.client else { return }
+        Task { artistToShow = try? await client.artist(id: id) }
     }
 
     private var emptyState: some View {
@@ -193,6 +231,7 @@ struct FolderBrowseScreen: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .preferredColorScheme(.dark)
+        .background(SwipeBackEnabler())
+        .preferredColorScheme(Theme.colorScheme)
     }
 }

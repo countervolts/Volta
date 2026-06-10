@@ -35,6 +35,7 @@ enum Symbols {
     static let queue = "list.bullet"
     static let lyrics = "quote.bubble.fill"
     static let lyricsInactive = "quote.bubble"
+    static let visualizer = "waveform.path.ecg.rectangle"
 
     static let star = "star.fill"
     static let starEmpty = "star"

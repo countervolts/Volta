@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 private struct ArtworkPrefetchProgress: Equatable {
     var completed = 0
@@ -25,6 +26,14 @@ struct SettingsView: View {
 
     @AppStorage("gaplessPlayback")     private var gaplessPlayback     = "on"
     @AppStorage("replayGainMode")      private var replayGainMode      = "off"
+    @AppStorage("crossfadeDurationSeconds") private var crossfadeDurationSeconds = 6.0
+    @AppStorage("automixStyle")        private var automixStyle        = "balanced"
+    @AppStorage("automixMaxBlendSeconds") private var automixMaxBlendSeconds = 10.0
+    @AppStorage("automixSilenceTrim")  private var automixSilenceTrim  = true
+    @AppStorage("automixTempoMatch")   private var automixTempoMatch   = true
+    @AppStorage("monoAudio")           private var monoAudio           = false
+    @AppStorage("spatialWidener")      private var spatialWidener      = false
+    @AppStorage("resumeAfterInterruption") private var resumeAfterInterruption = true
 
     @AppStorage("streamingBitrate")    private var streamingBitrate    = 0
     @AppStorage("streamingBitrateCell")private var streamingBitrateCell = 0
@@ -37,10 +46,10 @@ struct SettingsView: View {
 
     @AppStorage("artworkAnimation")    private var artworkAnimation    = true
     @AppStorage("liveArtwork")         private var liveArtwork         = true
+    @AppStorage("themeMode")           private var themeMode           = "dark"
     @AppStorage("showLosslessBadge")   private var showLosslessBadge   = true
     @AppStorage("dynamicBackground")   private var dynamicBackground   = true
     @AppStorage("showTrackArtwork")    private var showTrackArtwork    = true
-    @AppStorage("forceLiquidGlassUI")  private var forceLiquidGlassUI  = false
     @AppStorage("accentColorName")     private var accentColorName     = "purple"
     @AppStorage("customAccentRed")      private var customAccentRed     = 0.55
     @AppStorage("customAccentGreen")    private var customAccentGreen   = 0.36
@@ -51,13 +60,18 @@ struct SettingsView: View {
     @AppStorage("prefetchArtistImages") private var prefetchArtistImages = false
     @AppStorage("localArtworkLibraryDownloaded") private var localArtworkLibraryDownloaded = false
 
-    @AppStorage("albumSortOrder")      private var albumSortOrder      = "alphabetical"
-
     @AppStorage("developerLogging")    private var developerLogging    = true
+    @AppStorage("developerPerformanceOverlay") private var developerPerformanceOverlay = false
+    // hidden until the user taps the Version/Build row 7 times (Android-style)
+    @AppStorage("developerUnlocked")   private var developerUnlocked    = false
+    @AppStorage("showWarningNotifications") private var showWarningNotifications = false
+    @AppStorage("autoPlaylistBackupEnabled") private var autoPlaylistBackupEnabled = true
+    @AppStorage("saveLyricsLocally") private var saveLyricsLocally = true
 
     @State private var downloadsSize: String  = "…"
     @State private var artworkSize: String     = "…"
     @State private var localArtworkSize: String = "…"
+    @State private var lyricsSize: String = "…"
     @State private var localArtworkBytes: Int = 0
     @State private var dataSize: String        = "…"
     @State private var totalCacheSize: String  = "…"
@@ -67,6 +81,8 @@ struct SettingsView: View {
     @State private var showClearCacheAlert   = false
     @State private var showClearArtworkAlert = false
     @State private var showClearLocalArtworkAlert = false
+    @State private var showClearPlayEventsFirstAlert = false
+    @State private var showClearPlayEventsSecondAlert = false
     @State private var showClearLogsAlert   = false
     @State private var showLogoutAlert      = false
     @State private var connectionStatus     = ""
@@ -74,10 +90,25 @@ struct SettingsView: View {
     @State private var isPrefetchingArtwork = false
     @State private var artworkPrefetchProgress = ArtworkPrefetchProgress()
     @State private var settingsSearch       = ""
+    @State private var versionTapCount      = 0
     @State private var showCustomSpeedAlert = false
     @State private var showCustomCapAlert   = false
     @State private var customSpeedText      = ""
     @State private var customCapText        = ""
+    @State private var isDumpingAppFiles    = false
+    @State private var appDumpStatus: String?
+    @State private var isExportingSettings = false
+    @State private var showSettingsImporter = false
+    @State private var settingsBackupStatus: String?
+    @State private var isExportingPlaylists = false
+    @State private var isImportingPlaylists = false
+    @State private var showPlaylistImporter = false
+    @State private var playlistTransferStatus: String?
+    @State private var playlistBackupStore = PlaylistBackupStore.shared
+    @StateObject private var lyricsDownloader = LyricsBulkDownloader.shared
+    @State private var playlistBackupStatus: String?
+    @State private var isRefreshingPlaylistBackups = false
+    @State private var restoringPlaylistBackupID: String?
 
     private var audio: AudioPlayer { appState.audioPlayer }
     private var hasLocalArtworkLibrary: Bool { localArtworkLibraryDownloaded || localArtworkBytes > 0 }
@@ -104,74 +135,95 @@ struct SettingsView: View {
     }
 
     var body: some View {
+        settingsContent
+            .navigationTitle("Settings")
+            .navigationBarBackButtonHidden(true)
+            .background(SwipeBackEnabler())
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
+            }
+            .preferredColorScheme(Theme.colorScheme)
+            .onAppear { refreshCacheSize() }
+            .task(id: appState.currentServer?.id) { await estimateArtworkLibrarySize() }
+            .alert("Clear Downloads", isPresented: $showClearCacheAlert) {
+                Button("Clear", role: .destructive) { clearDownloads() }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("This removes all downloaded tracks. They can be re-downloaded.") }
+            .alert("Clear Caches", isPresented: $showClearArtworkAlert) {
+                Button("Clear", role: .destructive) { clearArtworkCache() }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Removes cached artwork and saved home data. They’ll be re-fetched as needed.") }
+            .alert("Delete Local Artwork Library", isPresented: $showClearLocalArtworkAlert) {
+                Button("Delete", role: .destructive) { clearLocalArtworkLibrary() }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Removes downloaded album covers and artist profile pictures used for faster local image loading.") }
+            .alert("Clear Listening Stats?", isPresented: $showClearPlayEventsFirstAlert) {
+                Button("Continue", role: .destructive) { showClearPlayEventsSecondAlert = true }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("This will clear all logged play events and reset local listening stats. This cannot be undone.") }
+            .alert("Really Clear All Stats?", isPresented: $showClearPlayEventsSecondAlert) {
+                Button("Clear Everything", role: .destructive) { clearPlayEvents() }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Be very sure: every local play event will be permanently removed and your stats cannot be recovered.") }
+            .alert("Clear All Logs", isPresented: $showClearLogsAlert) {
+                Button("Clear", role: .destructive) {
+                    AppLogger.shared.clearAll()
+                    VoltaNotificationCenter.shared.post("Logs cleared", tone: .success)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("All log entries will be permanently removed.") }
+            .alert("Log Out", isPresented: $showLogoutAlert) {
+                Button("Log Out", role: .destructive) { appState.logout() }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("You'll be disconnected from \(appState.currentServer?.displayName ?? "the server").") }
+            .alert("Custom Speed Limit", isPresented: $showCustomSpeedAlert) {
+                TextField("MB per second", text: $customSpeedText)
+                    .keyboardType(.decimalPad)
+                Button("Set") {
+                    if let mb = Double(customSpeedText), mb > 0 {
+                        downloadSpeedLimitKBps = Int(mb * 1024)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Enter a download speed limit in MB/s.") }
+            .alert("Custom Storage Cap", isPresented: $showCustomCapAlert) {
+                TextField("GB", text: $customCapText)
+                    .keyboardType(.decimalPad)
+                Button("Set") {
+                    if let gb = Double(customCapText), gb > 0 {
+                        downloadCapMB = Int(gb * 1024)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Enter a maximum download size in GB.") }
+            .fileImporter(
+                isPresented: $showSettingsImporter,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                restoreSettingsBackup(result)
+            }
+    }
+
+    private var settingsContent: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
             List {
                 playbackSection
+                audioSection
                 streamingSection
-                performanceSection
                 appearanceSection
-                librarySection
                 serverSection
-                serverInfoSection
                 cacheSection
-                aboutSection
+                backupSection
+                performanceSection
                 developerSection
-                logsSection
+                aboutSection
             }
             .searchable(text: $settingsSearch, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search settings")
             .scrollContentBackground(.hidden)
             .background(Theme.background)
         }
-        .navigationTitle("Settings")
-        .navigationBarBackButtonHidden(true)
-        .background(SwipeBackEnabler())
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
-        }
-        .preferredColorScheme(.dark)
-        .onAppear { refreshCacheSize() }
-        .task(id: appState.currentServer?.id) { await estimateArtworkLibrarySize() }
-        .alert("Clear Downloads", isPresented: $showClearCacheAlert) {
-            Button("Clear", role: .destructive) { clearDownloads() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("This removes all downloaded tracks. They can be re-downloaded.") }
-        .alert("Clear Caches", isPresented: $showClearArtworkAlert) {
-            Button("Clear", role: .destructive) { clearArtworkCache() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("Removes cached artwork and saved home data. They’ll be re-fetched as needed.") }
-        .alert("Delete Local Artwork Library", isPresented: $showClearLocalArtworkAlert) {
-            Button("Delete", role: .destructive) { clearLocalArtworkLibrary() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("Removes downloaded album covers and artist profile pictures used for faster local image loading.") }
-        .alert("Clear All Logs", isPresented: $showClearLogsAlert) {
-            Button("Clear", role: .destructive) { AppLogger.shared.clearAll() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("All log entries will be permanently removed.") }
-        .alert("Log Out", isPresented: $showLogoutAlert) {
-            Button("Log Out", role: .destructive) { appState.logout() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("You'll be disconnected from \(appState.currentServer?.displayName ?? "the server").") }
-        .alert("Custom Speed Limit", isPresented: $showCustomSpeedAlert) {
-            TextField("MB per second", text: $customSpeedText)
-                .keyboardType(.decimalPad)
-            Button("Set") {
-                if let mb = Double(customSpeedText), mb > 0 {
-                    downloadSpeedLimitKBps = Int(mb * 1024)
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("Enter a download speed limit in MB/s.") }
-        .alert("Custom Storage Cap", isPresented: $showCustomCapAlert) {
-            TextField("GB", text: $customCapText)
-                .keyboardType(.decimalPad)
-            Button("Set") {
-                if let gb = Double(customCapText), gb > 0 {
-                    downloadCapMB = Int(gb * 1024)
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("Enter a maximum download size in GB.") }
     }
 
     // formatted current download-speed limit for the menu label
@@ -229,7 +281,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var playbackSection: some View {
         let s = "Playback"
-        if sectionVisible(s, [["autoplay", "play"], ["crossfade", "fade", "automix", "transition"], ["gapless playback"], ["volume normalization", "replaygain", "replay gain", "normalize", "loudness"], ["equalizer", "eq", "bands", "graphic"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"]]) {
+        if sectionVisible(s, [["autoplay", "play"], ["crossfade", "fade", "automix", "transition", "duration", "style", "blend", "silence", "bpm", "tempo"], ["gapless playback"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"], ["resume playback after interruption", "resume", "interruption", "interrupt", "phone call", "siri", "other app", "force stop"]]) {
             Section(s) {
                 if rowVisible(s, ["autoplay", "play"]) {
                     Toggle(isOn: Binding(
@@ -255,6 +307,17 @@ struct SettingsView: View {
                         Label("Track Transition", systemImage: audio.transitionMode.icon)
                     }
                     .tint(Theme.accent)
+
+                    crossfadeTuningControls
+                }
+
+                if rowVisible(s, ["automix", "transition", "style", "blend", "silence", "bpm", "tempo"]) {
+                    NavigationLink {
+                        AutoMixSettingsView()
+                    } label: {
+                        Label("AutoMix", systemImage: "waveform.path")
+                    }
+                    .foregroundStyle(Theme.primaryText)
                 }
 
                 if rowVisible(s, ["gapless playback"]) {
@@ -273,26 +336,6 @@ struct SettingsView: View {
                     }
                 }
 
-                if rowVisible(s, ["volume normalization", "replaygain", "replay gain", "normalize", "loudness"]) {
-                    Picker(selection: $replayGainMode) {
-                        Text("Off").tag("off")
-                        Text("Track").tag("track")
-                        Text("Album").tag("album")
-                    } label: {
-                        Label("Volume Normalization", systemImage: "speaker.wave.2.bubble")
-                    }
-                    .tint(Theme.accent)
-                }
-
-                if rowVisible(s, ["equalizer", "eq", "bands", "graphic"]) {
-                    NavigationLink {
-                        EqualizerView()
-                    } label: {
-                        Label("Equalizer", systemImage: "slider.vertical.3")
-                    }
-                    .foregroundStyle(Theme.primaryText)
-                }
-
                 if rowVisible(s, ["shuffle"]) {
                     Toggle(isOn: Binding(
                         get: { audio.isShuffle },
@@ -308,6 +351,81 @@ struct SettingsView: View {
                         Label("Artwork Zoom on Play", systemImage: "arrow.up.left.and.arrow.down.right")
                     }
                     .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["resume playback after interruption", "resume", "interruption", "interrupt", "phone call", "siri", "other app", "force stop"]) {
+                    Toggle(isOn: $resumeAfterInterruption) {
+                        Label("Resume After Interruption", systemImage: "play.circle.fill")
+                    }
+                    .tint(Theme.accent)
+                }
+            }
+            .listRowBackground(Theme.secondaryBackground)
+        }
+    }
+
+    @ViewBuilder
+    private var crossfadeTuningControls: some View {
+        switch audio.transitionMode {
+        case .off:
+            EmptyView()
+        case .crossfade:
+            VStack(alignment: .leading, spacing: 8) {
+                LabeledContent("Crossfade Duration", value: "\(Int(crossfadeDurationSeconds))s")
+                    .foregroundStyle(Theme.primaryText)
+                Slider(value: $crossfadeDurationSeconds, in: 1...12, step: 1)
+                    .tint(Theme.accent)
+                    .onChange(of: crossfadeDurationSeconds) { _, _ in
+                        audio.setTransitionMode(audio.transitionMode)
+                    }
+            }
+        case .automix:
+            EmptyView()
+        }
+    }
+
+    // MARK: - Audio
+
+    @ViewBuilder
+    private var audioSection: some View {
+        let s = "Audio"
+        if sectionVisible(s, [["volume normalization", "replaygain", "replay gain", "normalize", "loudness"], ["equalizer", "eq", "bands", "graphic"], ["mono audio", "mono", "accessibility", "downmix"], ["spatial widener", "spatial", "3d", "stereo", "widener", "spatialize"]]) {
+            Section(s) {
+                if rowVisible(s, ["equalizer", "eq", "bands", "graphic"]) {
+                    NavigationLink {
+                        EqualizerView()
+                    } label: {
+                        Label("Equalizer", systemImage: "slider.vertical.3")
+                    }
+                    .foregroundStyle(Theme.primaryText)
+                }
+
+                if rowVisible(s, ["volume normalization", "replaygain", "replay gain", "normalize", "loudness"]) {
+                    Picker(selection: $replayGainMode) {
+                        Text("Off").tag("off")
+                        Text("Track").tag("track")
+                        Text("Album").tag("album")
+                    } label: {
+                        Label("Volume Normalization", systemImage: "speaker.wave.2.bubble")
+                    }
+                    .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["mono audio", "mono", "accessibility", "downmix"]) {
+                    Toggle(isOn: $monoAudio) {
+                        Label("Mono Audio", systemImage: "ear")
+                    }
+                    .tint(Theme.accent)
+                    .onChange(of: monoAudio) { _, _ in applyAudioEffectChange() }
+                }
+
+                if rowVisible(s, ["spatial widener", "spatial", "3d", "stereo", "widener", "spatialize"]) {
+                    Toggle(isOn: $spatialWidener) {
+                        Label("3D Spatial Widener", systemImage: "airpodspro")
+                    }
+                    .tint(Theme.accent)
+                    .disabled(monoAudio)
+                    .onChange(of: spatialWidener) { _, _ in applyAudioEffectChange() }
                 }
             }
             .listRowBackground(Theme.secondaryBackground)
@@ -447,8 +565,17 @@ struct SettingsView: View {
     @ViewBuilder
     private var performanceSection: some View {
         let s = "Performance"
-        if sectionVisible(s, [["image loading", "images", "speed", "power", "threads", "fast", "conservative"], ["data caching", "cache", "aggressive", "memory"], ["prefetch artist images", "prefetch", "artist", "profile", "pictures"], ["download local artwork library", "cover", "covers", "cover.png", "cover.webp", "album artwork", "artist pictures", "local images"]]) {
+        if sectionVisible(s, [["performance mode", "battery", "power save", "saver", "low power"], ["image loading", "images", "speed", "power", "threads", "fast", "conservative"], ["data caching", "cache", "aggressive", "memory"], ["prefetch artist images", "prefetch", "artist", "profile", "pictures"]]) {
             Section {
+                if rowVisible(s, ["performance mode", "battery", "power save", "saver", "low power"]) {
+                    NavigationLink {
+                        PerformanceModeView()
+                    } label: {
+                        Label("Performance Mode", systemImage: "bolt.badge.a")
+                    }
+                    .foregroundStyle(Theme.primaryText)
+                }
+
                 if rowVisible(s, ["image loading", "images", "speed", "power", "threads", "fast", "conservative"]) {
                     Picker(selection: $imageLoadMode) {
                         Text("Fast").tag("fast")
@@ -477,14 +604,10 @@ struct SettingsView: View {
                     }
                     .tint(Theme.accent)
                 }
-
-                if rowVisible(s, ["download local artwork library", "cover", "covers", "cover.png", "cover.webp", "album artwork", "artist pictures", "local images"]) {
-                    artworkLibraryDownloadRow
-                }
             } header: {
                 Text(s)
             } footer: {
-                Text("Fast uses more connections and CPU for snappier loading; Conservative saves battery. Aggressive caching keeps more artwork in memory. Local artwork saves album covers and artist photos on device so image views can resolve before the server responds. Loading/caching changes apply on next launch.")
+                Text("Fast uses more connections and CPU for snappier loading; Conservative saves battery. Aggressive caching keeps more artwork in memory. Loading/caching changes apply on next launch.")
             }
             .listRowBackground(Theme.secondaryBackground)
         }
@@ -540,13 +663,62 @@ struct SettingsView: View {
         .padding(.vertical, 4)
     }
 
+    private var lyricsDownloadRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Label("Download All Lyrics", systemImage: "quote.bubble")
+                    .foregroundStyle(Theme.primaryText)
+                Spacer()
+                if lyricsDownloader.isRunning {
+                    Button(role: .destructive) {
+                        lyricsDownloader.cancel()
+                    } label: {
+                        Text("Stop").font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        if let client = appState.client { lyricsDownloader.start(client: client) }
+                    } label: {
+                        Text("Download")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(appState.client == nil)
+                    .opacity(appState.client == nil ? 0.45 : 1)
+                }
+            }
+
+            if lyricsDownloader.isRunning {
+                ProgressView(value: lyricsDownloader.fraction)
+                    .tint(Theme.accent)
+            }
+            Text(lyricsDownloader.statusText)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .padding(.vertical, 4)
+    }
+
     // MARK: - Appearance
 
     @ViewBuilder
     private var appearanceSection: some View {
         let s = "Appearance"
-        if sectionVisible(s, [["show lossless badge", "lossless", "badge"], ["live artwork", "animated artwork", "live", "gif", "motion"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["force liquid glass", "liquid glass", "glass", "restart", "fallback"], ["accent color", "accent", "color", "colour", "theme"]]) {
+        if sectionVisible(s, [["theme", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["live artwork", "animated artwork", "live", "gif", "motion"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["accent color", "accent", "color", "colour", "theme"]]) {
             Section {
+                if rowVisible(s, ["theme", "dark", "light", "amoled", "oled", "black", "appearance"]) {
+                    Picker(selection: $themeMode) {
+                        Text("Dark").tag("dark")
+                        Text("AMOLED").tag("amoled")
+                        Text("Light").tag("light")
+                    } label: {
+                        Label("Theme", systemImage: "circle.lefthalf.filled")
+                    }
+                    .tint(Theme.accent)
+                }
+
                 if rowVisible(s, ["show lossless badge", "lossless", "badge"]) {
                     Toggle(isOn: $showLosslessBadge) {
                         Label("Show Lossless Badge", systemImage: "waveform.badge.plus")
@@ -571,13 +743,6 @@ struct SettingsView: View {
                 if rowVisible(s, ["dynamic player background", "dynamic", "background"]) {
                     Toggle(isOn: $dynamicBackground) {
                         Label("Dynamic Player Background", systemImage: "paintpalette")
-                    }
-                    .tint(Theme.accent)
-                }
-
-                if rowVisible(s, ["force liquid glass", "liquid glass", "glass", "restart", "fallback"]) {
-                    Toggle(isOn: $forceLiquidGlassUI) {
-                        Label("Force Liquid Glass", systemImage: "sparkles")
                     }
                     .tint(Theme.accent)
                 }
@@ -625,8 +790,6 @@ struct SettingsView: View {
                 }
             } header: {
                 Text(s)
-            } footer: {
-                Text("Force Liquid Glass is read when the app launches. Restart the app after changing it. Unsupported iOS versions still use the fallback UI.")
             }
             .listRowBackground(Theme.secondaryBackground)
         }
@@ -635,21 +798,180 @@ struct SettingsView: View {
     // MARK: - Library
 
     @ViewBuilder
-    private var librarySection: some View {
-        let s = "Library"
-        if sectionVisible(s, [["album sort order", "sort", "order", "album"]]) {
-            Section(s) {
-                if rowVisible(s, ["album sort order", "sort", "order", "album"]) {
-                    Picker(selection: $albumSortOrder) {
-                        Text("A–Z").tag("alphabetical")
-                        Text("Newest First").tag("newest")
-                        Text("Most Played").tag("most_played")
-                        Text("Year").tag("year")
-                    } label: {
-                        Label("Album Sort Order", systemImage: "arrow.up.arrow.down")
-                    }
-                    .tint(Theme.accent)
+    private var notificationsSection: some View {
+        let s = "Notifications"
+        if sectionVisible(s, [["test all notifications", "notifications", "toast", "error", "warning", "success", "queue", "info"]]) {
+            Section {
+                Button {
+                    VoltaNotificationCenter.shared.postTestNotifications()
+                } label: {
+                    Label("Test All Notifications", systemImage: "bell.badge")
                 }
+                .foregroundStyle(Theme.primaryText)
+
+                ForEach(VoltaNotificationTone.allCases) { tone in
+                    Button {
+                        VoltaNotificationCenter.shared.post(tone.testMessage, tone: tone)
+                    } label: {
+                        Label("Test \(tone.settingsLabel)", systemImage: tone.icon)
+                    }
+                    .foregroundStyle(Theme.primaryText)
+                }
+            } header: {
+                Text(s)
+            } footer: {
+                Text("Warnings and errors logged by the app show automatically. Use these buttons to preview every notification style.")
+            }
+            .listRowBackground(Theme.secondaryBackground)
+        }
+    }
+
+    @ViewBuilder
+    private var backupSection: some View {
+        let s = "Backups"
+        if sectionVisible(s, [["settings backup", "settings", "backup", "restore", "export", "import"], ["playlist backup", "playlist", "deleted", "restore", "auto", "json"]]) {
+            Section {
+                Toggle(isOn: $autoPlaylistBackupEnabled) {
+                    Label("Auto Playlist Backups", systemImage: "clock.arrow.circlepath")
+                }
+                .tint(Theme.accent)
+
+                Button {
+                    refreshPlaylistBackups()
+                } label: {
+                    HStack {
+                        Label("Update Playlist Backups", systemImage: "arrow.clockwise")
+                        Spacer()
+                        if isRefreshingPlaylistBackups {
+                            ProgressView().controlSize(.small).tint(Theme.accent)
+                        }
+                    }
+                }
+                .foregroundStyle(Theme.primaryText)
+                .disabled(!autoPlaylistBackupEnabled || isRefreshingPlaylistBackups || appState.client == nil)
+
+                if playlistBackupStore.deletedSnapshots.isEmpty {
+                    Text("No deleted playlist backups")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                } else {
+                    ForEach(playlistBackupStore.deletedSnapshots) { snapshot in
+                        HStack(spacing: 10) {
+                            Button {
+                                restoreDeletedPlaylist(snapshot)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "arrow.uturn.backward.circle")
+                                        .foregroundStyle(Theme.accent)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(snapshot.name)
+                                            .foregroundStyle(Theme.primaryText)
+                                        Text("\(snapshot.songCount) song\(snapshot.songCount == 1 ? "" : "s")")
+                                            .font(.caption)
+                                            .foregroundStyle(Theme.secondaryText)
+                                    }
+                                    Spacer()
+                                    if restoringPlaylistBackupID == snapshot.id {
+                                        ProgressView().controlSize(.small).tint(Theme.accent)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(restoringPlaylistBackupID != nil || appState.client == nil)
+
+                            Button(role: .destructive) {
+                                deletePlaylistBackup(snapshot)
+                            } label: {
+                                Image(systemName: Symbols.trash)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(Theme.error)
+                                    .frame(width: 34, height: 34)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(restoringPlaylistBackupID == snapshot.id)
+                            .accessibilityLabel("Delete backup for \(snapshot.name)")
+                        }
+                    }
+                }
+
+                if let playlistBackupStatus {
+                    Text(playlistBackupStatus)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+
+                Button {
+                    exportSettingsBackup()
+                } label: {
+                    HStack {
+                        Label("Export Settings Backup", systemImage: "square.and.arrow.up")
+                        Spacer()
+                        if isExportingSettings {
+                            ProgressView().controlSize(.small).tint(Theme.accent)
+                        }
+                    }
+                }
+                .foregroundStyle(Theme.primaryText)
+                .disabled(isExportingSettings)
+
+                Button {
+                    showSettingsImporter = true
+                } label: {
+                    Label("Restore Settings Backup", systemImage: "arrow.down.doc")
+                }
+                .foregroundStyle(Theme.primaryText)
+
+                if let settingsBackupStatus {
+                    Text(settingsBackupStatus)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+
+                Button {
+                    exportPlaylists()
+                } label: {
+                    HStack {
+                        Label("Export Playlists", systemImage: "square.and.arrow.up.on.square")
+                        Spacer()
+                        if isExportingPlaylists {
+                            ProgressView().controlSize(.small).tint(Theme.accent)
+                        }
+                    }
+                }
+                .foregroundStyle(Theme.primaryText)
+                .disabled(isExportingPlaylists || appState.client == nil)
+
+                Button {
+                    showPlaylistImporter = true
+                } label: {
+                    HStack {
+                        Label("Import Playlists", systemImage: "square.and.arrow.down.on.square")
+                        Spacer()
+                        if isImportingPlaylists {
+                            ProgressView().controlSize(.small).tint(Theme.accent)
+                        }
+                    }
+                }
+                .foregroundStyle(Theme.primaryText)
+                .disabled(isImportingPlaylists || appState.client == nil)
+                .fileImporter(
+                    isPresented: $showPlaylistImporter,
+                    allowedContentTypes: [.json],
+                    allowsMultipleSelection: false
+                ) { result in
+                    importPlaylists(result)
+                }
+
+                if let playlistTransferStatus {
+                    Text(playlistTransferStatus)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            } header: {
+                Text(s)
+            } footer: {
+                Text("Playlist backups are kept as local JSON and refresh after playlist edits. Export/Import recreates server playlists as portable JSON files. Settings backups include app preferences and smart playlists. Server passwords stay in Keychain and are not exported.")
             }
             .listRowBackground(Theme.secondaryBackground)
         }
@@ -660,7 +982,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var serverSection: some View {
         let s = "Server"
-        if sectionVisible(s, [["connected to", "server url", "cellular url", "data", "wifi", "username", "edit connection", "test connection", "log out", "logout", "sign out"]]) {
+        if sectionVisible(s, [["connected to", "server url", "cellular url", "data", "wifi", "username", "edit connection", "test connection", "log out", "logout", "sign out"], ["library stats & speed test", "stats", "speed test", "library", "server health", "latency"]]) {
         Section(s) {
             if let server = appState.currentServer {
                 LabeledContent("Connected to", value: server.displayName)
@@ -669,6 +991,10 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.primaryText)
                 if let cell = server.cellularURLString, !cell.isEmpty {
                     LabeledContent("Cellular URL", value: cell)
+                        .foregroundStyle(Theme.primaryText)
+                }
+                if let cellularUsername = server.cellularUsername, !cellularUsername.isEmpty {
+                    LabeledContent("Cellular Username", value: cellularUsername)
                         .foregroundStyle(Theme.primaryText)
                 }
                 LabeledContent("Username", value: server.username)
@@ -690,8 +1016,10 @@ struct SettingsView: View {
                     do {
                         try await appState.client?.ping()
                         connectionStatus = "✓ Connected"
+                        VoltaNotificationCenter.shared.post("Connection test passed", tone: .success)
                     } catch {
                         connectionStatus = "✗ \(error.localizedDescription)"
+                        VoltaNotificationCenter.shared.post("Connection test failed", tone: .error)
                     }
                 }
             } label: {
@@ -709,6 +1037,15 @@ struct SettingsView: View {
             }
             .foregroundStyle(Theme.primaryText)
 
+            if rowVisible(s, ["library stats & speed test", "stats", "speed test", "library", "server health", "latency"]) {
+                NavigationLink {
+                    ServerInfoView()
+                } label: {
+                    Label("Library Stats & Speed Test", systemImage: "chart.bar")
+                }
+                .foregroundStyle(Theme.primaryText)
+            }
+
             Button(role: .destructive) {
                 showLogoutAlert = true
             } label: {
@@ -719,38 +1056,20 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Server Info
-
-    @ViewBuilder
-    private var serverInfoSection: some View {
-        let s = "Server Info"
-        if sectionVisible(s, [["library stats & speed test", "stats", "speed test", "library"]]) {
-            Section {
-                NavigationLink {
-                    ServerInfoView()
-                } label: {
-                    Label("Library Stats & Speed Test", systemImage: "chart.bar")
-                }
-                .foregroundStyle(Theme.primaryText)
-            } header: {
-                Text(s)
-            }
-            .listRowBackground(Theme.secondaryBackground)
-        }
-    }
-
     // MARK: - Cache
 
     @ViewBuilder
     private var cacheSection: some View {
         let s = "Storage"
-        if sectionVisible(s, [["downloaded tracks", "artwork cache", "local artwork library", "cover", "artist pictures", "app data", "total", "clear downloads", "clear artwork", "delete local artwork", "cache", "storage"]]) {
+        if sectionVisible(s, [["downloaded tracks", "artwork cache", "local artwork library", "cover", "artist pictures", "lyrics cache", "local lyrics", "save lyrics", "app data", "total", "clear downloads", "clear artwork", "delete local artwork", "clear lyrics", "cache", "storage"], ["download local artwork library", "cover", "covers", "album artwork", "artist pictures", "local images"]]) {
         Section {
             LabeledContent("Downloaded Tracks", value: downloadsSize)
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("Artwork Cache", value: artworkSize)
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("Local Artwork Library", value: localArtworkSize)
+                .foregroundStyle(Theme.primaryText)
+            LabeledContent("Lyrics Cache", value: lyricsSize)
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("Logged Play Events", value: playEventsSize)
                 .foregroundStyle(Theme.primaryText)
@@ -761,6 +1080,15 @@ struct SettingsView: View {
             LabeledContent("Total", value: totalCacheSize)
                 .foregroundStyle(Theme.secondaryText)
 
+            if rowVisible(s, ["download local artwork library", "cover", "covers", "album artwork", "artist pictures", "local images"]) {
+                artworkLibraryDownloadRow
+            }
+
+            Toggle(isOn: $saveLyricsLocally) {
+                Label("Save Lyrics Locally", systemImage: Symbols.lyrics)
+            }
+            .tint(Theme.accent)
+            lyricsDownloadRow
             Button(role: .destructive) {
                 showClearCacheAlert = true
             } label: {
@@ -776,10 +1104,20 @@ struct SettingsView: View {
             } label: {
                 Label("Delete Local Artwork Library", systemImage: "photo.badge.minus")
             }
+            Button(role: .destructive) {
+                clearLocalLyrics()
+            } label: {
+                Label("Clear Local Lyrics", systemImage: "quote.bubble.badge.minus")
+            }
+            Button(role: .destructive) {
+                showClearPlayEventsFirstAlert = true
+            } label: {
+                Label("Clear Logged Play Events", systemImage: "chart.bar.xaxis")
+            }
         } header: {
             Text(s)
         } footer: {
-            Text("Downloaded tracks are kept for offline play. Artwork and data caches rebuild automatically. The local artwork library is the persistent cover and artist photo store used for faster image loading.")
+            Text("Downloaded tracks and saved lyrics are kept for offline use. Artwork and data caches rebuild automatically.")
         }
         .listRowBackground(Theme.secondaryBackground)
         }
@@ -797,13 +1135,33 @@ struct SettingsView: View {
             if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
                 LabeledContent("Version", value: version)
                     .foregroundStyle(Theme.primaryText)
+                    .contentShape(Rectangle())
+                    .onTapGesture { registerSecretDeveloperTap() }
             }
             if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
                 LabeledContent("Build", value: build)
                     .foregroundStyle(Theme.primaryText)
+                    .contentShape(Rectangle())
+                    .onTapGesture { registerSecretDeveloperTap() }
             }
         }
         .listRowBackground(Theme.secondaryBackground)
+        }
+    }
+
+    // Tapping Version/Build 7 times reveals the hidden Developer section. Taps
+    // tied to a single counter; a short hint appears as the user gets close.
+    private func registerSecretDeveloperTap() {
+        guard !developerUnlocked else { return }
+        versionTapCount += 1
+        if versionTapCount >= 7 {
+            developerUnlocked = true
+            versionTapCount = 0
+            VoltaNotificationCenter.shared.post("Developer Tools enabled", tone: .success)
+        } else if versionTapCount >= 4 {
+            let remaining = 7 - versionTapCount
+            VoltaNotificationCenter.shared.post(
+                "\(remaining) more tap\(remaining == 1 ? "" : "s") to enable Developer Tools", tone: .info)
         }
     }
 
@@ -812,8 +1170,30 @@ struct SettingsView: View {
     @ViewBuilder
     private var developerSection: some View {
         let s = "Developer"
-        if sectionVisible(s, [["verbose logging", "logging"], ["log device specs", "device", "specs", "ios", "liquid glass", "diagnostics"], ["export all logs"], ["clear all logs"], ["force refresh home"], ["logged play events"], ["queue length"], ["developer"]]) {
+        // Stays fully hidden (even from search) until unlocked via 7 taps on
+        // the Version/Build row in About.
+        if developerUnlocked,
+           sectionVisible(s, [["developer tools", "simulation", "simulate", "slow server", "expired session", "no network", "profiling", "ram", "automix", "autoplay"], ["notifications", "toast", "warning", "preview"], ["live performance overlay", "overlay", "fps", "ram", "frame pacing"], ["verbose logging", "logging"], ["log device specs", "device", "specs", "ios", "liquid glass", "diagnostics"], ["dump app files", "export app data", "zip", "all files"], ["export all logs"], ["clear all logs"], ["force refresh home"], ["logged play events"], ["queue length"], ["logs", "diagnostics"], ["developer"]]) {
         Section {
+            NavigationLink {
+                DeveloperToolsView()
+            } label: {
+                Label("Developer Tools", systemImage: "hammer")
+            }
+            .foregroundStyle(Theme.primaryText)
+
+            NavigationLink {
+                NotificationSettingsView()
+            } label: {
+                Label("Notifications", systemImage: "bell.badge")
+            }
+            .foregroundStyle(Theme.primaryText)
+
+            Toggle(isOn: $developerPerformanceOverlay) {
+                Label("Live Performance Overlay", systemImage: "chart.xyaxis.line")
+            }
+            .tint(Theme.accent)
+
             Toggle(isOn: $developerLogging) {
                 Label("Verbose Logging", systemImage: "terminal")
             }
@@ -833,6 +1213,26 @@ struct SettingsView: View {
             }
             .foregroundStyle(Theme.primaryText)
 
+            Button {
+                dumpAppFiles()
+            } label: {
+                HStack {
+                    Label("Dump App Files", systemImage: "archivebox")
+                    Spacer()
+                    if isDumpingAppFiles {
+                        ProgressView().controlSize(.small).tint(Theme.accent)
+                    }
+                }
+            }
+            .foregroundStyle(Theme.primaryText)
+            .disabled(isDumpingAppFiles)
+
+            if let appDumpStatus {
+                Text(appDumpStatus)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+
             Button(role: .destructive) {
                 showClearLogsAlert = true
             } label: {
@@ -840,7 +1240,10 @@ struct SettingsView: View {
             }
 
             Button {
-                Task { await appState.homeViewModel.load(appState: appState, force: true) }
+                Task {
+                    await appState.homeViewModel.load(appState: appState, force: true)
+                    VoltaNotificationCenter.shared.post("Home refreshed", tone: .success)
+                }
             } label: {
                 Label("Force Refresh Home", systemImage: "arrow.clockwise")
             }
@@ -857,31 +1260,29 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             .foregroundStyle(Theme.primaryText)
-        } header: {
-            Text(s)
-        } footer: {
-            Text("Verbose logging keeps info-level network and playback entries. Warnings and errors are always kept.")
-        }
-        .listRowBackground(Theme.secondaryBackground)
-        }
-    }
 
-    // MARK: - Logs (always last)
-
-    @ViewBuilder
-    private var logsSection: some View {
-        let s = "Diagnostics"
-        if sectionVisible(s, [["logs", "diagnostics"]]) {
-            Section {
+            if rowVisible(s, ["logs", "diagnostics"]) {
                 NavigationLink {
                     LogsView()
                 } label: {
                     Label("Logs", systemImage: Symbols.logs)
                 }
-            } header: {
-                Text(s)
+                .foregroundStyle(Theme.primaryText)
             }
-            .listRowBackground(Theme.secondaryBackground)
+
+            Button(role: .destructive) {
+                developerUnlocked = false
+                versionTapCount = 0
+                VoltaNotificationCenter.shared.post("Developer Tools hidden", tone: .info)
+            } label: {
+                Label("Hide Developer Tools", systemImage: "eye.slash")
+            }
+        } header: {
+            Text(s)
+        } footer: {
+            Text("Verbose logging keeps info-level network and playback entries. Warnings and errors are always kept. Tap Version 7 times in About to reveal this section.")
+        }
+        .listRowBackground(Theme.secondaryBackground)
         }
     }
 
@@ -1009,10 +1410,71 @@ struct SettingsView: View {
         async let artistsRequest = client.artists()
         let albums = await albumsRequest
         let artists = (try? await artistsRequest) ?? []
-        let coverCount = Set(albums.compactMap(\.coverArt)).count
-        let itemCount = coverCount * 3 + artists.count
-        let estimatedBytes = itemCount * 140_000
-        artworkLibraryEstimate = SettingsView.formatBytes(estimatedBytes)
+        let coverIDs = Array(Set(albums.compactMap(\.coverArt))).sorted()
+        let coverURLs = coverIDs.prefix(24).flatMap { coverID in
+            [client.coverArtURL(id: coverID), client.coverArtURL(id: coverID, size: 300), client.coverArtURL(id: coverID, size: 600)]
+        }
+        let sampledCoverAverage = await averageContentLength(for: Array(coverURLs.compactMap { $0 }))
+        let artistURLs = await sampledArtistArtworkURLs(artists: Array(artists.prefix(12)), client: client)
+        let sampledArtistAverage = await averageContentLength(for: artistURLs)
+
+        let coverAverage = sampledCoverAverage ?? 140_000
+        let artistAverage = sampledArtistAverage ?? sampledCoverAverage ?? 140_000
+        let estimatedBytes = (coverIDs.count * 3 * coverAverage) + (artists.count * artistAverage)
+        let sampleCount = (sampledCoverAverage == nil ? 0 : min(coverURLs.count, 72))
+            + (sampledArtistAverage == nil ? 0 : artistURLs.count)
+        let suffix = sampleCount > 0 ? " sampled" : " estimated"
+        artworkLibraryEstimate = SettingsView.formatBytes(estimatedBytes) + suffix
+    }
+
+    private func sampledArtistArtworkURLs(artists: [Artist], client: SubsonicClient) async -> [URL] {
+        await withTaskGroup(of: URL?.self) { group in
+            for artist in artists {
+                group.addTask {
+                    if let direct = artist.artistImageUrl.flatMap(URL.init(string:)) {
+                        return direct
+                    }
+                    if let info = try? await client.artistInfo(id: artist.id),
+                       let urlString = info.bestImageUrl,
+                       let url = URL(string: urlString) {
+                        return url
+                    }
+                    return client.coverArtURL(id: artist.coverArt, size: 600)
+                }
+            }
+            var urls: [URL] = []
+            for await url in group {
+                if let url { urls.append(url) }
+            }
+            return urls
+        }
+    }
+
+    private func averageContentLength(for urls: [URL]) async -> Int? {
+        guard !urls.isEmpty else { return nil }
+        let lengths = await withTaskGroup(of: Int?.self) { group in
+            for url in urls.prefix(72) {
+                group.addTask { await Self.contentLength(for: url) }
+            }
+            var values: [Int] = []
+            for await value in group {
+                if let value, value > 0 { values.append(value) }
+            }
+            return values
+        }
+        guard !lengths.isEmpty else { return nil }
+        return lengths.reduce(0, +) / lengths.count
+    }
+
+    private nonisolated static func contentLength(for url: URL) async -> Int? {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 8
+        if let (_, response) = try? await URLSession.shared.data(for: request),
+           response.expectedContentLength > 0 {
+            return Int(response.expectedContentLength)
+        }
+        return nil
     }
 
     private func refreshCacheSize() {
@@ -1026,6 +1488,7 @@ struct SettingsView: View {
             let artwork   = SettingsView.directorySize(at: caches.appendingPathComponent("artwork"))
                           + SettingsView.directorySize(at: caches.appendingPathComponent("api"))
             let localArtwork = await ArtworkLoader.shared.pinnedArtworkSize()
+            let lyrics = await LyricsService.shared.storageSizeBytes()
             let data      = SettingsView.directorySize(at: support.appendingPathComponent("Volta"))
             let playEvents = StatsStore.shared.storageSizeBytes()
             let logs = AppLogger.shared.estimatedSizeBytes()
@@ -1035,6 +1498,7 @@ struct SettingsView: View {
                 downloadsSize  = SettingsView.formatBytes(downloads)
                 artworkSize    = SettingsView.formatBytes(artwork)
                 localArtworkSize = SettingsView.formatBytes(localArtwork)
+                lyricsSize = SettingsView.formatBytes(lyrics)
                 localArtworkBytes = localArtwork
                 localArtworkLibraryDownloaded = localArtwork > 0
                 dataSize       = SettingsView.formatBytes(data)
@@ -1050,6 +1514,7 @@ struct SettingsView: View {
             await ArtworkLoader.shared.clearCache()
             DiskCache.clear()
             AppLogger.shared.log("Artwork & data cache cleared by user", category: .other)
+            VoltaNotificationCenter.shared.post("Artwork cache cleared", tone: .success)
             refreshCacheSize()
         }
     }
@@ -1060,6 +1525,16 @@ struct SettingsView: View {
             localArtworkLibraryDownloaded = false
             localArtworkBytes = 0
             AppLogger.shared.log("Local artwork library cleared by user", category: .other)
+            VoltaNotificationCenter.shared.post("Local artwork deleted", tone: .success)
+            refreshCacheSize()
+        }
+    }
+
+    private func clearLocalLyrics() {
+        Task {
+            await LyricsService.shared.clearLocalLyrics()
+            AppLogger.shared.log("Local lyrics cleared by user", category: .other)
+            VoltaNotificationCenter.shared.post("Local lyrics cleared", tone: .success)
             refreshCacheSize()
         }
     }
@@ -1073,26 +1548,195 @@ struct SettingsView: View {
             .reduce(0, +)
     }
 
-    private nonisolated static func formatBytes(_ n: Int) -> String {
+    fileprivate nonisolated static func formatBytes(_ n: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file)
     }
 
+    // re-attach/detach the audio processing tap when mono/spatial toggles flip
+    private func applyAudioEffectChange() {
+        EqualizerEngine.shared.refreshEffectFlags()
+        NotificationCenter.default.post(name: .equalizerToggled, object: nil)
+    }
+
     private func exportLogs() {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("volta-logs-\(Int(Date().timeIntervalSince1970))", isDirectory: true)
-        try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        Task {
+            let fm = FileManager.default
+            let stamp = Int(Date().timeIntervalSince1970)
+            let tmp = fm.temporaryDirectory
+                .appendingPathComponent("volta-logs-\(stamp)", isDirectory: true)
+            let zip = fm.temporaryDirectory
+                .appendingPathComponent("volta-logs-\(stamp).zip")
+            try? fm.removeItem(at: tmp)
+            try? fm.removeItem(at: zip)
+            try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
 
-        for cat in LogCategory.allCases {
-            let text = AppLogger.shared.allFormatted(category: cat)
-            let file = tmp.appendingPathComponent("\(cat.rawValue).txt")
-            try? text.write(to: file, atomically: true, encoding: .utf8)
-        }
+            let files: [ZipSourceFile] = LogCategory.allCases.compactMap { cat in
+                let text = AppLogger.shared.allFormatted(category: cat)
+                let file = tmp.appendingPathComponent("\(cat.rawValue).txt")
+                guard (try? text.write(to: file, atomically: true, encoding: .utf8)) != nil else {
+                    return nil
+                }
+                return ZipSourceFile(url: file, path: "Logs/\(cat.rawValue).txt")
+            }
 
-        let vc = UIActivityViewController(activityItems: [tmp], applicationActivities: nil)
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let root = scene.windows.first?.rootViewController {
-            root.present(vc, animated: true)
+            do {
+                try ZipArchiveWriter.write(files: files, to: zip)
+                VoltaNotificationCenter.shared.post("Logs zip ready", tone: .success)
+                ShareSheet.present([zip])
+            } catch {
+                VoltaNotificationCenter.shared.post("Logs export used folder fallback", tone: .warning)
+                ShareSheet.present([tmp])
+            }
         }
+    }
+
+    private func exportSettingsBackup() {
+        guard !isExportingSettings else { return }
+        isExportingSettings = true
+        settingsBackupStatus = "Preparing backup..."
+        Task {
+            defer { isExportingSettings = false }
+            do {
+                let url = try SettingsBackupManager.exportURL()
+                settingsBackupStatus = "Backup ready"
+                VoltaNotificationCenter.shared.post("Settings backup ready", tone: .success)
+                ShareSheet.present([url])
+            } catch {
+                settingsBackupStatus = "Backup failed: \(error.localizedDescription)"
+                AppLogger.shared.log("Settings backup failed: \(error.localizedDescription)", category: .other, level: .error)
+            }
+        }
+    }
+
+    private func restoreSettingsBackup(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer {
+                if scoped { url.stopAccessingSecurityScopedResource() }
+            }
+            let count = try SettingsBackupManager.restore(from: url)
+            SmartPlaylistStore.shared.reload()
+            PlaylistFolderStore.shared.reload()
+            settingsBackupStatus = "Restored \(count) settings"
+            VoltaNotificationCenter.shared.post("Settings restored", tone: .success)
+        } catch {
+            settingsBackupStatus = "Restore failed: \(error.localizedDescription)"
+            VoltaNotificationCenter.shared.post("Settings restore failed", tone: .error)
+            AppLogger.shared.log("Settings restore failed: \(error.localizedDescription)", category: .other, level: .error)
+        }
+    }
+
+    private func exportPlaylists() {
+        guard !isExportingPlaylists, let client = appState.client else { return }
+        isExportingPlaylists = true
+        playlistTransferStatus = "Collecting playlists…"
+        Task {
+            defer { isExportingPlaylists = false }
+            do {
+                let url = try await PlaylistTransfer.exportURL(client: client)
+                playlistTransferStatus = "Playlists exported"
+                VoltaNotificationCenter.shared.post("Playlists exported", tone: .success)
+                ShareSheet.present([url])
+            } catch {
+                playlistTransferStatus = "Export failed: \(error.localizedDescription)"
+                VoltaNotificationCenter.shared.post("Playlist export failed", tone: .error)
+            }
+        }
+    }
+
+    private func importPlaylists(_ result: Result<[URL], Error>) {
+        guard let client = appState.client else { return }
+        do {
+            guard let url = try result.get().first else { return }
+            isImportingPlaylists = true
+            playlistTransferStatus = "Importing playlists…"
+            Task {
+                defer { isImportingPlaylists = false }
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    let count = try await PlaylistTransfer.importPlaylists(from: url, client: client)
+                    playlistTransferStatus = "Imported \(count) playlist\(count == 1 ? "" : "s")"
+                    VoltaNotificationCenter.shared.post("Imported \(count) playlists", tone: .success)
+                } catch {
+                    playlistTransferStatus = "Import failed: \(error.localizedDescription)"
+                    VoltaNotificationCenter.shared.post("Playlist import failed", tone: .error)
+                }
+            }
+        } catch {
+            playlistTransferStatus = "Import failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func refreshPlaylistBackups() {
+        guard let client = appState.client else {
+            playlistBackupStatus = "Connect to a server to update playlist backups"
+            return
+        }
+        guard !isRefreshingPlaylistBackups else { return }
+        isRefreshingPlaylistBackups = true
+        playlistBackupStatus = "Updating playlist backups..."
+        Task {
+            await PlaylistBackupStore.shared.backupAll(client: client)
+            let count = PlaylistBackupStore.shared.snapshots.count
+            let size = SettingsView.formatBytes(PlaylistBackupStore.shared.estimatedSizeBytes())
+            playlistBackupStatus = "Backed up \(count) playlist\(count == 1 ? "" : "s") · \(size)"
+            isRefreshingPlaylistBackups = false
+            VoltaNotificationCenter.shared.post("Playlist backups updated", tone: .success)
+        }
+    }
+
+    private func restoreDeletedPlaylist(_ snapshot: PlaylistBackupSnapshot) {
+        guard let client = appState.client else {
+            playlistBackupStatus = "Connect to a server to restore playlists"
+            return
+        }
+        guard restoringPlaylistBackupID == nil else { return }
+        restoringPlaylistBackupID = snapshot.id
+        playlistBackupStatus = "Restoring \(snapshot.name)..."
+        Task {
+            do {
+                let playlist = try await PlaylistBackupStore.shared.restore(snapshot, client: client)
+                playlistBackupStatus = "Restored \(playlist.name)"
+                VoltaNotificationCenter.shared.post("Playlist restored", tone: .success)
+            } catch {
+                playlistBackupStatus = "Restore failed: \(error.localizedDescription)"
+                VoltaNotificationCenter.shared.post("Playlist restore failed", tone: .error)
+                AppLogger.shared.log("Playlist restore failed: \(error.localizedDescription)", category: .other, level: .error)
+            }
+            restoringPlaylistBackupID = nil
+        }
+    }
+
+    private func deletePlaylistBackup(_ snapshot: PlaylistBackupSnapshot) {
+        PlaylistBackupStore.shared.delete(snapshot)
+        playlistBackupStatus = "Deleted backup for \(snapshot.name)"
+        VoltaNotificationCenter.shared.post("Playlist backup deleted", tone: .success)
+    }
+
+    private func dumpAppFiles() {
+        guard !isDumpingAppFiles else { return }
+        isDumpingAppFiles = true
+        appDumpStatus = "Preparing zip..."
+        Task {
+            defer { isDumpingAppFiles = false }
+            do {
+                let url = try await AppDataExporter.makeArchive()
+                let size = SettingsView.formatBytes(SettingsView.fileSize(at: url))
+                appDumpStatus = "Ready: \(size)"
+                AppLogger.shared.log("App file dump exported: \(size)", category: .other)
+                VoltaNotificationCenter.shared.post("App files zip ready", tone: .success)
+                ShareSheet.present([url])
+            } catch {
+                appDumpStatus = "Export failed: \(error.localizedDescription)"
+                AppLogger.shared.log("App file dump failed: \(error.localizedDescription)", category: .other, level: .error)
+            }
+        }
+    }
+
+    private nonisolated static func fileSize(at url: URL) -> Int {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
     }
 
     private func clearDownloads() {
@@ -1101,7 +1745,193 @@ struct SettingsView: View {
         try? FileManager.default.removeItem(at: dir)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         AppLogger.shared.log("Downloads cleared by user", category: .other)
+        VoltaNotificationCenter.shared.post("Downloads cleared", tone: .success)
         refreshCacheSize()
+    }
+
+    private func clearPlayEvents() {
+        StatsStore.shared.clearAll()
+        AppLogger.shared.log("Logged play events cleared by user", category: .other, level: .warning)
+        VoltaNotificationCenter.shared.post("Listening stats cleared", tone: .success)
+        refreshCacheSize()
+    }
+}
+
+struct AutoMixSettingsView: View {
+    @Environment(AppState.self) private var appState
+
+    @AppStorage("gaplessPlayback") private var gaplessPlayback = "on"
+    @AppStorage("automixStyle") private var automixStyle = "balanced"
+    @AppStorage("automixMaxBlendSeconds") private var automixMaxBlendSeconds = 10.0
+    @AppStorage("automixSilenceTrim") private var automixSilenceTrim = true
+    @AppStorage("automixTempoMatch") private var automixTempoMatch = true
+    @AppStorage("automixBeatAlign") private var automixBeatAlign = true
+    @AppStorage("automixHarmonic") private var automixHarmonic = true
+    @AppStorage("automixBassSwap") private var automixBassSwap = true
+
+    private var audio: AudioPlayer { appState.audioPlayer }
+
+    var body: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
+            List {
+                Section {
+                    Picker(selection: Binding(
+                        get: { audio.transitionMode },
+                        set: { audio.setTransitionMode($0) }
+                    )) {
+                        ForEach(PlaybackTransitionMode.allCases) { mode in
+                            Text(mode.settingsLabel)
+                                .tag(mode)
+                                .disabled(mode == .automix && gaplessPlayback == "off")
+                        }
+                    } label: {
+                        Label("Track Transition", systemImage: audio.transitionMode.icon)
+                    }
+                    .tint(Theme.accent)
+                } header: {
+                    Text("Mode")
+                } footer: {
+                    Text("AutoMix requires Gapless Playback set to Weak or On.")
+                }
+                .listRowBackground(Theme.secondaryBackground)
+
+                Section {
+                    Picker(selection: $automixStyle) {
+                        Text("Tight").tag("tight")
+                        Text("Balanced").tag("balanced")
+                        Text("Wide").tag("wide")
+                    } label: {
+                        Label("Style", systemImage: "slider.horizontal.3")
+                    }
+                    .tint(Theme.accent)
+                    .onChange(of: automixStyle) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        LabeledContent("Max Blend", value: "\(Int(automixMaxBlendSeconds))s")
+                            .foregroundStyle(Theme.primaryText)
+                        Slider(value: $automixMaxBlendSeconds, in: 4...18, step: 1)
+                            .tint(Theme.accent)
+                            .onChange(of: automixMaxBlendSeconds) { _, _ in
+                                audio.setTransitionMode(audio.transitionMode)
+                            }
+                    }
+
+                    Toggle(isOn: $automixSilenceTrim) {
+                        Label("Silence Trim", systemImage: "scissors")
+                    }
+                    .tint(Theme.accent)
+                    .onChange(of: automixSilenceTrim) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+
+                    Toggle(isOn: $automixTempoMatch) {
+                        Label("BPM Match", systemImage: "metronome")
+                    }
+                    .tint(Theme.accent)
+                    .onChange(of: automixTempoMatch) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+
+                    Toggle(isOn: $automixBeatAlign) {
+                        Label("Beat Lock", systemImage: "waveform.path.ecg")
+                    }
+                    .tint(Theme.accent)
+                    .disabled(!automixTempoMatch)
+                    .onChange(of: automixBeatAlign) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+
+                    Toggle(isOn: $automixHarmonic) {
+                        Label("Harmonic Mixing", systemImage: "pianokeys")
+                    }
+                    .tint(Theme.accent)
+                    .onChange(of: automixHarmonic) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+
+                    Toggle(isOn: $automixBassSwap) {
+                        Label("Bass Swap", systemImage: "dial.low")
+                    }
+                    .tint(Theme.accent)
+                    .onChange(of: automixBassSwap) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+                } header: {
+                    Text("Mixing")
+                } footer: {
+                    Text("BPM Match bends the outgoing track to the incoming tempo (±6%, pitch preserved). Beat Lock then fires the blend on the downbeat so the two tracks' beats land together, like a DJ. Harmonic Mixing reads each track's musical key (Camelot) and gives compatible pairs a longer blend, clashing pairs a shorter, cleaner handover. Bass Swap rolls the incoming track's low end off and brings it in as it takes over, so the two basslines don't muddy each other (applies when the equalizer is off).")
+                }
+                .listRowBackground(Theme.secondaryBackground)
+
+                Section {
+                    NavigationLink {
+                        AutoMixPreviewView()
+                    } label: {
+                        Label("Preview AutoMix", systemImage: "waveform.badge.magnifyingglass")
+                    }
+                } footer: {
+                    Text("Hear and see how two of your tracks blend with the current settings.")
+                }
+                .listRowBackground(Theme.secondaryBackground)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+        }
+        .navigationTitle("AutoMix")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
+        }
+        .preferredColorScheme(Theme.colorScheme)
+    }
+}
+
+struct NotificationSettingsView: View {
+    @AppStorage("showWarningNotifications") private var showWarningNotifications = false
+    @AppStorage("showOfflineErrorNotifications") private var showOfflineErrorNotifications = false
+
+    var body: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
+            List {
+                Section {
+                    Toggle(isOn: $showWarningNotifications) {
+                        Label("Show Warning Notifications", systemImage: Symbols.warning)
+                    }
+                    .tint(Theme.accent)
+
+                    Toggle(isOn: $showOfflineErrorNotifications) {
+                        Label("Show Offline Error Notifications", systemImage: "wifi.slash")
+                    }
+                    .tint(Theme.accent)
+                } footer: {
+                    Text("Warnings and offline error notifications stay hidden unless enabled. The app keeps logging them.")
+                }
+                .listRowBackground(Theme.secondaryBackground)
+
+                Section {
+                    Button {
+                        VoltaNotificationCenter.shared.postTestNotifications()
+                    } label: {
+                        Label("Preview All", systemImage: "bell.badge")
+                    }
+                    .foregroundStyle(Theme.primaryText)
+
+                    ForEach(VoltaNotificationTone.allCases) { tone in
+                        Button {
+                            VoltaNotificationCenter.shared.post(tone.testMessage, tone: tone, force: true)
+                        } label: {
+                            Label("Preview \(tone.settingsLabel)", systemImage: tone.icon)
+                        }
+                        .foregroundStyle(Theme.primaryText)
+                    }
+                } header: {
+                    Text("Previews")
+                }
+                .listRowBackground(Theme.secondaryBackground)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+        }
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
+        }
+        .preferredColorScheme(Theme.colorScheme)
     }
 }
 
@@ -1113,6 +1943,9 @@ struct EditConnectionView: View {
 
     @State private var serverURL: String = ""
     @State private var cellularURL: String = ""
+    @State private var useSeparateCellularLogin = false
+    @State private var cellularUsername: String = ""
+    @State private var cellularPassword: String = ""
     @State private var username: String = ""
     @State private var password: String = ""
     @State private var isSaving = false
@@ -1143,10 +1976,20 @@ struct EditConnectionView: View {
                         .keyboardType(.URL)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
+                    Toggle(isOn: $useSeparateCellularLogin.animation(.easeInOut(duration: 0.2))) {
+                        Label("Separate Cellular Login", systemImage: "person.badge.key")
+                    }
+                    .tint(Theme.accent)
+                    if useSeparateCellularLogin {
+                        TextField("Cellular Username", text: $cellularUsername)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                        SecureField("Cellular Password", text: $cellularPassword)
+                    }
                 } header: {
                     Text("Cellular")
                 } footer: {
-                    Text("Used automatically when off Wi-Fi. Handy when the server URL above is a local-network address that's only reachable at home. Leave blank to always use the server URL.")
+                    Text("Used automatically when off Wi-Fi. Leave cellular login blank to keep using the main username and password.")
                 }
                 .listRowBackground(Theme.secondaryBackground)
 
@@ -1178,7 +2021,7 @@ struct EditConnectionView: View {
                 .disabled(isSaving || serverURL.trimmingCharacters(in: .whitespaces).isEmpty || username.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .onAppear { prefill() }
     }
 
@@ -1187,25 +2030,37 @@ struct EditConnectionView: View {
         serverURL = server.urlString
         cellularURL = server.cellularURLString ?? ""
         username = server.username
+        cellularUsername = server.cellularUsername ?? ""
+        useSeparateCellularLogin = server.cellularUsername?.nonBlank != nil || appState.store.cellularPassword(for: server) != nil
     }
 
     private func saveConnection() {
+        guard let currentServer = appState.currentServer else { return }
         guard let url = SubsonicConfig.normalizedURL(from: serverURL) else {
             errorMessage = "Invalid server URL"
+            VoltaNotificationCenter.shared.post("Invalid server URL", tone: .error)
             return
         }
-        // normalise the optional cellular URL (blank → cleared); reject a non-blank but malformed one
+        // normalise the optional cellular URL (blank > cleared); reject a non-blank but malformed one
         let trimmedCell = cellularURL.trimmingCharacters(in: .whitespacesAndNewlines)
         var normalizedCell: String? = nil
         if !trimmedCell.isEmpty {
             guard let cellURL = SubsonicConfig.normalizedURL(from: trimmedCell) else {
                 errorMessage = "Invalid cellular URL"
+                VoltaNotificationCenter.shared.post("Invalid cellular URL", tone: .error)
                 return
             }
             normalizedCell = cellURL.absoluteString
         }
-        let existingPassword = appState.store.config(for: appState.currentServer!)?.password ?? ""
+        let existingPassword = appState.store.config(for: currentServer)?.password ?? ""
+        let existingCellularPassword = appState.store.cellularPassword(for: currentServer)
         let pwd = password.isEmpty ? existingPassword : password
+        let cellUsername = useSeparateCellularLogin ? cellularUsername.nonBlank : nil
+        let cellPassword: String? = {
+            guard useSeparateCellularLogin else { return nil }
+            if let entered = cellularPassword.nonBlank { return entered }
+            return existingCellularPassword
+        }()
         isSaving = true
         errorMessage = nil
         Task {
@@ -1216,11 +2071,17 @@ struct EditConnectionView: View {
                 try await testClient.ping()
                 await MainActor.run {
                     appState.completeLogin(config: config)
-                    appState.updateCellularURL(normalizedCell)
+                    appState.updateCellularConnection(
+                        urlString: normalizedCell,
+                        username: cellUsername,
+                        password: cellPassword
+                    )
+                    VoltaNotificationCenter.shared.post("Connection saved", tone: .success)
                     dismiss()
                 }
             } catch {
                 errorMessage = "Could not connect: \(error.localizedDescription)"
+                VoltaNotificationCenter.shared.post("Could not connect", tone: .error)
             }
         }
     }
@@ -1234,15 +2095,65 @@ struct ServerInfoView: View {
     @State private var albumCount: Int? = nil
     @State private var songCount: Int? = nil
     @State private var totalDuration: Int? = nil   // seconds
+    @State private var totalLibrarySizeBytes: Int? = nil
     @State private var isLoading = false
     @State private var speedTestResult: String? = nil
     @State private var isTesting = false
     @State private var speedGrade: String? = nil
+    @State private var health: ServerHealthSnapshot?
+    @State private var healthError: String?
+    @State private var isCheckingHealth = false
 
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
             List {
+                Section {
+                    if isCheckingHealth && health == nil {
+                        HStack {
+                            ProgressView().controlSize(.small).tint(Theme.accent)
+                            Text("Checking…").foregroundStyle(Theme.secondaryText)
+                        }
+                    } else if let health {
+                        LabeledContent("Status", value: health.status.capitalized)
+                            .foregroundStyle(Theme.primaryText)
+                        LabeledContent("Latency", value: "\(health.latencyMS) ms")
+                            .foregroundStyle(Theme.primaryText)
+                        LabeledContent("API Version", value: health.apiVersion ?? "Unknown")
+                            .foregroundStyle(Theme.primaryText)
+                        LabeledContent("Server Type", value: health.serverType ?? "Subsonic")
+                            .foregroundStyle(Theme.primaryText)
+                        LabeledContent("Connection", value: NetworkMonitor.shared.connection.rawValue)
+                            .foregroundStyle(Theme.primaryText)
+                        if let activeURL = appState.client?.config.baseURL.absoluteString {
+                            LabeledContent("Active URL", value: activeURL)
+                                .foregroundStyle(Theme.primaryText)
+                        }
+                        LabeledContent("Checked", value: health.checkedAt.formatted(date: .omitted, time: .shortened))
+                            .foregroundStyle(Theme.secondaryText)
+                    } else if let healthError {
+                        Text(healthError)
+                            .foregroundStyle(Theme.error)
+                    }
+
+                    Button {
+                        Task { await loadHealth() }
+                    } label: {
+                        HStack {
+                            Label("Refresh Health", systemImage: "heart.text.square")
+                            Spacer()
+                            if isCheckingHealth {
+                                ProgressView().controlSize(.small).tint(Theme.accent)
+                            }
+                        }
+                    }
+                    .foregroundStyle(Theme.primaryText)
+                    .disabled(isCheckingHealth)
+                } header: {
+                    Text("Server Health")
+                }
+                .listRowBackground(Theme.secondaryBackground)
+
                 Section("Library") {
                     if isLoading {
                         HStack {
@@ -1261,6 +2172,9 @@ struct ServerInfoView: View {
                         }
                         if let dur = totalDuration {
                             LabeledContent("Total Duration", value: formatDuration(dur)).foregroundStyle(Theme.primaryText)
+                        }
+                        if let totalLibrarySizeBytes {
+                            LabeledContent("Total Music Size", value: SettingsView.formatBytes(totalLibrarySizeBytes)).foregroundStyle(Theme.primaryText)
                         }
                     }
                 }
@@ -1302,8 +2216,11 @@ struct ServerInfoView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
         }
-        .preferredColorScheme(.dark)
-        .task { await loadStats() }
+        .preferredColorScheme(Theme.colorScheme)
+        .task {
+            await loadHealth()
+            await loadStats()
+        }
     }
 
     private var gradeColor: Color {
@@ -1344,6 +2261,49 @@ struct ServerInfoView: View {
         albumCount = allAlbums.count
         songCount = allAlbums.compactMap(\.songCount).reduce(0, +)
         totalDuration = allAlbums.compactMap(\.duration).reduce(0, +)
+        totalLibrarySizeBytes = await loadTotalLibrarySize(albums: allAlbums, client: client)
+    }
+
+    private func loadHealth() async {
+        guard let client = appState.client else { return }
+        isCheckingHealth = true
+        healthError = nil
+        defer { isCheckingHealth = false }
+        do {
+            health = try await client.serverHealth()
+        } catch SubsonicError.serverUnreachable {
+            health = nil
+            healthError = "Server unreachable"
+        } catch {
+            health = nil
+            healthError = error.localizedDescription
+        }
+    }
+
+    private func loadTotalLibrarySize(albums: [Album], client: SubsonicClient) async -> Int? {
+        var total = 0
+        var seen = Set<String>()
+        var index = 0
+        let batchSize = 12
+
+        while index < albums.count {
+            let batch = Array(albums[index..<min(index + batchSize, albums.count)])
+            let partials = await withTaskGroup(of: [Song].self) { group in
+                for album in batch {
+                    group.addTask {
+                        (try? await client.album(id: album.id))?.song ?? album.song ?? []
+                    }
+                }
+                var songs: [Song] = []
+                for await value in group { songs.append(contentsOf: value) }
+                return songs
+            }
+            for song in partials where seen.insert(song.id).inserted {
+                total += song.size ?? 0
+            }
+            index += batchSize
+        }
+        return total > 0 ? total : nil
     }
 
     private func runSpeedTest() {
@@ -1521,7 +2481,7 @@ struct LogsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .onAppear { reload() }
         .onChange(of: selected) { _, _ in reload() }
         .onChange(of: levelFilter) { _, _ in reload() }

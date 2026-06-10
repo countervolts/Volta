@@ -37,7 +37,7 @@ struct SeededRNG: RandomNumberGenerator {
         return z ^ (z >> 31)
     }
 
-    // seed derived from the current day → rotates once per day
+    // seed derived from the current day > rotates once per day
     static func daySeed() -> UInt64 {
         UInt64(Int(Date().timeIntervalSince1970) / 86_400)
     }

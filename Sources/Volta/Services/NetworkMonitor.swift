@@ -33,7 +33,7 @@ final class NetworkMonitor {
         let previous = connection
         connection = conn
         UserDefaults.standard.set(conn == .cellular, forKey: "networkIsCellular")
-        AppLogger.shared.log("📶 Network: \(previous.rawValue) → \(conn.rawValue)", category: .networking)
+        AppLogger.shared.log("📶 Network: \(previous.rawValue) > \(conn.rawValue)", category: .networking)
         for handler in onChange { handler(conn) }
     }
 

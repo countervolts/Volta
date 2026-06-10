@@ -15,6 +15,7 @@ struct TrackRow<Trailing: View>: View {
     var onSwipePlayNext: (() -> Void)? = nil
     @State private var dragX: CGFloat = 0
     @State private var swipeAxis: SwipeAxis?
+    @State private var suppressTap = false
     @ViewBuilder var trailing: () -> Trailing
 
     private enum SwipeAxis {
@@ -22,8 +23,8 @@ struct TrackRow<Trailing: View>: View {
         case ignored
     }
 
-    private let swipeAxisLockDistance: CGFloat = 14
-    private let swipeHorizontalDominance: CGFloat = 1.25
+    private let swipeAxisLockDistance: CGFloat = 22
+    private let swipeHorizontalDominance: CGFloat = 1.65
     private let swipeTrigger: CGFloat = 128
     private let swipeMax: CGFloat = 220
     private var swipeProgress: CGFloat { min(1, dragX / swipeTrigger) }
@@ -61,12 +62,12 @@ struct TrackRow<Trailing: View>: View {
             .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragX)
         }
         .contentShape(Rectangle())
-        .simultaneousGesture(horizontalSwipeGesture)
+        .highPriorityGesture(horizontalSwipeGesture)
     }
 
     private var rowContent: some View {
         HStack(spacing: 14) {
-            Button(action: onTap) {
+            Button(action: performTap) {
                 HStack(spacing: 14) {
                     leadingContent
                     titleContent
@@ -163,7 +164,7 @@ struct TrackRow<Trailing: View>: View {
     }
 
     private var horizontalSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 10, coordinateSpace: .local)
+        DragGesture(minimumDistance: 22, coordinateSpace: .local)
             .onChanged { value in
                 guard onSwipePlayNext != nil else { return }
                 updateSwipe(translation: value.translation)
@@ -201,11 +202,27 @@ struct TrackRow<Trailing: View>: View {
 
     private func finishSwipe(translation: CGSize) {
         let finalX = max(0, min(swipeMax, translation.width))
-        if swipeAxis == .horizontal, finalX >= swipeTrigger {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            onSwipePlayNext?()
+        if swipeAxis == .horizontal {
+            suppressNextTap()
+            if finalX >= swipeTrigger {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                onSwipePlayNext?()
+            }
         }
         resetSwipe()
+    }
+
+    private func performTap() {
+        guard !suppressTap else { return }
+        onTap()
+    }
+
+    private func suppressNextTap() {
+        suppressTap = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            suppressTap = false
+        }
     }
 
     private func resetSwipe() {

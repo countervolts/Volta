@@ -44,7 +44,7 @@ struct MiniPlayerAccessory: View {
                 .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragX)
             }
             .buttonStyle(.plain)
-            // swipe left → next, swipe right → previous, with a slide animation.
+            // swipe left > next, swipe right > previous, with a slide animation.
             // highPriorityGesture (not simultaneous) so an actual swipe pre-empts
             // the expand tap — otherwise a swipe both skipped AND opened the player,
             // which then left the open/close state stuck.

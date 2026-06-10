@@ -43,6 +43,7 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
     var maxPlayCount: Int?
     var minPlayCount: Int?
     var onlyLossless = false
+    var onlyHiResLossless = false
     var onlyDownloaded = false
     var neverPlayedOnly = false
     var taste: SmartTasteFilter = .notDisliked
@@ -62,7 +63,11 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
         if !artist.isEmpty { parts.append(artist) }
         if !selectedArtists.isEmpty { parts.append("\(selectedArtists.count) artist\(selectedArtists.count == 1 ? "" : "s")") }
         if !selectedAlbums.isEmpty { parts.append("\(selectedAlbums.count) album\(selectedAlbums.count == 1 ? "" : "s")") }
-        if onlyLossless { parts.append("Lossless") }
+        if onlyHiResLossless {
+            parts.append("Hi-Res Lossless")
+        } else if onlyLossless {
+            parts.append("Lossless")
+        }
         if onlyDownloaded { parts.append("Downloaded") }
         if neverPlayedOnly { parts.append("Never Played") }
         if taste != .any { parts.append(taste.rawValue) }
@@ -130,6 +135,7 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
         if let maxPlayCount { rules.append((song.playCount ?? 0) <= maxPlayCount) }
         if let minPlayCount { rules.append((song.playCount ?? 0) >= minPlayCount) }
         if onlyLossless { rules.append(song.isLossless) }
+        if onlyHiResLossless { rules.append(song.isHiResLossless) }
         if onlyDownloaded { rules.append(DownloadService.shared.state(for: song) == .downloaded) }
         if neverPlayedOnly { rules.append((song.playCount ?? 0) == 0) }
 
@@ -150,7 +156,7 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, name, subtitle, pinned, matchMode, searchText, genre, artist, album
         case selectedArtists, selectedAlbums, minYear, maxYear, maxPlayCount, minPlayCount
-        case onlyLossless, onlyDownloaded, neverPlayedOnly, taste, sort, limit
+        case onlyLossless, onlyHiResLossless, onlyDownloaded, neverPlayedOnly, taste, sort, limit
     }
 
     init(from decoder: Decoder) throws {
@@ -171,6 +177,7 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
         maxPlayCount = try? c.decode(Int.self, forKey: .maxPlayCount)
         minPlayCount = try? c.decode(Int.self, forKey: .minPlayCount)
         onlyLossless = (try? c.decode(Bool.self, forKey: .onlyLossless)) ?? false
+        onlyHiResLossless = (try? c.decode(Bool.self, forKey: .onlyHiResLossless)) ?? false
         onlyDownloaded = (try? c.decode(Bool.self, forKey: .onlyDownloaded)) ?? false
         neverPlayedOnly = (try? c.decode(Bool.self, forKey: .neverPlayedOnly)) ?? false
         taste = (try? c.decode(SmartTasteFilter.self, forKey: .taste)) ?? .notDisliked
@@ -196,6 +203,7 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
         try c.encodeIfPresent(maxPlayCount, forKey: .maxPlayCount)
         try c.encodeIfPresent(minPlayCount, forKey: .minPlayCount)
         try c.encode(onlyLossless, forKey: .onlyLossless)
+        try c.encode(onlyHiResLossless, forKey: .onlyHiResLossless)
         try c.encode(onlyDownloaded, forKey: .onlyDownloaded)
         try c.encode(neverPlayedOnly, forKey: .neverPlayedOnly)
         try c.encode(taste, forKey: .taste)

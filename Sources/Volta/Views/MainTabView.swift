@@ -6,6 +6,7 @@ struct MainTabView: View {
     @AppStorage("customAccentRed") private var customAccentRed = 0.55
     @AppStorage("customAccentGreen") private var customAccentGreen = 0.36
     @AppStorage("customAccentBlue") private var customAccentBlue = 0.96
+    @AppStorage("developerPerformanceOverlay") private var developerPerformanceOverlay = false
     @State private var selectedTab = 0
     @State private var showNowPlaying = false
 
@@ -15,6 +16,18 @@ struct MainTabView: View {
     @State private var searchPath:    [SearchRoute]  = []
 
     private var audio: AudioPlayer { appState.audioPlayer }
+    private var tabSelection: Binding<Int> {
+        Binding(
+            get: { selectedTab },
+            set: { value in
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    selectedTab = value
+                }
+            }
+        )
+    }
     private var accentRefreshKey: String {
         "\(accentColorName)-\(customAccentRed)-\(customAccentGreen)-\(customAccentBlue)"
     }
@@ -28,10 +41,18 @@ struct MainTabView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(10)
             }
+
+            if developerPerformanceOverlay {
+                PerformanceOverlay()
+                    .padding(.horizontal, 10)
+                    .padding(.top, 10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .allowsHitTesting(false)
+                    .zIndex(20)
+            }
         }
-        .animation(.spring(response: 0.42, dampingFraction: 0.85), value: showNowPlaying)
         .animation(.easeInOut(duration: 0.2), value: accentRefreshKey)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .onAppear {
             AppDiagnostics.logMainTabDecision()
         }
@@ -63,14 +84,14 @@ struct MainTabView: View {
     }
 
     private var modernMiniPlayerAccessory: some View {
-        MiniPlayerAccessory(onExpand: { showNowPlaying = true })
+        MiniPlayerAccessory(onExpand: presentNowPlaying)
             .padding(.horizontal, 12)
             .padding(.bottom, 2)
     }
 
     @available(iOS 26.0, *)
     private var modernTabView: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: tabSelection) {
             Tab("Home", systemImage: Symbols.home, value: 0) {
                 HomeView(path: $homePath)
             }
@@ -92,7 +113,7 @@ struct MainTabView: View {
     }
 
     private var legacyTabs: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: tabSelection) {
             legacyTabPage {
                 HomeView(path: $homePath)
             }
@@ -136,9 +157,20 @@ struct MainTabView: View {
     @ViewBuilder
     private var legacyMiniPlayer: some View {
         if audio.currentSong != nil {
-            MiniPlayerAccessory(onExpand: { showNowPlaying = true })
+            MiniPlayerAccessory(onExpand: presentNowPlaying)
                 .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.28), radius: 18, x: 0, y: 10)
+                .padding(.horizontal, 10)
                 .padding(.bottom, 4)
+        }
+    }
+
+    private func presentNowPlaying() {
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
+            showNowPlaying = true
         }
     }
 }

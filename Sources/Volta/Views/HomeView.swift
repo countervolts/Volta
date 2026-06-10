@@ -17,6 +17,7 @@ struct HomeView: View {
     @State private var showSettings = false
     @State private var toastMessage: String?
     @State private var savingMixIDs = Set<String>()
+    @State private var networkMonitor = NetworkMonitor.shared
     @Namespace private var heroNamespace
 
     private let pad = Theme.Layout.screenPadding
@@ -24,7 +25,9 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                if vm.isLoading && !vm.hasLoaded {
+                if isServerUnavailable {
+                    serverUnavailableState
+                } else if vm.isLoading && !vm.hasLoaded {
                     loadingState
                 } else if isEmpty {
                     emptyState
@@ -34,11 +37,6 @@ struct HomeView: View {
             }
             .background(Theme.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    ServerMenuButton(onOpenSettings: { showSettings = true })
-                }
-            }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsView()
             }
@@ -48,7 +46,7 @@ struct HomeView: View {
             .environment(\.heroNamespace, heroNamespace)
         }
         .tint(Theme.accent)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .task(id: appState.currentServer?.id) {
             if !vm.hasLoaded { await vm.load(appState: appState) }
         }
@@ -67,6 +65,7 @@ struct HomeView: View {
             ArtistDetailView(artist: artist)
         case .mix(let mix):
             MixDetailView(mix: mix)
+                .zoomNavigationTransition(sourceID: mix.id, in: heroNamespace)
         case .recentlyPlayedAll:
             FullMediaGrid(title: "Recently Played", items: vm.recentlyPlayed) { item in
                 navigate(to: item)
@@ -94,14 +93,13 @@ struct HomeView: View {
         vm.newReleases.isEmpty && vm.topArtists.isEmpty
     }
 
+    private var isServerUnavailable: Bool {
+        networkMonitor.connection == .none || vm.serverUnavailable
+    }
+
     private var sections: some View {
         VStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
-            Text("Home")
-                .font(.largeTitle.bold())
-                .foregroundStyle(Theme.primaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, pad)
-                .padding(.top, 4)
+            homeHeader
 
             if !vm.picksFeed.isEmpty {
                 section(title: "Picks for You") {
@@ -157,7 +155,7 @@ struct HomeView: View {
                 }
             }
         }
-        .padding(.top, 8)
+        .padding(.top, -10)
         .padding(.bottom, 120)
         .overlay(alignment: .bottom) {
             if let toastMessage {
@@ -167,6 +165,21 @@ struct HomeView: View {
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: toastMessage)
+    }
+
+    private var homeHeader: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text("Home")
+                .font(.largeTitle.bold())
+                .foregroundStyle(Theme.primaryText)
+                .lineLimit(1)
+
+            Spacer()
+
+            ServerMenuButton(onOpenSettings: { showSettings = true })
+        }
+        .padding(.horizontal, pad)
+        .padding(.top, 2)
     }
 
     @ViewBuilder
@@ -242,6 +255,36 @@ struct HomeView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private var serverUnavailableState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 38, weight: .ultraLight))
+                .foregroundStyle(Theme.secondaryText)
+            Text("Server Unreachable")
+                .font(.headline)
+                .foregroundStyle(Theme.primaryText)
+            Text("Picks for You needs the server. Try reconnecting, or listen to downloaded music from the Library tab.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+                .multilineTextAlignment(.center)
+            Button {
+                Task { await vm.load(appState: appState, force: true) }
+            } label: {
+                Label("Retry Connection", systemImage: "arrow.clockwise")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Theme.accent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
+        }
+        .padding(.horizontal, 40)
+        .padding(.top, 120)
+        .frame(maxWidth: .infinity)
+    }
+
     private func saveMixAsPlaylist(_ mix: MusicMix) {
         guard !savingMixIDs.contains(mix.id), let client = appState.client else { return }
         savingMixIDs.insert(mix.id)
@@ -249,14 +292,7 @@ struct HomeView: View {
 
         Task {
             do {
-                let name = try await uniquePlaylistName(for: mix.title, client: client)
-                guard let playlist = try await client.createPlaylist(name: name) else {
-                    throw MixSaveError.createFailed
-                }
-                for song in mix.songs {
-                    try await client.addToPlaylist(playlistID: playlist.id, songID: song.id)
-                }
-                AppLogger.shared.log("Saved mix '\(mix.title)' as playlist '\(name)' (\(mix.songs.count) songs)", category: .other)
+                let name = try await PlaylistWriter.saveMixAsPlaylist(mix, client: client)
                 await MainActor.run {
                     savingMixIDs.remove(mix.id)
                     showToast("Saved to \(name)")
@@ -271,19 +307,6 @@ struct HomeView: View {
         }
     }
 
-    private func uniquePlaylistName(for title: String, client: SubsonicClient) async throws -> String {
-        let base = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Saved Mix" : title
-        let existing = Set((try await client.playlists()).map { $0.name.lowercased() })
-        guard existing.contains(base.lowercased()) else { return base }
-        for index in 2...99 {
-            let candidate = "\(base) \(index)"
-            if !existing.contains(candidate.lowercased()) {
-                return candidate
-            }
-        }
-        return "\(base) \(Date().formatted(date: .numeric, time: .shortened))"
-    }
-
     private func showToast(_ message: String) {
         withAnimation { toastMessage = message }
         Task {
@@ -292,13 +315,5 @@ struct HomeView: View {
                 withAnimation { toastMessage = nil }
             }
         }
-    }
-}
-
-private enum MixSaveError: LocalizedError {
-    case createFailed
-
-    var errorDescription: String? {
-        "The server did not return a playlist."
     }
 }

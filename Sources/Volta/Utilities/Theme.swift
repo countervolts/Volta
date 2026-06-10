@@ -1,10 +1,41 @@
 import SwiftUI
 
 enum Theme {
-    static let background = Color.black
-    static let secondaryBackground = Color(red: 0.07, green: 0.07, blue: 0.08)
-    static let primaryText = Color.white
-    static let secondaryText = Color.white.opacity(0.6)
+    // app theme: "dark" (default), "amoled" (pure black), "light"
+    static var themeMode: String { UserDefaults.standard.string(forKey: "themeMode") ?? "dark" }
+
+    static var background: Color {
+        switch themeMode {
+        case "light":  return Color(red: 0.95, green: 0.95, blue: 0.96)
+        case "amoled": return .black
+        default:       return .black
+        }
+    }
+
+    static var secondaryBackground: Color {
+        switch themeMode {
+        case "light":  return .white
+        case "amoled": return Color(red: 0.03, green: 0.03, blue: 0.035)
+        default:       return Color(red: 0.07, green: 0.07, blue: 0.08)
+        }
+    }
+
+    static var primaryText: Color {
+        switch themeMode {
+        case "light":  return Color(red: 0.08, green: 0.08, blue: 0.10)
+        default:       return .white
+        }
+    }
+
+    static var secondaryText: Color {
+        switch themeMode {
+        case "light":  return Color.black.opacity(0.55)
+        default:       return Color.white.opacity(0.6)
+        }
+    }
+
+    static var colorScheme: ColorScheme { themeMode == "light" ? .light : .dark }
+
     static let error = Color(red: 0.95, green: 0.26, blue: 0.30)
 
     static var accent: Color { accentColor(named: currentAccentName) }

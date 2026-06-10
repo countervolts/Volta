@@ -40,6 +40,8 @@ struct HorizontalPickRow: View {
     var onSaveMix: (MusicMix) -> Void = { _ in }
     var isSavingMix: (MusicMix) -> Bool = { _ in false }
 
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: Theme.Layout.gridSpacing) {
@@ -65,8 +67,8 @@ struct HorizontalPickRow: View {
                     }
                     .containerRelativeFrame(
                         .horizontal,
-                        count: 5,
-                        span: 3,
+                        count: sizeClass == .regular ? 10 : 5,
+                        span: sizeClass == .regular ? 2 : 3,
                         spacing: Theme.Layout.gridSpacing
                     )
                 }
@@ -91,8 +93,9 @@ struct PickMixCard: View {
                 ArtworkView(coverArtID: mix.coverArt, size: 600, cornerRadius: 0,
                             onImageLoaded: { image in
                                 accentColor = Color(ColorExtractor.dominantColor(from: image))
-                            })
+                    })
                     .frame(width: geo.size.width, height: geo.size.width)
+                    .scaleEffect(1.02)
                     .clipped()
             }
             .aspectRatio(1, contentMode: .fit)
@@ -108,10 +111,20 @@ struct PickMixCard: View {
                 }
 
             VStack(alignment: .leading, spacing: 4) {
+                // subtitle fills the same caption slot the album cards use for
+                // genre/year, giving mix cards a matching three-line text block
+                // so they end up the exact same height (and size) as albums.
+                Text(mix.subtitle)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(1)
+                // single line keeps mix cards the same height as the album pick
+                // cards they're interleaved with, so neither squishes the other.
                 Text(mix.title)
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text("\(mix.songs.count) songs")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.85))
@@ -127,6 +140,7 @@ struct PickMixCard: View {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
         )
+        .heroSource(id: mix.id)
         .animation(.easeInOut(duration: 0.4), value: accentColor.description)
     }
 }
