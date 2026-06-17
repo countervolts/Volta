@@ -64,7 +64,7 @@ final class PlaylistBackupStore {
         snapshots = payload.snapshots
     }
 
-    func backupPlaylistList(_ playlists: [Playlist], client: SubsonicClient? = nil) {
+    func backupPlaylistList(_ playlists: [Playlist], client: (any MusicService)? = nil) {
         guard isEnabled else { return }
         for playlist in playlists {
             upsert(snapshot(from: playlist, client: client), saveAfter: false)
@@ -72,18 +72,18 @@ final class PlaylistBackupStore {
         save()
     }
 
-    func backup(playlist: Playlist, client: SubsonicClient? = nil, deletedAt: Date? = nil) {
+    func backup(playlist: Playlist, client: (any MusicService)? = nil, deletedAt: Date? = nil) {
         guard isEnabled || deletedAt != nil else { return }
         upsert(snapshot(from: playlist, client: client, deletedAt: deletedAt))
     }
 
-    func backup(playlistID: String, client: SubsonicClient) async {
+    func backup(playlistID: String, client: any MusicService) async {
         guard isEnabled else { return }
         guard let playlist = try? await client.playlist(id: playlistID) else { return }
         backup(playlist: playlist, client: client)
     }
 
-    func backupAll(client: SubsonicClient) async {
+    func backupAll(client: any MusicService) async {
         guard isEnabled else { return }
         guard let playlists = try? await client.playlists() else { return }
         backupPlaylistList(playlists, client: client)
@@ -93,12 +93,12 @@ final class PlaylistBackupStore {
         AppLogger.shared.log("Playlist backups refreshed (\(playlists.count) playlists)", category: .other)
     }
 
-    func markDeleted(_ playlist: Playlist, client: SubsonicClient) async {
+    func markDeleted(_ playlist: Playlist, client: any MusicService) async {
         let full = (try? await client.playlist(id: playlist.id)) ?? playlist
         backup(playlist: full, client: client, deletedAt: Date())
     }
 
-    func restore(_ snapshot: PlaylistBackupSnapshot, client: SubsonicClient) async throws -> Playlist {
+    func restore(_ snapshot: PlaylistBackupSnapshot, client: any MusicService) async throws -> Playlist {
         let name = try await uniqueRestoredName(for: snapshot.name, client: client)
         guard let created = try await client.createPlaylist(name: name) else {
             throw PlaylistBackupError.createFailed
@@ -136,7 +136,7 @@ final class PlaylistBackupStore {
         (try? Data(contentsOf: fileURL).count) ?? 0
     }
 
-    private func snapshot(from playlist: Playlist, client: SubsonicClient?, deletedAt: Date? = nil) -> PlaylistBackupSnapshot {
+    private func snapshot(from playlist: Playlist, client: (any MusicService)?, deletedAt: Date? = nil) -> PlaylistBackupSnapshot {
         let existing = snapshots.first { $0.id == playlist.id }
         return PlaylistBackupSnapshot(
             id: playlist.id,
@@ -166,7 +166,7 @@ final class PlaylistBackupStore {
         try? data.write(to: fileURL, options: .atomic)
     }
 
-    private func uniqueRestoredName(for name: String, client: SubsonicClient) async throws -> String {
+    private func uniqueRestoredName(for name: String, client: any MusicService) async throws -> String {
         let base = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Restored Playlist" : name
         let existing = Set((try await client.playlists()).map { $0.name.lowercased() })
         let restoredBase = existing.contains(base.lowercased()) ? "\(base) Restored" : base
@@ -182,8 +182,9 @@ final class PlaylistBackupStore {
 }
 
 enum PlaylistWriter {
-    static func saveMixAsPlaylist(_ mix: MusicMix, client: SubsonicClient) async throws -> String {
-        let name = try await uniquePlaylistName(for: mix.title, client: client)
+    static func saveMixAsPlaylist(_ mix: MusicMix, client: any MusicService, title: String? = nil) async throws -> String {
+        let playlistTitle = title ?? mix.title
+        let name = try await uniquePlaylistName(for: playlistTitle, client: client)
         guard let playlist = try await client.createPlaylist(name: name) else {
             throw PlaylistBackupError.createFailed
         }
@@ -192,11 +193,11 @@ enum PlaylistWriter {
             try await client.addToPlaylist(playlistID: playlist.id, songID: song.id)
         }
         await PlaylistBackupStore.shared.backup(playlistID: playlist.id, client: client)
-        AppLogger.shared.log("Saved mix '\(mix.title)' as playlist '\(name)' (\(mix.songs.count) songs)", category: .other)
+        AppLogger.shared.log("Saved mix '\(playlistTitle)' as playlist '\(name)' (\(mix.songs.count) songs)", category: .other)
         return name
     }
 
-    private static func uniquePlaylistName(for title: String, client: SubsonicClient) async throws -> String {
+    private static func uniquePlaylistName(for title: String, client: any MusicService) async throws -> String {
         let base = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Saved Mix" : title
         let existing = Set((try await client.playlists()).map { $0.name.lowercased() })
         guard !existing.contains(base.lowercased()) else {

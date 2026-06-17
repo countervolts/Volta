@@ -7,6 +7,35 @@ import UIKit
 
 enum RepeatMode: Sendable { case off, one, all }
 enum AutoplayMode: Sendable { case off, random, algorithm }
+
+// User-tunable infinite-play fill style.
+enum InfinitePlayStyle: String, CaseIterable, Identifiable, Sendable {
+    case random      // any songs from the library
+    case similar     // similar to what was playing before infinite play started
+    case sameGenre   // stay in the current genre
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .random:    return "Random"
+        case .similar:   return "Similar Songs"
+        case .sameGenre: return "Same Genre"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .random:    return "shuffle"
+        case .similar:   return "wand.and.stars"
+        case .sameGenre: return "guitars"
+        }
+    }
+
+    static var current: InfinitePlayStyle {
+        InfinitePlayStyle(rawValue: UserDefaults.standard.string(forKey: "infinitePlayStyle") ?? "") ?? .random
+    }
+}
 enum PlaybackTransitionMode: String, CaseIterable, Identifiable, Sendable {
     case off
     case crossfade
@@ -43,16 +72,15 @@ private struct PlaybackTransitionPlan: Sendable {
     let reason: String
     let oldRate: Float
     let nextRate: Float
-    // True beat-matching: when the two tempos lock, the transition fires on the
-    // outgoing track's downbeat and the incoming is seeked to its own downbeat, so
-    // the beats coincide (phase lock), not merely the tempos. These carry the grids
-    // the engine needs to schedule that.
+    // Beat grids used for downbeat-locked transitions.
     var beatAligned: Bool = false
     var beatsPerBar: Int = 4
     var outBeatPeriod: TimeInterval = 0     // outgoing-track beat period (s)
     var outBeatPhase: TimeInterval = 0      // outgoing-track grid offset (s)
     var inBeatPeriod: TimeInterval = 0      // incoming-track beat period (s)
     var inBeatPhase: TimeInterval = 0       // incoming-track grid offset (s)
+    // Incoming-volume multiplier for hotter masters.
+    var volumeMatch: Float = 1
 
     static func fallback(mode: PlaybackTransitionMode, current: Song, next: Song) -> PlaybackTransitionPlan {
         let sameAlbum = current.albumId != nil && current.albumId == next.albumId
@@ -90,17 +118,28 @@ private enum PlaybackTransitionSettings {
         return UserDefaults.standard.bool(forKey: "automixTempoMatch")
     }
 
-    // Phase-lock the beat grids (fire on the outgoing downbeat, drop the incoming on
-    // its downbeat) — true DJ beat-matching on top of the tempo bend.
+    // Fire on the outgoing downbeat and drop the incoming on its downbeat.
     static var beatAlignEnabled: Bool {
         if UserDefaults.standard.object(forKey: "automixBeatAlign") == nil { return true }
         return UserDefaults.standard.bool(forKey: "automixBeatAlign")
     }
 
-    // Harmonic (key) awareness — scale the blend by Camelot compatibility.
+    // Scale blend length by Camelot compatibility.
     static var harmonicEnabled: Bool {
         if UserDefaults.standard.object(forKey: "automixHarmonic") == nil { return true }
         return UserDefaults.standard.bool(forKey: "automixHarmonic")
+    }
+
+    // Skip sparse intros and long decaying outros.
+    static var sweetSpotEnabled: Bool {
+        if UserDefaults.standard.object(forKey: "automixSweetSpot") == nil { return true }
+        return UserDefaults.standard.bool(forKey: "automixSweetSpot")
+    }
+
+    // Loudness match when ReplayGain is not already doing it.
+    static var loudnessMatchEnabled: Bool {
+        if UserDefaults.standard.object(forKey: "automixLoudnessMatch") == nil { return true }
+        return UserDefaults.standard.bool(forKey: "automixLoudnessMatch")
     }
 
     static var maxBlend: TimeInterval {
@@ -136,17 +175,13 @@ private struct AudioSilenceProfile: Sendable {
     static let zero = AudioSilenceProfile(leadingSilence: 0, trailingSilence: 0)
 }
 
-// Shared beat-matching math so the live AutoMix engine and the Settings AutoMix
-// preview agree on exactly how much each track is sped up / slowed down to line
-// the beats up through the blend.
+// Shared by live AutoMix and the Settings preview.
 enum AutoMixTempo {
-    // Pitch-preserved, clamped gentle so the bend stays artifact-free, and only
-    // engaged when the two tempos are close enough to line up with a small nudge.
-    static let maxRate: Double = 1.06          // ±6% — gentle, clean
+    // Gentle, pitch-preserved bend.
+    static let maxRate: Double = 1.06          // +/-6%
     static let maxRatio: Double = 1.32         // engage only within ~32%
 
-    // Octave-fold a tempo toward a target (a 75 vs 150 BPM pair is really the
-    // same tempo, just counted differently).
+    // 75 and 150 BPM are often the same pulse counted differently.
     static func fold(_ bpm: Double, toward target: Double) -> Double {
         let candidates = [bpm / 2, bpm, bpm * 2].filter { $0 >= 60 && $0 <= 210 }
         return candidates.min {
@@ -154,12 +189,7 @@ enum AutoMixTempo {
         } ?? bpm
     }
 
-    // Only the OUTGOING (ending) track bends — and only once, to a single constant
-    // rate held through the blend while it fades out. The incoming track plays at
-    // its true tempo (rate 1.0), so the track that becomes dominant is never
-    // time-stretched (no stutter), and the outgoing never needs to "ease back" to
-    // 1.0 (it just stops). Returns the rate to apply to the outgoing track so its
-    // beats match the incoming track's tempo, plus the folded tempos used.
+    // Bend only the outgoing track, and hold one constant rate through the fade.
     static func outgoingRate(currentBPM rawCurrent: Double, nextBPM rawNext: Double)
         -> (rate: Float, currentBPM: Double, nextBPM: Double)? {
         let currentBPM = fold(rawCurrent, toward: rawNext)
@@ -183,7 +213,7 @@ final class AudioPlayer {
     private(set) var duration: TimeInterval = 0
     private(set) var currentArtwork: UIImage?
     private(set) var currentAnimatedArtwork: UIImage?
-    private var currentLiveArtwork: LiveArtworkAsset?
+    private(set) var currentLiveArtwork: LiveArtworkAsset?
 
     private(set) var queue: [Song] = []
     private(set) var currentIndex: Int = 0
@@ -215,7 +245,7 @@ final class AudioPlayer {
     private var inactivePlayer: AVQueuePlayer {
         activePlayer === primaryPlayer ? secondaryPlayer : primaryPlayer
     }
-    private var client: SubsonicClient?
+    private var client: (any MusicService)?
     private var primaryTimeObserverToken: Any?
     private var secondaryTimeObserverToken: Any?
     private var shuffledOrder: [Int] = []
@@ -226,17 +256,15 @@ final class AudioPlayer {
     private var transitionPlanKey: String?
     private var preparedTransitionPlan: PlaybackTransitionPlan?
     private var isTransitioning = false
-    // true while a blend is audibly in progress — drives the "Mixing" indicator
+    // Drives the "Mixing" indicator.
     private(set) var isMixing = false
     private var transitionSuppressedUntil = Date.distantPast
-    // song id pre-buffered (playing muted) on the inactive player, ahead of a blend
+    // Muted pre-buffer on the inactive player.
     private var primedSongID: String?
-    // a beat-aligned transition that's been scheduled to fire on the outgoing
-    // downbeat (so the two beat grids coincide) but hasn't started yet
+    // Scheduled downbeat transition that has not fired yet.
     private var transitionArmTask: Task<Void, Never>?
     private var transitionArmed = false
-    // DJ bass-swap tap ids: the one armed on the primed incoming, and the one
-    // driving the current blend (0 = none / disabled)
+    // Bass-swap tap ids; 0 means inactive.
     private var primedBassID: UInt64 = 0
     private var currentBassID: UInt64 = 0
 
@@ -246,6 +274,9 @@ final class AudioPlayer {
 
     private(set) var autoplayArtistName: String?
     private(set) var autoplayArtistId: String?
+
+    // Seed songs for Similar Songs infinite play.
+    private var infinitePlaySeed: [Song] = []
 
     private(set) var sleepTimerActive = false
     private(set) var sleepEndsAtTrackEnd = false
@@ -284,11 +315,7 @@ final class AudioPlayer {
         }
     }
 
-    // All items share one pitch-preserving time-stretch algorithm, fixed at
-    // creation, so AutoMix can bend tempo (by changing `rate`) without the audible
-    // re-prime glitch that switching the algorithm mid-playback causes — and
-    // without ever shifting pitch. `.timeDomain` is cheap and effectively bypassed
-    // at rate 1.0, so normal playback is unaffected.
+    // Pick the time-stretch algorithm once; switching later audibly re-primes.
     private func makePlayerItem(url: URL) -> AVPlayerItem {
         let item = AVPlayerItem(url: url)
         item.audioTimePitchAlgorithm = .timeDomain
@@ -311,8 +338,7 @@ final class AudioPlayer {
         }
     }
 
-    // Bass-swap only runs in AutoMix when the global EQ/effects are off (an item's
-    // audioMix carries one tap, so we never fight the EQ tap for it).
+    // One audioMix tap per item, so bass-swap yields to EQ/effects.
     private var bassSwapAvailable: Bool {
         transitionMode == .automix
             && AutoMixBassSwap.shared.isEnabled
@@ -320,9 +346,7 @@ final class AudioPlayer {
             && !PerformanceMode.bypassAudioEffects
     }
 
-    // Attach a DJ bass-swap high-pass to an INCOMING item (call after applyEqualizer,
-    // which leaves audioMix == nil when effects are off). Returns the tap id to drive
-    // during the blend, or 0 when bass-swap isn't active.
+    // Attach incoming-track bass-swap and return its tap id.
     private func attachBassSwap(to item: AVPlayerItem) -> UInt64 {
         guard bassSwapAvailable else { return 0 }
         let id = AutoMixBassSwap.shared.reserveID()
@@ -339,19 +363,14 @@ final class AudioPlayer {
         return id
     }
 
-    // Low-cut (Hz) for the incoming track at blend progress `x` (0…1): strong roll-off
-    // early, fully open by ~60% through, so the incoming bass arrives as it takes over.
+    // Incoming bass opens as the new track takes over.
     private func bassSwapCutoff(at x: Double) -> Double {
         let openBy = 0.6
         let k = max(0, 1 - x / openBy)
         return AutoMixBassSwap.bypassHz + (AutoMixBassSwap.maxCutoffHz - AutoMixBassSwap.bypassHz) * (k * k)
     }
 
-    // Seek offset (s) to apply to the incoming downbeat so that at the moment the
-    // outgoing tempo bend engages (~15% into the fade), the two beat grids coincide.
-    // Both run at rate 1 until then, drifting because their periods differ; after the
-    // bend the outgoing matches the incoming period and the relationship freezes — so
-    // we align them at the bend, not at T0. Clamped to ±half a beat.
+    // Align grids at the bend point, not at T0, then clamp to half a beat.
     private func beatLockSeekShift(plan: PlaybackTransitionPlan) -> TimeInterval {
         guard plan.beatAligned, plan.outBeatPeriod > 0.2, plan.inBeatPeriod > 0.2,
               abs(plan.oldRate - 1) >= 0.01 else { return 0 }
@@ -366,7 +385,7 @@ final class AudioPlayer {
         return shift
     }
 
-    func updateClient(_ client: SubsonicClient?) {
+    func updateClient(_ client: (any MusicService)?) {
         self.client = client
         DownloadService.shared.updateClient(client)
     }
@@ -378,6 +397,7 @@ final class AudioPlayer {
         gaplessNextItem = nil
         autoplayArtistName = nil
         autoplayArtistId = nil
+        infinitePlaySeed = []
         queue = songs
         queueSourceTitle = source
         queueSourceAlbum = album
@@ -469,8 +489,7 @@ final class AudioPlayer {
         updateNowPlaying()
     }
 
-    // fully stops and clears playback so nothing remains playable —
-    // used when the user logs out so the session can't keep streaming
+    // Full stop for logout.
     func stopAndClear() {
         pauseAllPlayers()
         cancelTransitionPlayback(keepPaused: true)
@@ -528,6 +547,9 @@ final class AudioPlayer {
     }
 
     func playNext(_ song: Song) {
+        // single-song entry point fired from menus/swipes/album loops; the toast
+        // centre dedupes a burst of identical posts (album "Play Next") into one.
+        VoltaNotificationCenter.shared.post(L(.notif_playing_next), tone: .queue)
         guard !queue.isEmpty else {
             queue = [song]
             currentIndex = 0
@@ -545,6 +567,7 @@ final class AudioPlayer {
     func addToQueue(_ song: Song) {
         guard !queue.isEmpty else { play(song: song); return }
         queue.append(song)
+        VoltaNotificationCenter.shared.post(L(.notif_added_to_queue), tone: .queue)
     }
 
     func playNext(_ songs: [Song]) {
@@ -717,9 +740,11 @@ final class AudioPlayer {
     func toggleStar(songID: String) {
         if starredIDs.contains(songID) {
             starredIDs.remove(songID)
+            VoltaNotificationCenter.shared.post(L(.notif_removed_from_favorites), tone: .info)
             Task { try? await client?.unstar(id: songID) }
         } else {
             starredIDs.insert(songID)
+            VoltaNotificationCenter.shared.post(L(.notif_added_to_favorites), tone: .success)
             Task { try? await client?.star(id: songID) }
         }
     }
@@ -775,8 +800,12 @@ final class AudioPlayer {
 
     private func fetchAutoplaySongs() async {
         guard autoplayMode != .off, let client else { return }
+        // First dry queue becomes the Similar Songs seed.
+        if infinitePlaySeed.isEmpty { infinitePlaySeed = queue }
         let existingIDs = Set(queue.map(\.id))
-        func freshFrom(_ list: [Song]) -> [Song] { list.filter { !existingIDs.contains($0.id) } }
+        func freshFrom(_ list: [Song]) -> [Song] {
+            HiddenAlbumStore.shared.visibleSongs(list).filter { !existingIDs.contains($0.id) }
+        }
 
         var fresh: [Song] = []
 
@@ -785,6 +814,9 @@ final class AudioPlayer {
         }
         if fresh.isEmpty, autoplayMode == .algorithm {
             fresh = await algorithmicAutoplay(client: client, existingIDs: existingIDs)
+        }
+        if fresh.isEmpty, autoplayMode == .random {
+            fresh = await styledRandomAutoplay(client: client, existingIDs: existingIDs)
         }
         if fresh.isEmpty {
             var pool = (try? await client.randomSongs(size: 30)) ?? []
@@ -799,7 +831,7 @@ final class AudioPlayer {
         scheduleGaplessPreload()
     }
 
-    private func algorithmicAutoplay(client: SubsonicClient, existingIDs: Set<String>) async -> [Song] {
+    private func algorithmicAutoplay(client: any MusicService, existingIDs: Set<String>) async -> [Song] {
         let currentGenre = currentSong?.genre?.lowercased()
         var pool: [Song] = []
 
@@ -816,7 +848,9 @@ final class AudioPlayer {
         }
 
         var seen = Set<String>()
-        let unique = pool.filter { seen.insert($0.id).inserted && !existingIDs.contains($0.id) }
+        let unique = HiddenAlbumStore.shared.visibleSongs(pool).filter {
+            seen.insert($0.id).inserted && !existingIDs.contains($0.id)
+        }
 
         if transitionMode == .automix {
             return automixSmoothAutoplay(unique, current: currentSong)
@@ -825,6 +859,44 @@ final class AudioPlayer {
         let matching = unique.filter { $0.genre?.lowercased() == currentGenre }.shuffled()
         let rest     = unique.filter { $0.genre?.lowercased() != currentGenre }.shuffled()
         return matching + rest
+    }
+
+    // Toggle-based autoplay (.random mode) fill, shaped by the user's
+    // InfinitePlayStyle. Returns [] to fall through to the plain random fill.
+    private func styledRandomAutoplay(client: any MusicService, existingIDs: Set<String>) async -> [Song] {
+        func dedupe(_ list: [Song]) -> [Song] {
+            var seen = Set<String>()
+            return HiddenAlbumStore.shared.visibleSongs(list).filter {
+                seen.insert($0.id).inserted && !existingIDs.contains($0.id)
+            }
+        }
+
+        let seed = infinitePlaySeed.isEmpty ? [currentSong].compactMap { $0 } : infinitePlaySeed
+
+        switch InfinitePlayStyle.current {
+        case .random:
+            return []   // plain random fallback handles it
+
+        case .similar:
+            var pool: [Song] = []
+            let artistNames = Array(Set(seed.compactMap { $0.artist?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty })).prefix(4)
+            pool += await topSongs(forArtists: Array(artistNames), client: client, each: 8)
+            let genres = Array(Set(seed.compactMap { $0.genre?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty })).prefix(2)
+            for g in genres {
+                pool += (try? await client.songsByGenre(g, count: 15)) ?? []
+            }
+            let unique = dedupe(pool)
+            return transitionMode == .automix ? automixSmoothAutoplay(unique, current: currentSong) : unique.shuffled()
+
+        case .sameGenre:
+            let genre = (currentSong?.genre ?? seed.first?.genre)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let genre, !genre.isEmpty else { return [] }
+            let unique = dedupe((try? await client.songsByGenre(genre, count: 40)) ?? [])
+            return transitionMode == .automix ? automixSmoothAutoplay(unique, current: currentSong) : unique.shuffled()
+        }
     }
 
     private func automixSmoothAutoplay(_ songs: [Song], current: Song?) -> [Song] {
@@ -863,16 +935,12 @@ final class AudioPlayer {
         return counts.sorted { $0.value > $1.value }.prefix(limit).map(\.key)
     }
 
-    private func topSongs(forArtists names: [String], client: SubsonicClient, each: Int) async -> [Song] {
+    private func topSongs(forArtists names: [String], client: any MusicService, each: Int) async -> [Song] {
         guard !names.isEmpty else { return [] }
-        return await withTaskGroup(of: [Song].self) { group in
-            for n in names {
-                group.addTask { (try? await client.topSongs(artistName: n, count: each)) ?? [] }
-            }
-            var all: [Song] = []
-            for await s in group { all += s }
-            return all
+        let batches = await DeveloperExperiments.runConcurrently(names, defaultMaxConcurrent: names.count) { name in
+            (try? await client.topSongs(artistName: name, count: each)) ?? []
         }
+        return HiddenAlbumStore.shared.visibleSongs(batches.flatMap { $0 })
     }
 
     // MARK: - Private
@@ -1029,7 +1097,7 @@ final class AudioPlayer {
     ) async -> PlaybackTransitionPlan {
         let sameAlbum = current.albumId != nil && current.albumId == next.albumId
 
-        // One cached musical analysis per track — silence, beat grid, key.
+        // One cached analysis per track.
         let a = await AutoMixAudioAnalyzer.shared.analysis(
             songID: current.id,
             localURL: DownloadService.shared.localURL(for: current),
@@ -1050,20 +1118,46 @@ final class AudioPlayer {
         var nextStart: TimeInterval = 0
         var startLead = max(1.5, duration)
 
-        // 1) Silence trim — drop the incoming past its dead-air intro and open the
-        // blend before the outgoing's trailing silence is heard.
+        // 1) Trim dead air on either side of the handoff.
+        let trailing = min(10, max(0, a.trailingSilence))
+        let trailingPad = PlaybackTransitionSettings.silenceTrimEnabled && trailing > 0.35 ? trailing - 0.1 : 0
         if PlaybackTransitionSettings.silenceTrimEnabled {
-            let trailing = min(10, max(0, a.trailingSilence))
             let leading = min(8, max(0, b.leadingSilence))
             if leading > 0.35 { nextStart = max(0, leading - 0.08); reasons.append("silence trim") }
             else if trailing > 0.35 { reasons.append("silence trim") }
-            startLead = min(PlaybackTransitionSettings.maxBlend + 8, max(1.5, duration + (trailing > 0.35 ? trailing - 0.1 : 0)))
         }
 
-        // 2) Harmonic match — Camelot compatibility scales how long the two tracks'
-        // melodic content overlaps: a clean pair blends longer, a clash overlaps
-        // briefly so the dissonant region passes quickly. It does NOT gate the
-        // rhythm — two songs in different keys can still be beat-matched fine.
+        // 1b) Sequential album tracks get a near-gapless handoff.
+        let sequentialAlbum = sameAlbum
+            && current.track != nil && next.track != nil
+            && next.track == (current.track ?? 0) + 1
+            && (current.discNumber ?? 1) == (next.discNumber ?? 1)
+        if sequentialAlbum {
+            reasons.append("album handoff")
+            let handoff = min(duration, 1.2)
+            return PlaybackTransitionPlan(
+                mode: .automix,
+                duration: handoff,
+                startLead: max(0.9, handoff + trailingPad),
+                nextStart: nextStart,
+                reason: reasons.joined(separator: ", "),
+                oldRate: 1,
+                nextRate: 1
+            )
+        }
+
+        // 1c) Cold endings cut tight.
+        if a.endsCold {
+            duration = min(duration, 3.2)
+            reasons.append("cold end")
+        }
+        // Two arrhythmic tracks get a longer wash.
+        else if a.grid == nil, b.grid == nil {
+            duration = min(PlaybackTransitionSettings.maxBlend, max(duration, 10))
+            reasons.append("long fade")
+        }
+
+        // 2) Harmonic match changes overlap length, not beat matching.
         if PlaybackTransitionSettings.harmonicEnabled, let ka = a.key, let kb = b.key, !sameAlbum {
             let compat = MusicalKey.compatibility(ka, kb)
             if compat >= 0.8 { reasons.append("key \(ka.camelot)→\(kb.camelot)") }
@@ -1071,10 +1165,7 @@ final class AudioPlayer {
             else { duration = max(2.5, duration * 0.7); reasons.append("key \(ka.camelot)/\(kb.camelot) tight") }
         }
 
-        // 3) Beat match — whenever the tempos lock with a gentle bend (independent of
-        // key). The incoming is moved onto its first strong downbeat so it "drops" on
-        // the beat; the engine then fires on the outgoing downbeat so the two beat
-        // grids coincide (phase lock), not merely the tempos.
+        // 3) Beat match when a small outgoing-track bend can lock the grids.
         var oldRate: Float = 1
         var beatAligned = false
         var outPeriod: TimeInterval = 0, outPhase: TimeInterval = 0
@@ -1088,11 +1179,66 @@ final class AudioPlayer {
                 beatAligned = true
                 outPeriod = ga.period; outPhase = ga.phase
                 inPeriod = gb.period; inPhase = gb.phase
-                // start the incoming on its first strong downbeat (>= trimmed intro)
-                nextStart = gb.downbeat(atOrAfter: max(nextStart, gb.firstStrongBeat))
-                // leave a bar of slack so we can wait for the outgoing downbeat
-                startLead = min(PlaybackTransitionSettings.maxBlend + 8, startLead + ga.period * 4)
+                // Start the incoming on a strong downbeat, past sparse intro if needed.
+                var entryFloor = max(nextStart, gb.firstStrongBeat)
+                if PlaybackTransitionSettings.sweetSpotEnabled, b.mixInPoint > entryFloor + 1.0 {
+                    entryFloor = b.mixInPoint
+                    reasons.append(String(format: "intro +%.0fs", b.mixInPoint))
+                }
+                var entry = gb.downbeat(atOrAfter: entryFloor)
+                // Prefer a nearby 4-bar phrase boundary.
+                let bar = gb.period * 4
+                let phrase = bar * 4
+                let anchor = gb.downbeat(atOrAfter: gb.firstStrongBeat)
+                if phrase > 0, entry > anchor + 0.01 {
+                    let k = ((entry - anchor) / phrase).rounded(.up)
+                    let phraseEntry = anchor + k * phrase
+                    if phraseEntry - entry <= bar * 2 + 0.01 { entry = phraseEntry }
+                }
+                nextStart = entry
+                // Bar-counted blend length.
+                if bar > 0.5 {
+                    let bars = max(1, (duration / bar).rounded())
+                    duration = min(PlaybackTransitionSettings.maxBlend, max(2, bars * bar))
+                }
                 reasons.append("beat-locked")
+            }
+        }
+
+        // 4) Vocal guard: avoid stacking two vocal lines.
+        if a.duration > 0,
+           let vocalTail = a.vocalTailEnd, vocalTail > a.duration - 3,
+           let vocalIn = b.vocalIntroStart, vocalIn < nextStart + duration + 1 {
+            duration = min(duration, 4)
+            reasons.append("vocal guard")
+        }
+
+        // 5) Open point: blend length, silence pad, and optional outro skip.
+        startLead = min(PlaybackTransitionSettings.maxBlend + 8, max(1.5, duration + trailingPad))
+        if PlaybackTransitionSettings.sweetSpotEnabled, a.mixOutPoint > 0, a.duration > 0 {
+            var mixOut = a.mixOutPoint
+            if let vocalTail = a.vocalTailEnd, vocalTail > mixOut, vocalTail < a.duration - 2 {
+                mixOut = min(a.duration - 2, vocalTail + 0.3)
+            }
+            let lead = a.duration - mixOut
+            if lead > startLead + 1.5 {
+                startLead = min(45, lead)
+                reasons.append(String(format: "outro −%.0fs", lead - duration))
+            }
+        }
+        if beatAligned, outPeriod > 0 {
+            startLead = min(startLead + outPeriod * 4, max(startLead, PlaybackTransitionSettings.maxBlend + 8))
+        }
+
+        // 6) Loudness match when ReplayGain is not already handling it.
+        var volumeMatch: Float = 1
+        if PlaybackTransitionSettings.loudnessMatchEnabled, a.rms > 0, b.rms > 0 {
+            let rgMode = UserDefaults.standard.string(forKey: "replayGainMode") ?? "off"
+            let rgHandled = rgMode != "off" && next.replayGain != nil
+            let ratio = a.rms / b.rms
+            if !rgHandled, ratio < 0.95 {
+                volumeMatch = max(0.7, ratio)
+                reasons.append("level match")
             }
         }
 
@@ -1110,7 +1256,8 @@ final class AudioPlayer {
             outBeatPeriod: outPeriod,
             outBeatPhase: outPhase,
             inBeatPeriod: inPeriod,
-            inBeatPhase: inPhase
+            inBeatPhase: inPhase,
+            volumeMatch: volumeMatch
         )
     }
 
@@ -1135,8 +1282,7 @@ final class AudioPlayer {
         await tempoBPM(for: song)
     }
 
-    // Full musical analysis (BPM + beat grid + key) for the Settings preview, so it
-    // can show keys/compatibility and demonstrate the same beat-locked drop.
+    // Full analysis for the Settings preview.
     func autoMixAnalysis(for song: Song) async -> AutoMixTrackAnalysis {
         await AutoMixAudioAnalyzer.shared.analysis(
             songID: song.id,
@@ -1168,8 +1314,7 @@ final class AudioPlayer {
         )
         let remaining = liveDuration() - liveTime()
         guard remaining.isFinite, remaining > 0.25 else { return }
-        // prime (pre-buffer) the next track a few seconds before the blend so it's
-        // fully buffered and rolling — no stall/gap when the crossfade opens
+        // Pre-buffer the next track before the blend opens.
         let primeLead: TimeInterval = 6
         if remaining <= plan.startLead + primeLead {
             primeNext(next, plan: plan)
@@ -1178,11 +1323,7 @@ final class AudioPlayer {
         armTransition(plan, nextSong: next, remaining: remaining)
     }
 
-    // For a beat-locked plan, hold until the outgoing track crosses its next
-    // downbeat (bar line) and fire the transition exactly there — so when the
-    // incoming (already seeked to ITS downbeat) becomes audible, the two beat grids
-    // coincide. Falls back to firing immediately when the wait would eat the tail or
-    // when the plan isn't beat-locked.
+    // For beat-locked plans, wait for the outgoing downbeat before starting.
     private func armTransition(_ plan: PlaybackTransitionPlan, nextSong: Song, remaining: TimeInterval) {
         guard !transitionArmed, !isTransitioning else { return }
         guard plan.beatAligned, plan.outBeatPeriod > 0.2 else {
@@ -1191,7 +1332,7 @@ final class AudioPlayer {
         }
         let grid = AutoMixBeatGrid(bpm: 60.0 / plan.outBeatPeriod, phase: plan.outBeatPhase, firstStrongBeat: 0)
         let now = liveTime()
-        // need enough outgoing left to actually overlap the incoming after the wait
+        // Need enough outgoing tail left after the wait.
         let minOverlap = min(2.5, max(1.2, plan.duration * 0.25))
         var target = grid.downbeat(atOrAfter: now + 0.05, beatsPerBar: plan.beatsPerBar)
         if target - now > remaining - minOverlap {
@@ -1215,8 +1356,7 @@ final class AudioPlayer {
         }
     }
 
-    // Pre-buffer the next track on the inactive player by playing it muted ahead of
-    // the blend. startPlannedTransition then reuses this already-rolling player.
+    // Muted pre-buffer on the inactive player.
     private func primeNext(_ song: Song, plan: PlaybackTransitionPlan) {
         guard primedSongID != song.id,
               !isTransitioning,
@@ -1233,7 +1373,7 @@ final class AudioPlayer {
             let tol = CMTime(seconds: 0.05, preferredTimescale: 600)
             p.seek(to: CMTime(seconds: plan.nextStart, preferredTimescale: 600), toleranceBefore: tol, toleranceAfter: tol)
         }
-        p.play()   // muted — warms + buffers
+        p.play()   // muted warmup
         primedSongID = song.id
         AppLogger.shared.log("🔥 Prime next: '\(song.title)'", category: .playback)
     }
@@ -1256,22 +1396,13 @@ final class AudioPlayer {
 
         let oldPlayer = activePlayer
         let newPlayer = inactivePlayer
-        // beat-matching is on whenever the plan asks for a non-unity rate. Both
-        // items already carry a fixed pitch-preserving algorithm from makePlayerItem,
-        // so we never switch it mid-playback (which re-primes the audio unit and is
-        // exactly what made the mix drop to silence instead of bending tempo).
+        // Non-unity rate means tempo bend; do not switch pitch algorithms mid-play.
         let tempoActive = abs(plan.oldRate - 1) >= 0.01 || abs(plan.nextRate - 1) >= 0.01
 
-        // Reuse the primed player when it already holds the next track (it's been
-        // playing muted + buffering ahead of the blend). Otherwise build it now.
-        // `incomingStart` is where the incoming actually sits when the blend opens —
-        // for a beat-locked plan we land it exactly on its own downbeat so the grids
-        // coincide (the transition itself fired on the outgoing downbeat).
+        // Reuse a primed player when possible; otherwise build the item now.
         let nextItem: AVPlayerItem
         var incomingStart = plan.nextStart
-        // Pre-compensate the tiny phase drift that builds up between the blend
-        // opening and the tempo bend engaging (~15% in), so the beats coincide AFTER
-        // the bend — when the incoming is loud enough to matter — not just at T0.
+        // Pre-compensate the tiny drift before the tempo bend engages.
         let lockShift = beatLockSeekShift(plan: plan)
         let inGrid: AutoMixBeatGrid? = (plan.beatAligned && plan.inBeatPeriod > 0.2)
             ? AutoMixBeatGrid(bpm: 60.0 / plan.inBeatPeriod, phase: plan.inBeatPhase, firstStrongBeat: 0)
@@ -1281,9 +1412,7 @@ final class AudioPlayer {
             newPlayer.volume = 0
             currentBassID = primedBassID
             primedBassID = 0
-            // The primed track has been rolling since priming, so nudge it onto its
-            // next downbeat (+ drift compensation) — a tiny seek inside the already-
-            // buffered region, inaudible because it's still muted — to phase-lock.
+            // Nudge the muted primed track onto its next downbeat.
             if let inGrid {
                 let pIn = newPlayer.currentTime().seconds
                 if pIn.isFinite {
@@ -1303,8 +1432,7 @@ final class AudioPlayer {
             newPlayer.volume = 0
             if inGrid != nil { incomingStart = max(0, incomingStart + lockShift) }
             if incomingStart > 0 {
-                // small tolerance keeps the seek fast — exact (zero-tolerance) seek
-                // decodes to the precise frame and lags the blend
+                // Small tolerance keeps this seek fast.
                 let seekTime = CMTime(seconds: incomingStart, preferredTimescale: 600)
                 let tol = CMTime(seconds: 0.05, preferredTimescale: 600)
                 newPlayer.seek(to: seekTime, toleranceBefore: tol, toleranceAfter: tol)
@@ -1316,7 +1444,9 @@ final class AudioPlayer {
 
         if urlInfo.isLocal { DownloadService.shared.markPlayed(nextSong.id) }
         let oldStartVolume = oldPlayer.volume
-        let newTargetVolume = replayGainVolume(for: nextSong)
+        // plan.volumeMatch ducks a hotter incoming master to the outgoing's level
+        // (Sound Check-style); 1.0 whenever ReplayGain already normalizes it.
+        let newTargetVolume = replayGainVolume(for: nextSong) * plan.volumeMatch
 
         activePlayer = newPlayer
         targetVolume = newTargetVolume
@@ -1332,8 +1462,7 @@ final class AudioPlayer {
         if nextSong.starred != nil { starredIDs.insert(nextSong.id) }
         resetPreparedTransitionPlan()
 
-        // The incoming track always plays at its true tempo (rate 1.0), so the
-        // track that becomes dominant is never time-stretched and never stutters.
+        // Incoming stays at true tempo.
         newPlayer.play()
         updateNowPlaying()
         Task { await loadArtwork(for: nextSong) }
@@ -1348,11 +1477,7 @@ final class AudioPlayer {
         transitionTask = Task { @MainActor [weak self, weak oldPlayer, weak newPlayer] in
             guard let self, let oldPlayer, let newPlayer else { return }
 
-            // Hold the outgoing track at full level while the incoming track buffers
-            // and actually starts rolling, so the blend never opens into a silent gap
-            // (a freshly created item — especially a network stream — is rarely ready
-            // the instant we call play()). The outgoing keeps playing audibly during
-            // the wait, so there's no silence; we bail early if it's about to end.
+            // Keep the outgoing audible while the incoming starts rolling.
             let warmDeadline = Date().addingTimeInterval(3.0)
             while Date() < warmDeadline {
                 if Task.isCancelled { return }
@@ -1374,26 +1499,17 @@ final class AudioPlayer {
             for step in 0...steps {
                 if Task.isCancelled { return }
                 let x = Double(step) / Double(steps)
-                // Both modes use a constant-power (equal-power) curve so perceived
-                // loudness stays steady right through the blend — no mid-blend dip,
-                // no "one song suddenly louder". The two modes stay distinct via the
-                // crossover *shape*: Crossfade sweeps the blend evenly, while AutoMix
-                // eases it (linger on the outgoing, swap through the middle, settle)
-                // and adds the tempo bend + silence trim on top.
+                // Equal-power curve; AutoMix differs by shape and analysis extras.
                 let phase = plan.mode == .crossfade ? x : x * x * (3 - 2 * x)
                 let theta = phase * (Double.pi / 2)
                 oldPlayer.volume = oldStartVolume * Float(cos(theta))
                 newPlayer.volume = newTargetVolume * Float(sin(theta))
-                // Bend the outgoing (ending) track once, ~15% into the fade so it's
-                // already ducking — that masks the time-stretch engage. Held constant
-                // (no per-frame ramp = no stutter); the track just stops at the end, so
-                // it never needs to ease back. Beats match the incoming track's tempo.
+                // Bend the outgoing once after it is already ducking.
                 if tempoActive, !bentOutgoing, x >= 0.15 {
                     bentOutgoing = true
                     oldPlayer.rate = plan.oldRate
                 }
-                // DJ bass swap: roll the incoming low end off early and open it as it
-                // takes over, so the two basslines never pile up into mud.
+                // Open incoming bass as it takes over.
                 if self.currentBassID != 0 {
                     AutoMixBassSwap.shared.setCutoff(self.bassSwapCutoff(at: x), id: self.currentBassID)
                 }
@@ -1454,7 +1570,7 @@ final class AudioPlayer {
 
     private func loadArtwork(for song: Song) async {
         let url = client?.coverArtURL(id: song.coverArt, size: 600)
-        let image = await ArtworkLoader.shared.image(for: url)
+        let image = await ArtworkLoader.shared.image(for: url, maxPixelSize: 600)
         guard currentSong?.id == song.id else { return }
         currentArtwork = image
         if let image {
@@ -1464,15 +1580,48 @@ final class AudioPlayer {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         }
 
-        let liveEnabled = (UserDefaults.standard.object(forKey: "liveArtwork") as? Bool ?? true)
-            && !PerformanceMode.disableLiveArtwork
-        guard liveEnabled, song.coverArt != nil else { return }
-        let originalURL = client?.coverArtURL(id: song.coverArt)
-        let live = await ArtworkLoader.shared.liveArtwork(for: originalURL)
+        let liveEnabled = LiveArtworkSettings.shouldShowAnimatedArtwork
+        guard liveEnabled else { return }
+
+        var live = await ArtworkLoader.shared.liveArtwork(for: client?.coverArtURL(id: song.coverArt))
+        if live == nil, let albumID = song.albumId {
+            let albumCoverArt: String?
+            if queueSourceAlbum?.id == albumID {
+                albumCoverArt = queueSourceAlbum?.coverArt
+            } else if let client {
+                albumCoverArt = (try? await client.album(id: albumID))?.coverArt
+            } else {
+                albumCoverArt = nil
+            }
+            if albumCoverArt != song.coverArt {
+                live = await ArtworkLoader.shared.liveArtwork(for: client?.coverArtURL(id: albumCoverArt))
+            }
+        }
         guard currentSong?.id == song.id else { return }
         currentLiveArtwork = live
         currentAnimatedArtwork = live?.animatedImage
         applyNowPlayingAnimatedArtwork(live)
+        if live?.videoURL != nil {
+            scheduleAnimatedArtworkReattach(for: song)
+        }
+    }
+
+    // The OS's supportedAnimatedArtworkKeys set reads empty right at song start and
+    // populates a beat later; re-attach the (already built) animated artwork once it
+    // turns on so the lock screen actually picks it up.
+    private func scheduleAnimatedArtworkReattach(for song: Song) {
+        guard #available(iOS 26.0, *) else { return }
+        Task { @MainActor [weak self] in
+            for delaySeconds in [0.4, 1.0, 2.0, 4.0] {
+                try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+                guard let self, self.currentSong?.id == song.id else { return }
+                let supported = MPNowPlayingInfoCenter.supportedAnimatedArtworkKeys
+                guard supported.contains(MPNowPlayingInfoProperty3x4AnimatedArtwork)
+                    || supported.contains(MPNowPlayingInfoProperty1x1AnimatedArtwork) else { continue }
+                self.applyNowPlayingAnimatedArtwork(self.currentLiveArtwork)
+                return
+            }
+        }
     }
 
     private func loadDuration(from item: AVPlayerItem) async {
@@ -1717,16 +1866,38 @@ final class AudioPlayer {
 
     @available(iOS 26.0, *)
     private func addSupportedAnimatedArtwork(to info: inout [String: Any], live: LiveArtworkAsset?) {
-        info.removeValue(forKey: MPNowPlayingInfoProperty1x1AnimatedArtwork)
-        guard let live, let videoURL = live.videoURL else { return }
-        let key = MPNowPlayingInfoProperty1x1AnimatedArtwork
-        guard MPNowPlayingInfoCenter.supportedAnimatedArtworkKeys.contains(key) else { return }
-        let preview = live.previewImage
-        let animated = MPMediaItemAnimatedArtwork(artworkID: live.artworkID) { _ in
-            preview
-        } videoAssetFileURLRequestHandler: { _ in
-            videoURL
+        // iOS 26/27 expose the PORTRAIT 3x4 lock-screen slot (square 1x1 isn't
+        // offered); prefer it, fall back to 1x1 only if that's all the OS lists.
+        let candidateKeys = [
+            MPNowPlayingInfoProperty3x4AnimatedArtwork,
+            MPNowPlayingInfoProperty1x1AnimatedArtwork
+        ]
+        for k in candidateKeys { info.removeValue(forKey: k) }
+        let supportedKeys = MPNowPlayingInfoCenter.supportedAnimatedArtworkKeys
+        let key = candidateKeys.first { supportedKeys.contains($0) }
+            ?? (LiveArtworkSettings.rawAnimatedArtworkEnabled ? MPNowPlayingInfoProperty3x4AnimatedArtwork : nil)
+        guard let live, let videoURL = live.videoURL else {
+            AppLogger.shared.log("Lock-screen animated artwork: not attached (live=\(live != nil), video=\(live?.videoURL != nil), supportedKeys=\(supportedKeys))", category: .playback)
+            return
         }
+        guard let key else {
+            AppLogger.shared.log("Lock-screen animated artwork: OS reports no usable key — animated now-playing won't show (supportedKeys=\(supportedKeys))", category: .playback, level: .warning)
+            return
+        }
+        AppLogger.shared.log("Lock-screen animated artwork: attached ✓ key=\(key) (\(videoURL.lastPathComponent))", category: .playback)
+        let preview = live.previewImage
+        // If the system never requests the video, it is gating animation, not format.
+        let animated = MPMediaItemAnimatedArtwork(
+            artworkID: live.artworkID,
+            previewImageRequestHandler: { _, completion in
+                AppLogger.shared.log("Lock-screen animated artwork: system REQUESTED preview image ✓", category: .playback)
+                completion(preview)
+            },
+            videoAssetFileURLRequestHandler: { _, completion in
+                AppLogger.shared.log("Lock-screen animated artwork: system REQUESTED video asset ✓ (\(videoURL.lastPathComponent))", category: .playback)
+                completion(videoURL)
+            }
+        )
         info[key] = animated
     }
 
@@ -1738,24 +1909,26 @@ final class AudioPlayer {
     }
 }
 
-// On-device musical analyser behind AutoMix. For each song it produces an
-// `AutoMixTrackAnalysis` — leading/trailing silence, a beat grid (tempo + phase +
-// first strong beat) and an estimated musical key — by decoding the audio once (a
-// local download when present, otherwise a short streamed prefix). Everything is
-// cached per song id so a track is examined at most once. The heavy DSP (energy
-// envelope + chromagram FFT) lives here; the musical interpretation is in
-// `AutoMixDSP`.
+// On-device analyser behind AutoMix. Results are cached per song id.
 private actor AutoMixAudioAnalyzer {
     static let shared = AutoMixAudioAnalyzer()
 
     private var analysisByID: [String: AutoMixTrackAnalysis] = [:]
     private let silenceThreshold: Float = 0.003
-    private let energyCapSeconds: TimeInterval = 120
+    // beat grid only trusts the first couple of minutes (phase smears over longer
+    // spans); the structure pass (mix-in/out, RMS) wants the whole track
+    private let gridCapSeconds: TimeInterval = 120
+    private let envelopeCapSeconds: TimeInterval = 1200
     private let chromaCapSeconds: TimeInterval = 90
 
     private static var harmonicEnabled: Bool {
         if UserDefaults.standard.object(forKey: "automixHarmonic") == nil { return true }
         return UserDefaults.standard.bool(forKey: "automixHarmonic")
+    }
+
+    private static var sweetSpotEnabled: Bool {
+        if UserDefaults.standard.object(forKey: "automixSweetSpot") == nil { return true }
+        return UserDefaults.standard.bool(forKey: "automixSweetSpot")
     }
 
     // MARK: Public
@@ -1786,10 +1959,53 @@ private actor AutoMixAudioAnalyzer {
         result.trailingSilence = env.silence.trailingSilence
         var effectiveTag = taggedBPM
         if effectiveTag == nil { effectiveTag = await readBPMMetadata(url: fileURL) }
-        result.grid = AutoMixDSP.beatGrid(energy: env.energy, taggedBPM: effectiveTag)
-        if Self.harmonicEnabled, let chroma = await decodeChroma(url: fileURL) {
-            result.key = AutoMixDSP.estimateKey(chroma: chroma)
+        let gridEnergy = env.energy.last.map { $0.time > gridCapSeconds } == true
+            ? Array(env.energy.prefix(while: { $0.time <= gridCapSeconds }))
+            : env.energy
+        result.grid = AutoMixDSP.beatGrid(energy: gridEnergy, taggedBPM: effectiveTag)
+
+        // Structure: loudness + sweet-spot mix points. A streamed prefix has no
+        // tail, so only the entry point (and a loudness estimate) applies there.
+        if !env.energy.isEmpty {
+            result.rms = env.energy.reduce(Float(0)) { $0 + $1.value } / Float(env.energy.count)
+            let analysedSpan = isPrefix ? (env.energy.last?.time ?? 0) : env.duration
+            result.mixInPoint = AutoMixDSP.mixInPoint(energy: env.energy, duration: analysedSpan)
+            if !isPrefix {
+                result.duration = env.duration
+                result.mixOutPoint = AutoMixDSP.mixOutPoint(energy: env.energy, duration: env.duration)
+                result.endsCold = AutoMixDSP.endsCold(
+                    energy: env.energy,
+                    duration: env.duration,
+                    trailingSilence: env.silence.trailingSilence
+                )
+            }
         }
+        // One FFT pass over the head of the file feeds both the key estimate and
+        // the vocal-presence heuristic; a second, short pass scans the tail for the
+        // last sung moment (local full files only — a prefix has no tail).
+        if Self.harmonicEnabled || Self.sweetSpotEnabled {
+            let head = await decodeSpectral(
+                url: fileURL,
+                capSeconds: chromaCapSeconds,
+                includeChroma: Self.harmonicEnabled
+            )
+            if let chroma = head.chroma {
+                result.key = AutoMixDSP.estimateKey(chroma: chroma)
+            }
+            if Self.sweetSpotEnabled {
+                result.vocalIntroStart = AutoMixDSP.firstVocalActivity(frames: head.frames)
+                if !isPrefix, result.duration > 50 {
+                    let tail = await decodeSpectral(
+                        url: fileURL,
+                        startingAt: max(0, result.duration - 40),
+                        capSeconds: 45,
+                        includeChroma: false
+                    )
+                    result.vocalTailEnd = AutoMixDSP.lastVocalActivity(frames: tail.frames)
+                }
+            }
+        }
+
         analysisByID[songID] = result
         return result
     }
@@ -1831,15 +2047,34 @@ private actor AutoMixAudioAnalyzer {
         return temp
     }
 
-    // One decode pass → short-time energy envelope (for tempo/phase) plus the
-    // leading/trailing silence. Energy is capped to `energyCapSeconds`; silence
-    // scans the whole file (trailing is meaningless for a truncated prefix, so it's
-    // reported as 0 there).
-    private func decodeEnergyEnvelope(url: URL, isPrefix: Bool) async -> (energy: [AutoMixEnergyPoint], silence: AudioSilenceProfile) {
+    // Energy envelope plus leading/trailing silence from one decode pass.
+    private func decodeEnergyEnvelope(url: URL, isPrefix: Bool) async -> (energy: [AutoMixEnergyPoint], silence: AudioSilenceProfile, duration: TimeInterval) {
         let asset = AVURLAsset(url: url)
         let durationSeconds = (try? await asset.load(.duration))?.seconds ?? 0
-        guard let track = try? await asset.loadTracks(withMediaType: .audio).first,
-              let reader = try? AVAssetReader(asset: asset) else { return ([], .zero) }
+        guard let track = try? await asset.loadTracks(withMediaType: .audio).first else { return ([], .zero, 0) }
+        let threshold = silenceThreshold
+        let cap = envelopeCapSeconds
+        return await DeveloperExperiments.runBlocking(qos: .userInitiated) {
+            Self.decodeEnergyEnvelopeSync(
+                asset: asset,
+                track: track,
+                isPrefix: isPrefix,
+                durationSeconds: durationSeconds,
+                silenceThreshold: threshold,
+                envelopeCapSeconds: cap
+            )
+        }
+    }
+
+    private nonisolated static func decodeEnergyEnvelopeSync(
+        asset: AVURLAsset,
+        track: AVAssetTrack,
+        isPrefix: Bool,
+        durationSeconds: TimeInterval,
+        silenceThreshold: Float,
+        envelopeCapSeconds: TimeInterval
+    ) -> (energy: [AutoMixEnergyPoint], silence: AudioSilenceProfile, duration: TimeInterval) {
+        guard let reader = try? AVAssetReader(asset: asset) else { return ([], .zero, 0) }
 
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
@@ -1849,9 +2084,9 @@ private actor AutoMixAudioAnalyzer {
         ]
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: settings)
         output.alwaysCopiesSampleData = false
-        guard reader.canAdd(output) else { return ([], .zero) }
+        guard reader.canAdd(output) else { return ([], .zero, 0) }
         reader.add(output)
-        guard reader.startReading() else { return ([], .zero) }
+        guard reader.startReading() else { return ([], .zero, 0) }
 
         var energy: [AutoMixEnergyPoint] = []
         var firstAudible: TimeInterval?
@@ -1886,7 +2121,7 @@ private actor AutoMixAudioAnalyzer {
 
             guard pts.isFinite else { continue }
             let sampleDuration = CMSampleBufferGetDuration(sampleBuffer).seconds
-            if pts <= energyCapSeconds {
+            if pts <= envelopeCapSeconds {
                 let midpoint = pts + (sampleDuration.isFinite ? sampleDuration / 2 : 0)
                 energy.append(AutoMixEnergyPoint(time: midpoint, value: measured.mean))
             }
@@ -1905,15 +2140,43 @@ private actor AutoMixAudioAnalyzer {
         } else {
             silence = .zero
         }
-        return (energy, silence)
+        return (energy, silence, durationSeconds.isFinite ? max(0, durationSeconds) : 0)
     }
 
-    // Average chromagram (12 pitch classes) over a mono/downsampled decode, via
-    // overlapping windowed FFTs. Hands the result to AutoMixDSP for key finding.
-    private func decodeChroma(url: URL) async -> [Double]? {
+    // Downsampled FFT for chroma and vocal-band frames.
+    private func decodeSpectral(
+        url: URL,
+        startingAt: TimeInterval? = nil,
+        capSeconds: TimeInterval,
+        includeChroma: Bool
+    ) async -> (chroma: [Double]?, frames: [AutoMixSpectralFrame]) {
         let asset = AVURLAsset(url: url)
-        guard let track = try? await asset.loadTracks(withMediaType: .audio).first,
-              let reader = try? AVAssetReader(asset: asset) else { return nil }
+        guard let track = try? await asset.loadTracks(withMediaType: .audio).first else { return (nil, []) }
+        return await DeveloperExperiments.runBlocking(qos: .userInitiated) {
+            Self.decodeSpectralSync(
+                asset: asset,
+                track: track,
+                startingAt: startingAt,
+                capSeconds: capSeconds,
+                includeChroma: includeChroma
+            )
+        }
+    }
+
+    private nonisolated static func decodeSpectralSync(
+        asset: AVURLAsset,
+        track: AVAssetTrack,
+        startingAt: TimeInterval?,
+        capSeconds: TimeInterval,
+        includeChroma: Bool
+    ) -> (chroma: [Double]?, frames: [AutoMixSpectralFrame]) {
+        guard let reader = try? AVAssetReader(asset: asset) else { return (nil, []) }
+        if let startingAt, startingAt > 0 {
+            reader.timeRange = CMTimeRange(
+                start: CMTime(seconds: startingAt, preferredTimescale: 600),
+                duration: .positiveInfinity
+            )
+        }
 
         let sampleRate = 22_050.0
         let settings: [String: Any] = [
@@ -1926,24 +2189,27 @@ private actor AutoMixAudioAnalyzer {
         ]
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: settings)
         output.alwaysCopiesSampleData = false
-        guard reader.canAdd(output) else { return nil }
+        guard reader.canAdd(output) else { return (nil, []) }
         reader.add(output)
-        guard reader.startReading() else { return nil }
+        guard reader.startReading() else { return (nil, []) }
 
         let n = 8192
         let half = n / 2
         let log2n = vDSP_Length(13)
-        guard let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return nil }
+        guard let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return (nil, []) }
         defer { vDSP_destroy_fftsetup(setup) }
 
         var window = [Float](repeating: 0, count: n)
         vDSP_hann_window(&window, vDSP_Length(n), Int32(vDSP_HANN_NORM))
 
-        // pitch class per FFT bin, restricted to the range where pitch is salient
-        // (≈ C2–C7); higher/lower bins are mostly noise/harmonics for key finding.
+        // Pitch-class bins, restricted to the range useful for key finding.
         var binPitch = [Int](repeating: -1, count: half)
+        var isMid = [Bool](repeating: false, count: half)
+        var isAudible = [Bool](repeating: false, count: half)
         for k in 1..<half {
             let f = Double(k) * sampleRate / Double(n)
+            isMid[k] = f >= 280 && f <= 3800
+            isAudible[k] = f >= 65 && f <= 8000
             guard f >= 65, f <= 2100 else { continue }
             let midi = 69 + 12 * log2(f / 440)
             binPitch[k] = ((Int(midi.rounded()) % 12) + 12) % 12
@@ -1958,8 +2224,11 @@ private actor AutoMixAudioAnalyzer {
         var ring = [Float]()
         ring.reserveCapacity(n * 2)
         let hop = n / 2
-        let maxSamples = Int(chromaCapSeconds * sampleRate)
+        let maxSamples = Int(capSeconds * sampleRate)
         var consumed = 0
+        var frames: [AutoMixSpectralFrame] = []
+        let baseTime = startingAt ?? 0
+        var frameIndex = 0
 
         func processFrame() {
             ring.withUnsafeBufferPointer { rb in
@@ -1977,9 +2246,22 @@ private actor AutoMixAudioAnalyzer {
                     vDSP_zvabs(&split, 1, &mags, 1, vDSP_Length(half))
                 }
             }
-            // Per-frame chroma, normalised so every moment contributes equally —
-            // otherwise loud sections dominate and skew the key estimate. Log
-            // compression tames percussive spikes.
+            // Vocal-band share for the heuristic.
+            var midSum: Float = 0, totalSum: Float = 0
+            for k in 1..<half where isAudible[k] {
+                totalSum += mags[k]
+                if isMid[k] { midSum += mags[k] }
+            }
+            let time = baseTime + (Double(frameIndex) * Double(hop) + Double(n) / 2) / sampleRate
+            frames.append(AutoMixSpectralFrame(
+                time: time,
+                energy: totalSum,
+                midRatio: totalSum > 0 ? midSum / totalSum : 0
+            ))
+            frameIndex += 1
+
+            guard includeChroma else { return }
+            // Normalize per-frame chroma so loud sections do not dominate.
             for i in 0..<12 { frameChroma[i] = 0 }
             for k in 1..<half where binPitch[k] >= 0 {
                 frameChroma[binPitch[k]] += log1p(Double(mags[k]))
@@ -2012,7 +2294,7 @@ private actor AutoMixAudioAnalyzer {
             }
         }
 
-        return chroma.reduce(0, +) > 0 ? chroma : nil
+        return (includeChroma && chroma.reduce(0, +) > 0 ? chroma : nil, frames)
     }
 
     // Embedded BPM tag (ID3 TBPM / iTunes tmpo) for local files, as a fallback when

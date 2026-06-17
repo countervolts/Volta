@@ -41,7 +41,7 @@ final class StatsStore {
 
     private let fileURL: URL
     private var events: [PlayEvent] = []
-    private let queue = DispatchQueue(label: "stats-store", qos: .utility)
+    private let queue = DeveloperExperiments.queue(label: "stats-store", qos: .utility)
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -56,13 +56,13 @@ final class StatsStore {
     }
 
     func flush() {
-        queue.sync { [weak self] in self?.save() }
+        syncOnStore { [weak self] in self?.save() }
     }
 
     // MARK: - Write
 
     func record(_ event: PlayEvent) {
-        queue.async { [weak self] in
+        asyncOnStore { [weak self] in
             guard let self else { return }
             self.events.append(event)
             self.save()
@@ -75,7 +75,7 @@ final class StatsStore {
     // MARK: - Read (synchronous snapshots for use on background threads)
 
     func allEvents() -> [PlayEvent] {
-        queue.sync { events }
+        syncOnStore { events }
     }
 
     func storageSizeBytes() -> Int {
@@ -84,7 +84,7 @@ final class StatsStore {
     }
 
     func clearAll() {
-        queue.sync {
+        syncOnStore {
             events.removeAll()
             save()
         }
@@ -94,10 +94,18 @@ final class StatsStore {
     }
 
     func events(from start: Date, to end: Date) -> [PlayEvent] {
-        queue.sync { events.filter { $0.timestamp >= start && $0.timestamp <= end } }
+        syncOnStore { events.filter { $0.timestamp >= start && $0.timestamp <= end } }
     }
 
     // MARK: - Persistence
+
+    private func syncOnStore<T>(_ operation: () -> T) -> T {
+        return queue.sync(execute: operation)
+    }
+
+    private func asyncOnStore(_ operation: @escaping () -> Void) {
+        queue.async(execute: operation)
+    }
 
     private func load() {
         guard let data = try? Data(contentsOf: fileURL),

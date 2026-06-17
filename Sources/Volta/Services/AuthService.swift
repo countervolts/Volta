@@ -1,9 +1,11 @@
 import Foundation
 
-// validates a server + credentials by pinging the subsonic endpoint.
+// Server login check. Some backends validate during client creation.
 enum AuthService {
-    static func validate(config: SubsonicConfig) async throws {
-        let client = SubsonicClient(config: config)
+    static func validate(config: SubsonicConfig,
+                         kind: MusicBackendKind = .subsonic,
+                         session: URLSession = .shared) async throws {
+        let client = try await MusicServiceFactory.make(config: config, kind: kind, session: session)
         try await client.ping()
     }
 }

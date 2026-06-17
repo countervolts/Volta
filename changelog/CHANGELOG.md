@@ -1,6 +1,27 @@
-stuff that needs to be done or stuff that is done
+# volta full changelog
 
-## done
+a running log of everything done in the app
+
+## Recent changes
+
+### Backends & accounts (multi-server support)
+- [x] added a `MusicService` protocol abstraction with a `MusicServiceFactory` so the whole UI talks to one interface; servers now carry a `MusicBackendKind` (Subsonic/Navidrome, Jellyfin, Emby, Plex) plus a `MusicServiceCapabilities` set (folder browsing, public sharing, favorites, …)
+- [x] added a Jellyfin/Emby client that maps both servers into Volta's Subsonic-shaped models
+- [x] added a Plex client (token auth, MediaContainer envelopes, ratings-as-favorites, cached file-part keys for synchronous stream/download URLs) with hosted "Sign in with Plex" SSO through a Safari sheet (PlexHostedAuth)
+- [x] redesigned the login screen into a service-selection step with per-backend login, the Plex hosted sign-in flow, and a language menu
+- [x] added public, stream-only demo servers (Navidrome demo, Jellyfin demo) so people can explore without their own server; the app refuses to download or persist demo songs, lyrics, or artwork
+- [x] added a Switch Server sheet from the account menu; touch-and-hold or swipe a saved server to remove it (the currently connected server is protected and can't be removed)
+
+### Localization
+- [x] added runtime language switching across 17 languages (English default + Spanish, French, German, Portuguese, Italian, Dutch, Russian, Polish, Turkish, Swedish, Norwegian, Danish, Finnish, Simplified Chinese, Japanese, Korean) backed by a `LocKey` string catalog (~210 keys); added Settings -> Language and threaded localized strings through the views and view models
+
+### Settings
+- [x] split the single large SettingsView into focused per-section screens under Settings/ (About, Appearance, AutoMix, Backup, Developer, Notifications, Performance, Playback, Server, Storage) behind a SettingsView container
+
+### Library
+- [x] added Hidden Albums: hide albums from the library/artist views and manage the hidden list from Settings (HiddenAlbumStore + Hidden Albums settings)
+
+## Earlier changes
 
 ### Player & Playback
 - [x] make it so that the tab bar miniplayer doenst have a forward button
@@ -123,7 +144,7 @@ stuff that needs to be done or stuff that is done
 - [x] performance overlay now shows CPU %, estimated CPU power, thermal state, battery, low-power state, transition and autoplay state
 - [x] automatic local JSON playlist backups are enabled by default, update after playlist edits, and Settings can refresh backups or restore deleted playlists
 - [x] users can permanently delete local playlist backups from Settings
-- [x] the whole Developer section is hidden until you tap Version/Build in About 7 times (Android-style), persisted via `developerUnlocked`; a hint toast counts down from 4 taps and a "Hide Developer Tools" button re-locks it
+- [x] the whole Developer section is hidden until you tap Version/Build in About 7 times, persisted via `developerUnlocked`; a hint toast counts down from 4 taps and a "Hide Developer Tools" button re-locks it
 
 ### Bug Fixes
 - [x] fix error in stats where it will say avg play for 700,000 days instead of the amount of days the app was installed
@@ -240,6 +261,7 @@ stuff that needs to be done or stuff that is done
 - [x] fixed bug where logging out while a song was playing left it playing in the background (logout now fully stops and clears the player — queue, now-playing info and audio session — so nothing remains playable after sign-out)
 - [x] when exiting the app or turning off the phone the audio stops (added route-change observer that syncs isPlaying on headphone unplug; added stall observer that reactivates the session and re-calls player.play() so background streaming recovers after a brief network drop)
 - [x] issue when using siri to skip a song the first N seconds of the song will be silent just like if automix was playing, when skipping using the next button this doesnt happen (startPlaying now calls setActive(true) before player.play() so the session is always live at the moment playback begins even when Siri interrupted it; the interruption-ended guard required rate==0 but a remote-command skip already set rate to 1 so the session was left inactive)
+- [x] redesigned the album/player view for animated artworks so they look nicer
 
 ### Playlists
 - [x] add the ability to edit playlists remove songs via 3-dot menu, delete playlist via long-press context menu
@@ -264,7 +286,3 @@ stuff that needs to be done or stuff that is done
 ### Stats & Playlists Export
 - [x] export stats (Stats tab>share button) writes play events as JSON + CSV and opens the share sheet
 - [x] export/import playlists (Settings>Backups) exports all server playlists to portable JSON and recreates them on import (name, comment, ordered song ids)
-
-## not done
-
-### (add these to where you think they should go)

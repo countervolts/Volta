@@ -4,14 +4,15 @@ struct ServerRecord: Codable, Identifiable, Hashable {
     var id: String
     var displayName: String
     var urlString: String
-    // optional alternate base URL used while on cellular (e.g. a public address when
-    // the primary urlString is a LAN-only one). nil/blank > always use urlString.
+    // Cellular-only base URL override.
     var cellularURLString: String?
-    // optional alternate username used while on cellular. nil/blank > use username.
+    // Cellular-only username override.
     var cellularUsername: String?
     var username: String
     var isCurrent: Bool
     var addedAt: Date
+    // Server protocol for this connection.
+    var backend: MusicBackendKind
 
     init(id: String = UUID().uuidString,
          displayName: String,
@@ -20,7 +21,8 @@ struct ServerRecord: Codable, Identifiable, Hashable {
          cellularUsername: String? = nil,
          username: String,
          isCurrent: Bool = false,
-         addedAt: Date = .now) {
+         addedAt: Date = .now,
+         backend: MusicBackendKind = .subsonic) {
         self.id = id
         self.displayName = displayName
         self.urlString = urlString
@@ -29,6 +31,26 @@ struct ServerRecord: Codable, Identifiable, Hashable {
         self.username = username
         self.isCurrent = isCurrent
         self.addedAt = addedAt
+        self.backend = backend
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, displayName, urlString, cellularURLString, cellularUsername
+        case username, isCurrent, addedAt, backend
+    }
+
+    // Older servers.json files have no backend key.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        displayName = try c.decode(String.self, forKey: .displayName)
+        urlString = try c.decode(String.self, forKey: .urlString)
+        cellularURLString = try c.decodeIfPresent(String.self, forKey: .cellularURLString)
+        cellularUsername = try c.decodeIfPresent(String.self, forKey: .cellularUsername)
+        username = try c.decode(String.self, forKey: .username)
+        isCurrent = try c.decode(Bool.self, forKey: .isCurrent)
+        addedAt = try c.decode(Date.self, forKey: .addedAt)
+        backend = try c.decodeIfPresent(MusicBackendKind.self, forKey: .backend) ?? .subsonic
     }
 }
 

@@ -52,8 +52,7 @@ struct Song: Codable, Identifiable, Hashable, Sendable {
     let bitRate: Int?
     let path: String?
     let playCount: Int?
-    // beats-per-minute from OpenSubsonic metadata (when the server/file exposes
-    // it). Lets AutoMix tempo-match streaming tracks without a local file.
+    // OpenSubsonic BPM, when the server has it.
     let bpm: Int?
     let starred: String?
     let contributes: String?
@@ -67,8 +66,7 @@ struct Song: Codable, Identifiable, Hashable, Sendable {
     let contributors: [Contributor]?
 }
 
-// one OpenSubsonic credit: a role (composer / producer / engineer …) + the
-// artist who filled it.
+// One OpenSubsonic credit: role + artist.
 struct Contributor: Codable, Hashable, Sendable {
     let role: String?
     let subRole: String?
@@ -81,7 +79,7 @@ struct ArtistRef: Codable, Hashable, Sendable {
 }
 
 extension Song {
-    // lossless if the file format is one of the known lossless container/codecs
+    // known lossless containers/codecs
     var isLossless: Bool {
         guard let s = suffix?.lowercased() else { return false }
         return ["flac", "wav", "aiff", "aif", "alac", "ape", "wv", "tta"].contains(s)
@@ -97,7 +95,7 @@ extension Song {
     }
 }
 
-// OpenSubsonic replayGain object on a song (values in dB / linear peak)
+// OpenSubsonic ReplayGain values.
 struct ReplayGain: Codable, Hashable, Sendable {
     let trackGain: Double?
     let albumGain: Double?
@@ -105,7 +103,7 @@ struct ReplayGain: Codable, Hashable, Sendable {
     let albumPeak: Double?
 }
 
-// a public share returned by createShare
+// Public share returned by createShare.
 struct Share: Decodable, Identifiable, Sendable {
     let id: String
     let url: String?
@@ -132,12 +130,12 @@ struct Playlist: Codable, Identifiable, Hashable, Sendable {
 struct ArtistInfo: Decodable, Sendable {
     let biography: String?
     let similarArtist: [Artist]?
-    // real artist photos from getArtistInfo2 (last.fm / spotify backed)
+    // real artist photos from getArtistInfo2
     let smallImageUrl: String?
     let mediumImageUrl: String?
     let largeImageUrl: String?
 
-    // best available real artist photo, largest first
+    // largest real artist image first
     var bestImageUrl: String? {
         for url in [largeImageUrl, mediumImageUrl, smallImageUrl] {
             if let url, !url.isEmpty { return url }
@@ -146,7 +144,7 @@ struct ArtistInfo: Decodable, Sendable {
     }
 }
 
-// structured lyrics line from OpenSubsonic getLyricsBySongId
+// Synced lyric line from getLyricsBySongId.
 struct StructuredLyricLine: Decodable, Sendable {
     let start: Int?   // milliseconds
     let value: String
@@ -164,7 +162,7 @@ struct LyricsList: Decodable, Sendable {
     let structuredLyrics: [StructuredLyrics]?
 }
 
-// parsed lyric line for display
+// Parsed lyric line for display.
 struct LyricLine: Identifiable, Hashable, Codable, Sendable {
     let id: Int
     let time: TimeInterval   // seconds; < 0 means unsynced

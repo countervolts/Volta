@@ -10,7 +10,7 @@ struct MediaItem: Codable, Identifiable, Hashable, Sendable {
     let coverArt: String?
     let sortDate: Date?
 
-    // full model references for navigation/detail
+    // Full models for navigation/detail.
     let albumRef: Album?
     let playlistRef: Playlist?
 

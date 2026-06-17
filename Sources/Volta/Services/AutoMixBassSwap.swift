@@ -2,22 +2,12 @@ import Foundation
 import AVFoundation
 import os
 
-// DJ-style bass swap for AutoMix. When two tracks overlap, both basslines playing
-// at once turns the low end into mud — so a DJ rolls the incoming track's bass off
-// and only brings it in as it takes over. This applies a time-varying high-pass to
-// the INCOMING track during the blend: its low end starts cut and opens back to
-// full as the blend completes, while the outgoing keeps its bass but recedes with
-// its volume fade. The result is a clean low end through the handover instead of a
-// boomy double-bass.
-//
-// Built like EqualizerEngine's tap: a global, lock-guarded cutoff that the per-item
-// MTAudioProcessingTap reads. Only ONE blend runs at a time, and each incoming tap
-// carries an id — it filters only while it's the *active* blend's incoming, so the
-// previous track (now playing under the next blend) keeps its bass untouched.
+// Bass Swap: high-pass the incoming track until it takes over.
+// Tap ids keep primed and active incoming tracks separate.
 final class AutoMixBassSwap {
     static let shared = AutoMixBassSwap()
 
-    static let bypassHz: Double = 20          // ≤ this = effectively transparent
+    static let bypassHz: Double = 20          // effectively transparent
     static let maxCutoffHz: Double = 200      // strongest low-end roll-off
 
     private var lock = os_unfair_lock_s()
@@ -44,7 +34,7 @@ final class AutoMixBassSwap {
         os_unfair_lock_unlock(&lock)
     }
 
-    // Set the current low-cut (Hz) — ignored unless `id` is the active blend.
+    // Ignored unless `id` is the active blend.
     func setCutoff(_ hz: Double, id: UInt64) {
         os_unfair_lock_lock(&lock)
         if id == activeID {

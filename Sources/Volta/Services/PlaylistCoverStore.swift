@@ -5,14 +5,13 @@ extension Notification.Name {
     static let playlistCoverChanged = Notification.Name("PlaylistCoverChanged")
 }
 
-// Subsonic has no endpoint to upload a playlist cover, so user-chosen covers are
-// kept on-device, keyed by playlist id, with a small in-memory cache over disk.
+// Local playlist covers; Subsonic has no upload endpoint for them.
 final class PlaylistCoverStore: @unchecked Sendable {
     static let shared = PlaylistCoverStore()
 
     private let dir: URL
     private let cache = NSCache<NSString, UIImage>()
-    private let io = DispatchQueue(label: "com.volta.playlist-covers", qos: .utility)
+    private let io = DeveloperExperiments.queue(label: "com.volta.playlist-covers", qos: .utility)
 
     private init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -25,35 +24,33 @@ final class PlaylistCoverStore: @unchecked Sendable {
         return dir.appendingPathComponent(safe).appendingPathExtension("jpg")
     }
 
-    // synchronous mem-cache hit only — cheap, safe to call during a view's init
+    // Sync memory hit only; safe during view init.
     func cachedImage(for id: String) -> UIImage? { cache.object(forKey: id as NSString) }
 
-    // a single filesystem stat; call once (e.g. on appear), not every render
+    // One filesystem stat; call from lifecycle, not every render.
     func hasCover(for id: String) -> Bool {
         cache.object(forKey: id as NSString) != nil
             || FileManager.default.fileExists(atPath: fileURL(id).path)
     }
 
-    // mem cache, then disk read off the main thread
+    // Memory first, then disk off the main thread.
     func image(for id: String) async -> UIImage? {
         if let hit = cache.object(forKey: id as NSString) { return hit }
-        return await withCheckedContinuation { cont in
-            io.async {
-                guard let data = try? Data(contentsOf: self.fileURL(id)),
-                      let img = UIImage(data: data) else {
-                    cont.resume(returning: nil); return
-                }
-                self.cache.setObject(img, forKey: id as NSString)
-                cont.resume(returning: img)
-            }
+        return await DeveloperExperiments.runBlocking(qos: .utility) {
+            guard let data = try? Data(contentsOf: self.fileURL(id)),
+                  let img = UIImage(data: data) else { return nil }
+            self.cache.setObject(img, forKey: id as NSString)
+            return img
         }
     }
 
     func set(_ image: UIImage, for id: String) {
         cache.setObject(image, forKey: id as NSString)
         let url = fileURL(id)
-        io.async {
-            let scaled = Self.downscaled(image, maxDimension: 1000)
+        runIO {
+            let scaled = DeveloperExperiments.disableRAMOptimizations
+                ? image
+                : Self.downscaled(image, maxDimension: 1000)
             if let data = scaled.jpegData(compressionQuality: 0.9) {
                 try? data.write(to: url, options: .atomic)
             }
@@ -64,11 +61,15 @@ final class PlaylistCoverStore: @unchecked Sendable {
     func remove(for id: String) {
         cache.removeObject(forKey: id as NSString)
         let url = fileURL(id)
-        io.async { try? FileManager.default.removeItem(at: url) }
+        runIO { try? FileManager.default.removeItem(at: url) }
         NotificationCenter.default.post(name: .playlistCoverChanged, object: id)
     }
 
-    // keep stored covers a sensible size — full-res camera shots are wasteful
+    private func runIO(_ operation: @escaping () -> Void) {
+        io.async(execute: operation)
+    }
+
+    // Keep camera-roll covers reasonably sized.
     private static func downscaled(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
         let longest = max(image.size.width, image.size.height)
         guard longest > maxDimension else { return image }

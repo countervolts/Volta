@@ -5,22 +5,61 @@ struct SubsonicConfig: Sendable, Hashable, Codable {
     var username: String
     var password: String
 
-    // turns user input ("demo.navidrome.org", "http://10.0.0.5:4533/") into a
-    // usable root url, defaulting to https when no scheme is given.
+    // Normalize user-entered server roots. Defaults to https when no scheme is given.
     static func normalizedURL(from raw: String) -> URL? {
+        let cleaned = sanitizedInput(raw)
+        guard !cleaned.isEmpty else { return nil }
+        let text = hasExplicitScheme(cleaned) ? cleaned : "https://" + cleaned
+        return URL(string: text)
+    }
+
+    // Whether the user explicitly typed an http:// or https:// scheme.
+    static func hasExplicitScheme(_ raw: String) -> Bool {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return text.hasPrefix("http://") || text.hasPrefix("https://")
+    }
+
+    // Server roots to try when logging in, in priority order. If the user typed
+    // a scheme we honour it exactly; otherwise we probe https first then http.
+    static func candidateURLs(from raw: String) -> [URL] {
+        let cleaned = sanitizedInput(raw)
+        guard !cleaned.isEmpty else { return [] }
+        if hasExplicitScheme(cleaned) {
+            return URL(string: cleaned).map { [$0] } ?? []
+        }
+        return ["https://" + cleaned, "http://" + cleaned].compactMap { URL(string: $0) }
+    }
+
+    // Clean up common copy/paste mistakes so the stored base URL is the server
+    // root: drop a pasted #fragment, a trailing Subsonic "/rest" API path, and
+    // any trailing slashes.
+    private static func sanitizedInput(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
-        if !text.lowercased().hasPrefix("http://") && !text.lowercased().hasPrefix("https://") {
-            text = "https://" + text
+        if let hash = text.firstIndex(of: "#") { text = String(text[..<hash]) }
+        // Strip a pasted Subsonic API path (e.g. ".../rest" or ".../rest/ping.view"),
+        // but only at a real path boundary so hosts like "my.com/restful" survive.
+        if let restRange = text.range(of: "/rest", options: .caseInsensitive) {
+            let after = text[restRange.upperBound...]
+            if let next = after.first {
+                if next == "/" || next == "." || next == "?" {
+                    text = String(text[..<restRange.lowerBound])
+                }
+            } else {
+                text = String(text[..<restRange.lowerBound])
+            }
         }
         while text.hasSuffix("/") { text.removeLast() }
-        return URL(string: text)
+        return text
     }
 }
 
 struct SubsonicClient: Sendable {
     let config: SubsonicConfig
     let session: URLSession
+
+    let backendKind: MusicBackendKind = .subsonic
+    // Reference backend: most Volta features map directly here.
+    let capabilities: MusicServiceCapabilities = .subsonicFull
 
     static let clientName = "Volta"
     static let apiVersion = "1.16.1"
@@ -54,8 +93,7 @@ struct SubsonicClient: Sendable {
         return comps.url
     }
 
-    // returns the decoded response body, mapping transport and api failures into
-    // SubsonicError. never throws anything outside SubsonicError.
+    // Decode a response and normalize failures to SubsonicError.
     func request(_ endpoint: String, query: [URLQueryItem] = []) async throws -> SubsonicEnvelope.Body {
         try await DeveloperSimulation.prepareRequest(endpoint: endpoint)
         AppLogger.shared.log("> \(endpoint)", category: .networking)
@@ -100,8 +138,8 @@ struct SubsonicClient: Sendable {
         return body
     }
 
-    // media urls (auth embedded so AVPlayer / image loaders can use them directly)
-    func coverArtURL(id: String?, size: Int? = nil) -> URL? {
+    // Auth-bearing media URLs for AVPlayer and image loaders.
+    func coverArtURL(id: String?, size: Int?) -> URL? {
         guard let id, !id.isEmpty else { return nil }
         var query = [URLQueryItem(name: "id", value: id)]
         if let size { query.append(URLQueryItem(name: "size", value: String(size))) }
@@ -110,15 +148,8 @@ struct SubsonicClient: Sendable {
 
     func streamURL(id: String) -> URL? {
         var query = [URLQueryItem(name: "id", value: id)]
-        // on cellular use the cellular quality when one is set (>0); otherwise the
-        // Wi-Fi quality. NetworkMonitor mirrors the current type into UserDefaults.
-        let onCellular = UserDefaults.standard.bool(forKey: "networkIsCellular")
-        let cellBitrate = UserDefaults.standard.integer(forKey: "streamingBitrateCell")
-        let wifiBitrate = UserDefaults.standard.integer(forKey: "streamingBitrate")
-        var bitrate = (onCellular && cellBitrate > 0) ? cellBitrate : wifiBitrate
-        // Performance Mode caps streaming quality (overrides the user pick)
-        let cap = PerformanceMode.streamBitrateCap
-        if cap > 0 { bitrate = bitrate > 0 ? min(bitrate, cap) : cap }
+        // Shared quality resolver keeps every backend on the same rules.
+        let bitrate = StreamingPreferences.streamBitrateKbps
         if bitrate > 0 {
             query.append(URLQueryItem(name: "maxBitRate", value: String(bitrate)))
         }
@@ -126,12 +157,10 @@ struct SubsonicClient: Sendable {
         return makeURL(endpoint: "stream", query: query)
     }
 
-    // URL used for downloads — honours the download bitrate setting, not the
-    // streaming one. When original (0) no transcoding is requested, so the
-    // downloaded size matches the song's reported size and progress is accurate.
+    // Download URL uses download quality, not streaming quality.
     func downloadURL(id: String) -> URL? {
         var query = [URLQueryItem(name: "id", value: id)]
-        let bitrate = UserDefaults.standard.integer(forKey: "downloadBitrate")
+        let bitrate = StreamingPreferences.downloadBitrateKbps
         if bitrate > 0 {
             query.append(URLQueryItem(name: "maxBitRate", value: String(bitrate)))
         }
@@ -139,15 +168,16 @@ struct SubsonicClient: Sendable {
         return makeURL(endpoint: "stream", query: query)
     }
 
-    // Untranscoded original stream URL. Used for short-prefix BPM analysis where
-    // the file extension must match the bytes so AVFoundation can decode them.
+    // Exact original URL for short-prefix BPM analysis.
     func originalStreamURL(id: String) -> URL? {
         makeURL(endpoint: "stream", query: [URLQueryItem(name: "id", value: id)])
     }
 
     private func appendTranscodingFormat(to query: inout [URLQueryItem]) {
-        let format = UserDefaults.standard.string(forKey: "transcodingFormat") ?? "raw"
-        guard format != "raw" else { return }
+        guard let format = StreamingPreferences.transcodingFormat else { return }
         query.append(URLQueryItem(name: "format", value: format))
     }
 }
+
+// Conformance lives on the API methods and URL builders above.
+extension SubsonicClient: MusicService {}

@@ -92,19 +92,19 @@ struct MainTabView: View {
     @available(iOS 26.0, *)
     private var modernTabView: some View {
         TabView(selection: tabSelection) {
-            Tab("Home", systemImage: Symbols.home, value: 0) {
+            Tab(L(.tab_home), systemImage: Symbols.home, value: 0) {
                 HomeView(path: $homePath)
             }
-            Tab("Library", systemImage: Symbols.library, value: 1) {
+            Tab(L(.tab_library), systemImage: Symbols.library, value: 1) {
                 LibraryView(path: $libraryPath)
             }
-            Tab("Playlists", systemImage: Symbols.playlists, value: 2) {
+            Tab(L(.tab_playlists), systemImage: Symbols.playlists, value: 2) {
                 PlaylistsView(path: $playlistsPath)
             }
-            Tab("Stats", systemImage: Symbols.stats, value: 3) {
+            Tab(L(.tab_stats), systemImage: Symbols.stats, value: 3) {
                 StatsView()
             }
-            Tab("Search", systemImage: Symbols.search, value: 4, role: .search) {
+            Tab(L(.tab_search), systemImage: Symbols.search, value: 4, role: .search) {
                 SearchView(path: $searchPath)
             }
         }
@@ -117,31 +117,31 @@ struct MainTabView: View {
             legacyTabPage {
                 HomeView(path: $homePath)
             }
-                .tabItem { Label("Home", systemImage: Symbols.home) }
+                .tabItem { Label(L(.tab_home), systemImage: Symbols.home) }
                 .tag(0)
 
             legacyTabPage {
                 LibraryView(path: $libraryPath)
             }
-                .tabItem { Label("Library", systemImage: Symbols.library) }
+                .tabItem { Label(L(.tab_library), systemImage: Symbols.library) }
                 .tag(1)
 
             legacyTabPage {
                 PlaylistsView(path: $playlistsPath)
             }
-                .tabItem { Label("Playlists", systemImage: Symbols.playlists) }
+                .tabItem { Label(L(.tab_playlists), systemImage: Symbols.playlists) }
                 .tag(2)
 
             legacyTabPage {
                 StatsView()
             }
-                .tabItem { Label("Stats", systemImage: Symbols.stats) }
+                .tabItem { Label(L(.tab_stats), systemImage: Symbols.stats) }
                 .tag(3)
 
             legacyTabPage {
                 SearchView(path: $searchPath)
             }
-                .tabItem { Label("Search", systemImage: Symbols.search) }
+                .tabItem { Label(L(.tab_search), systemImage: Symbols.search) }
                 .tag(4)
         }
         .tint(Theme.accent)

@@ -1,6 +1,6 @@
 import Foundation
 
-// Exports locally logged play events as JSON + CSV for the user to keep or analyse.
+// JSON/CSV export for local play history.
 enum StatsExporter {
     static func exportURLs() throws -> [URL] {
         let events = StatsStore.shared.allEvents()

@@ -1,25 +1,17 @@
 import SwiftUI
 
-// top-right avatar that opens a liquid glass contextual menu: switch servers,
-// log out, open settings. shown on every tab.
+// Top-right server/account menu.
 struct ServerMenuButton: View {
     var onOpenSettings: () -> Void
 
     @Environment(AppState.self) private var appState
+    @State private var showSwitcher = false
 
     var body: some View {
         Menu {
-            let servers = appState.servers()
-            if servers.count > 1 {
-                Menu {
-                    ForEach(servers) { server in
-                        Button {
-                            appState.switchTo(server)
-                        } label: {
-                            Label(server.displayName, systemImage: Symbols.server)
-                        }
-                        .disabled(server.id == appState.currentServer?.id)
-                    }
+            if appState.servers().count > 1 {
+                Button {
+                    showSwitcher = true
                 } label: {
                     Label("Switch Server", systemImage: Symbols.switchServer)
                 }
@@ -44,5 +36,8 @@ struct ServerMenuButton: View {
                 .glassCircle()
         }
         .menuStyle(.button)
+        .sheet(isPresented: $showSwitcher) {
+            ServerSwitcherSheet()
+        }
     }
 }

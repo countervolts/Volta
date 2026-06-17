@@ -1,7 +1,6 @@
 import UIKit
 
-// Presents the system share sheet from the top-most view controller. Works even
-// when invoked from inside a sheet / full-screen cover (e.g. the now playing screen).
+// System share sheet from the visible view controller.
 enum ShareSheet {
     @MainActor
     static func present(_ items: [Any]) {

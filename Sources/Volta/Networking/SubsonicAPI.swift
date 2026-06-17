@@ -34,8 +34,7 @@ extension SubsonicClient {
         return body.musicFolders?.musicFolder ?? []
     }
 
-    // top-level directories within a music folder (nil = all folders combined),
-    // plus any loose songs sitting at the root.
+    // Root directories for one folder, or all folders when nil.
     func indexes(musicFolderId: String?) async throws -> [BrowseEntry] {
         var query: [URLQueryItem] = []
         if let musicFolderId, !musicFolderId.isEmpty {
@@ -47,7 +46,7 @@ extension SubsonicClient {
         return dirs + songs
     }
 
-    // contents of one directory: sub-directories first, then songs.
+    // Directory contents: folders first, then songs.
     func musicDirectory(id: String) async throws -> [BrowseEntry] {
         let body = try await request("getMusicDirectory", query: [URLQueryItem(name: "id", value: id)])
         let children = body.directory?.child ?? []
@@ -81,7 +80,7 @@ extension SubsonicClient {
         try await albumList(type: "frequent", size: size)
     }
 
-    func allAlbums(size: Int = 500, offset: Int = 0) async throws -> [Album] {
+    func allAlbums(size: Int, offset: Int) async throws -> [Album] {
         try await albumList(type: "alphabeticalByName", size: size, offset: offset)
     }
 
@@ -100,15 +99,13 @@ extension SubsonicClient {
         return body.playlist
     }
 
-    // create a playlist seeded with an ordered list of songs (used by the AI
-    // playlist maker). Subsonic's createPlaylist accepts repeated songId items.
+    // Create a playlist with an ordered song seed.
     func createPlaylist(name: String, songIDs: [String]) async throws -> Playlist? {
         var query = [URLQueryItem(name: "name", value: name)]
         query.append(contentsOf: songIDs.map { URLQueryItem(name: "songId", value: $0) })
         let body = try await request("createPlaylist", query: query)
         if let pl = body.playlist { return pl }
-        // some servers return an empty body on createPlaylist; fall back to
-        // locating the newly created playlist by name so the caller still gets it.
+        // Some servers return no body; find the new playlist by name.
         return try? await playlists().first { $0.name == name }
     }
 
@@ -169,16 +166,10 @@ extension SubsonicClient {
     }
 
     func albums(ids: [String]) async throws -> [Album] {
-        try await withThrowingTaskGroup(of: Album?.self) { group in
-            for id in ids {
-                group.addTask { try? await self.album(id: id) }
-            }
-            var result: [Album] = []
-            for try await album in group {
-                if let album { result.append(album) }
-            }
-            return result
+        let albums = await DeveloperExperiments.runConcurrently(ids, defaultMaxConcurrent: ids.count) { id in
+            try? await self.album(id: id)
         }
+        return albums.compactMap { $0 }
     }
 
     func star(id: String) async throws {
@@ -207,7 +198,7 @@ extension SubsonicClient {
         return body.randomSongs?.song ?? []
     }
 
-    func songsByGenre(_ genre: String, count: Int = 50, offset: Int = 0) async throws -> [Song] {
+    func songsByGenre(_ genre: String, count: Int, offset: Int) async throws -> [Song] {
         let body = try await request("getSongsByGenre", query: [
             URLQueryItem(name: "genre", value: genre),
             URLQueryItem(name: "count", value: String(count)),
@@ -250,7 +241,7 @@ extension SubsonicClient {
             URLQueryItem(name: "size", value: "1"),
             URLQueryItem(name: "offset", value: "0"),
         ])
-        // We can't get exact counts without a stats endpoint; return what we can
+        // No stats endpoint here; return the cheap counts.
         return (artistCount, albumBody.albumList2?.album?.count ?? 0, 0)
     }
 
@@ -268,15 +259,13 @@ extension SubsonicClient {
         return body.lyricsList
     }
 
-    // whether the server has sharing enabled (getShares succeeds). Used to decide
-    // if the Share action should be offered at all.
+    // Sharing is available when getShares succeeds.
     func sharingAvailable() async -> Bool {
         do { _ = try await request("getShares"); return true }
         catch { return false }
     }
 
-    // create a public share link for a song/album/playlist; returns the URL if the
-    // server has sharing enabled, otherwise nil.
+    // Public share link, when the server allows it.
     func createShare(id: String) async throws -> URL? {
         let body = try await request("createShare", query: [URLQueryItem(name: "id", value: id)])
         guard let urlString = body.shares?.share?.first?.url,

@@ -1,16 +1,15 @@
 import Foundation
 
-// portable playlist file: name + comment + ordered song ids
+// Portable playlist payload.
 struct ExportedPlaylist: Codable, Sendable {
     let name: String
     let comment: String?
     let songIDs: [String]
 }
 
-// Exports all server playlists to a JSON file and re-creates them from one.
-// Songs are matched by their server id, so import targets the same library.
+// Exports playlists as JSON and restores them by server song id.
 enum PlaylistTransfer {
-    static func exportURL(client: SubsonicClient) async throws -> URL {
+    static func exportURL(client: any MusicService) async throws -> URL {
         let playlists = try await client.playlists()
         var exported: [ExportedPlaylist] = []
         for playlist in playlists {
@@ -31,7 +30,7 @@ enum PlaylistTransfer {
     }
 
     @discardableResult
-    static func importPlaylists(from url: URL, client: SubsonicClient) async throws -> Int {
+    static func importPlaylists(from url: URL, client: any MusicService) async throws -> Int {
         let data = try Data(contentsOf: url)
         let imported = try JSONDecoder().decode([ExportedPlaylist].self, from: data)
         var created = 0

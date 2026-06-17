@@ -1,7 +1,6 @@
 import SwiftUI
 
-// Apple Music-style long-press menu for an album card: enlarges the cover in a
-// preview and offers play / shuffle / queue / download / favourite actions.
+// Long-press album menu with a larger cover preview.
 struct AlbumContextMenu: ViewModifier {
     let album: Album
     var onAddToPlaylist: ((Song) -> Void)? = nil
@@ -12,20 +11,25 @@ struct AlbumContextMenu: ViewModifier {
 
     func body(content: Content) -> some View {
         content.contextMenu {
-            Button { play(shuffled: false) } label: { Label("Play", systemImage: Symbols.play) }
-            Button { play(shuffled: true) } label: { Label("Shuffle", systemImage: Symbols.shuffle) }
+            Button { play(shuffled: false) } label: { Label(L(.action_play), systemImage: Symbols.play) }
+            Button { play(shuffled: true) } label: { Label(L(.action_shuffle), systemImage: Symbols.shuffle) }
             Section {
                 Button { queue(next: true) } label: {
-                    Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                    Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
                 }
                 Button { queue(next: false) } label: {
-                    Label("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward")
+                    Label(L(.action_add_to_queue), systemImage: "text.line.last.and.arrowtriangle.forward")
                 }
             }
             Section {
-                Button { download() } label: { Label("Download", systemImage: Symbols.download) }
-                Button { favorite() } label: { Label("Favorite", systemImage: Symbols.starEmpty) }
-                Button { showStats = true } label: { Label("View Stats", systemImage: Symbols.stats) }
+                Button { download() } label: { Label(L(.action_download), systemImage: Symbols.download) }
+                Button { favorite() } label: { Label(L(.action_favorite), systemImage: Symbols.starEmpty) }
+                Button { showStats = true } label: { Label(L(.action_view_stats), systemImage: Symbols.stats) }
+            }
+            Section {
+                Button(role: .destructive) { removeDownload() } label: {
+                    Label(L(.action_remove_download), systemImage: Symbols.trash)
+                }
             }
         } preview: {
             VStack(alignment: .leading, spacing: 10) {
@@ -81,6 +85,20 @@ struct AlbumContextMenu: ViewModifier {
     private func favorite() {
         Task { try? await appState.client?.star(id: album.id) }
     }
+
+    private func removeDownload() {
+        Task {
+            let songs = await fetchSongs()
+            var removed = 0
+            for song in songs where DownloadService.shared.state(for: song) == .downloaded {
+                DownloadService.shared.removeDownload(for: song)
+                removed += 1
+            }
+            if removed == 0 {
+                VoltaNotificationCenter.shared.post(L(.notif_no_downloads_to_remove), tone: .info)
+            }
+        }
+    }
 }
 
 private struct AlbumStatsSheet: View {
@@ -91,21 +109,21 @@ private struct AlbumStatsSheet: View {
         NavigationStack {
             List {
                 Section(album.name) {
-                    statRow("Artist", album.displayArtist)
-                    statRow("Songs", album.songCount.map(String.init))
-                    statRow("Duration", album.duration.map(formatDuration))
-                    statRow("Plays", album.playCount.map(String.init))
-                    statRow("Year", album.year.map(String.init))
-                    statRow("Genre", album.genre)
-                    statRow("Added", album.createdDate?.formatted(date: .abbreviated, time: .omitted))
-                    statRow("Label", album.recordLabel)
+                    statRow(L(.media_artist), album.displayArtist)
+                    statRow(L(.media_songs), album.songCount.map(String.init))
+                    statRow(L(.media_duration), album.duration.map(formatDuration))
+                    statRow(L(.media_plays), album.playCount.map(String.init))
+                    statRow(L(.media_year), album.year.map(String.init))
+                    statRow(L(.media_genre), album.genre)
+                    statRow(L(.media_added), album.createdDate?.formatted(date: .abbreviated, time: .omitted))
+                    statRow(L(.media_label), album.recordLabel)
                 }
             }
-            .navigationTitle("Album Stats")
+            .navigationTitle(L(.album_stats_title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button(L(.action_done)) { dismiss() }
                 }
             }
         }

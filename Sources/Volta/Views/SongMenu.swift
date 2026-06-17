@@ -6,10 +6,7 @@ enum SongMenuSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
-// Native SwiftUI Menu for song actions. The system renders it as a Liquid Glass
-// contextual menu (same look as the top-right account menu). The Download /
-// Favorite / Share row uses a ControlGroup so the system lays them out as the
-// compact icon row at the top, Apple Music style.
+// Native song action menu.
 //
 // Usage:
 //   SongMenu(song: song, onGoToArtist: ..., onAddToPlaylist: ...) {
@@ -22,7 +19,7 @@ struct SongMenu<Trigger: View>: View {
     var onGoToArtist: (() -> Void)? = nil
     var onAddToPlaylist: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
-    var deleteLabel: String = "Delete"
+    var deleteLabel: String? = nil
 
     @ViewBuilder var label: () -> Trigger
 
@@ -44,19 +41,19 @@ struct SongMenu<Trigger: View>: View {
                 Button {
                     audio.toggleStar(songID: song.id)
                 } label: {
-                    Label(isStarred ? "Unfavorite" : "Favorite",
+                    Label(isStarred ? L(.action_unfavorite) : L(.action_favorite),
                           systemImage: isStarred ? Symbols.star : Symbols.starEmpty)
                 }
                 Button {
                     tasteStore.toggleLove(song.id)
                 } label: {
-                    Label(taste == .loved ? "Unlove" : "Love",
+                    Label(taste == .loved ? L(.action_unlove) : L(.action_love),
                           systemImage: taste == .loved ? "heart.fill" : "heart")
                 }
                 Button {
                     tasteStore.toggleDislike(song.id)
                 } label: {
-                    Label(taste == .disliked ? "Remove Dislike" : "Dislike",
+                    Label(taste == .disliked ? L(.action_remove_dislike) : L(.action_dislike),
                           systemImage: taste == .disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                 }
             }
@@ -65,16 +62,16 @@ struct SongMenu<Trigger: View>: View {
                 Button {
                     audio.playNext(song)
                 } label: {
-                    Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                    Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
                 }
                 Button {
                     audio.addToQueue(song)
                 } label: {
-                    Label("Play Last", systemImage: "text.line.last.and.arrowtriangle.forward")
+                    Label(L(.action_play_last), systemImage: "text.line.last.and.arrowtriangle.forward")
                 }
                 if let add = onAddToPlaylist {
                     Button(action: add) {
-                        Label("Add to Playlist", systemImage: Symbols.addToPlaylist)
+                        Label(L(.action_add_to_playlist), systemImage: Symbols.addToPlaylist)
                     }
                 }
             }
@@ -83,32 +80,32 @@ struct SongMenu<Trigger: View>: View {
                 Button {
                     sheet = .info
                 } label: {
-                    Label("Info", systemImage: Symbols.info)
+                    Label(L(.action_info), systemImage: Symbols.info)
                 }
                 if let albumAction = onGoToAlbum {
                     Button(action: albumAction) {
-                        Label("Go to Album", systemImage: "square.stack")
+                        Label(L(.action_go_to_album), systemImage: "square.stack")
                     }
                 }
                 if let artistAction = onGoToArtist {
                     Button(action: artistAction) {
-                        Label("Go to Artist", systemImage: "music.mic")
+                        Label(L(.action_go_to_artist), systemImage: "music.mic")
                     }
                 }
                 Button {
                     sheet = .credits
                 } label: {
-                    Label("View Credits", systemImage: "list.star")
+                    Label(L(.action_view_credits), systemImage: "list.star")
                 }
                 Button(action: shareSong) {
-                    Label("Share", systemImage: Symbols.share)
+                    Label(L(.action_share), systemImage: Symbols.share)
                 }
             }
 
             if let del = onDelete {
                 Section {
                     Button(role: .destructive, action: del) {
-                        Label(deleteLabel, systemImage: Symbols.trash)
+                        Label(deleteLabel ?? L(.action_delete), systemImage: Symbols.trash)
                     }
                 }
             }
@@ -148,11 +145,12 @@ struct SongMenu<Trigger: View>: View {
         case .downloaded:    return "checkmark.circle.fill"
         }
     }
+    @MainActor
     private var downloadLabel: String {
         switch dlState {
-        case .notDownloaded: return "Download"
-        case .downloading:   return "Cancel"
-        case .downloaded:    return "Remove"
+        case .notDownloaded: return L(.action_download)
+        case .downloading:   return L(.action_cancel)
+        case .downloaded:    return L(.action_remove)
         }
     }
 }
@@ -165,7 +163,7 @@ extension SongMenu where Trigger == AnyView {
         onGoToArtist: (() -> Void)? = nil,
         onAddToPlaylist: (() -> Void)? = nil,
         onDelete: (() -> Void)? = nil,
-        deleteLabel: String = "Delete"
+        deleteLabel: String? = nil
     ) {
         self.init(
             song: song,

@@ -15,7 +15,6 @@ struct DeveloperToolsView: View {
     @AppStorage(DeveloperSimulation.Keys.slowServerDelayMS) private var slowServerDelayMS = 1200
     @AppStorage(DeveloperSimulation.Keys.expiredSession) private var expiredSession = false
     @AppStorage(DeveloperSimulation.Keys.noNetwork) private var noNetwork = false
-    @AppStorage("developerPerformanceOverlay") private var developerPerformanceOverlay = false
 
     @State private var report = "Ready"
     @State private var isRunning = false
@@ -90,11 +89,6 @@ struct DeveloperToolsView: View {
 
     private var runtimeSection: some View {
         Section {
-            Toggle(isOn: $developerPerformanceOverlay) {
-                Label("Live Performance Overlay", systemImage: "chart.xyaxis.line")
-            }
-            .tint(Theme.accent)
-
             ForEach(runtimeMetrics) { metric in
                 LabeledContent(metric.name, value: metric.value)
                     .foregroundStyle(Theme.primaryText)

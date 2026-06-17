@@ -4,8 +4,6 @@
 <dict>
     <key>CFBundleDisplayName</key>
     <string>Volta</string>
-    <!-- loose-file app icon: xtool does not compile asset catalogs, so icons are
-         injected into the app-bundle root by xtool/deploy.sh and declared here. -->
     <key>CFBundleIcons</key>
     <dict>
         <key>CFBundlePrimaryIcon</key>
@@ -19,9 +17,9 @@
         </dict>
     </dict>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.1</string>
+    <string>1.0.0</string>
     <key>CFBundleVersion</key>
-    <string>5</string>
+    <string>1</string>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UISupportedInterfaceOrientations</key>

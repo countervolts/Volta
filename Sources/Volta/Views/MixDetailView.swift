@@ -55,13 +55,13 @@ struct MixDetailView: View {
             switch sheet {
             case .addToPlaylist(let song):
                 AddToPlaylistSheet(song: song, onAdded: { name in
-                    showToast("Added to \(name)")
+                    showToast(L(.home_saved_to, name))
                 })
             case .album(let album):
                 NavigationStack {
                     AlbumDetailView(album: album)
                         .toolbar { ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { activeSheet = nil }.foregroundStyle(Theme.accent)
+                            Button(L(.action_done)) { activeSheet = nil }.foregroundStyle(Theme.accent)
                         } }
                 }
                 .preferredColorScheme(Theme.colorScheme)
@@ -69,7 +69,7 @@ struct MixDetailView: View {
                 NavigationStack {
                     ArtistDetailView(artist: artist)
                         .toolbar { ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { activeSheet = nil }.foregroundStyle(Theme.accent)
+                            Button(L(.action_done)) { activeSheet = nil }.foregroundStyle(Theme.accent)
                         } }
                 }
                 .preferredColorScheme(Theme.colorScheme)
@@ -98,15 +98,15 @@ struct MixDetailView: View {
 
     private var infoSection: some View {
         VStack(spacing: 6) {
-            Text(mix.title)
+            Text(mix.localizedTitle)
                 .font(.title2.bold())
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
-            Text(mix.subtitle)
+            Text(mix.localizedSubtitle)
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
-            Text("\(mix.songs.count) songs")
+            Text(L(.home_song_count, mix.songs.count))
                 .font(.footnote)
                 .foregroundStyle(.white.opacity(0.45))
         }
@@ -118,7 +118,7 @@ struct MixDetailView: View {
     private var actionRow: some View {
         HStack(spacing: 14) {
             Button {
-                appState.audioPlayer.playQueue(mix.songs.shuffled(), startIndex: 0, source: mix.title)
+                appState.audioPlayer.playQueue(mix.songs.shuffled(), startIndex: 0, source: mix.localizedTitle)
             } label: {
                 Image(systemName: Symbols.shuffle)
                     .font(.system(size: 16, weight: .semibold))
@@ -129,11 +129,11 @@ struct MixDetailView: View {
             .buttonStyle(.plain)
 
             Button {
-                appState.audioPlayer.playQueue(mix.songs, startIndex: 0, source: mix.title)
+                appState.audioPlayer.playQueue(mix.songs, startIndex: 0, source: mix.localizedTitle)
             } label: {
                 HStack(spacing: 7) {
                     Image(systemName: Symbols.play).font(.system(size: 14, weight: .bold))
-                    Text("Play").font(.subheadline.weight(.semibold))
+                    Text(L(.action_play)).font(.subheadline.weight(.semibold))
                 }
                 .foregroundStyle(.black)
                 .frame(maxWidth: .infinity)
@@ -158,13 +158,12 @@ struct MixDetailView: View {
                     index: i + 1,
                     isCurrentlyPlaying: appState.audioPlayer.currentSong?.id == song.id,
                     onTap: {
-                        appState.audioPlayer.playQueue(mix.songs, startIndex: i, source: mix.title)
+                        appState.audioPlayer.playQueue(mix.songs, startIndex: i, source: mix.localizedTitle)
                     },
                     showArtist: true,
                     leadingArtwork: showTrackArtwork,
                     onSwipePlayNext: {
                         appState.audioPlayer.playNext(song)
-                        showToast("Playing Next")
                     }
                 ) {
                     SongMenu(

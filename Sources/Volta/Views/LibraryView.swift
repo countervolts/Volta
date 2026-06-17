@@ -4,6 +4,7 @@ import UIKit
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
     @State private var vm = LibraryViewModel()
+    @State private var hiddenAlbums = HiddenAlbumStore.shared
     @Binding var path: [LibraryRoute]
     @Namespace private var heroNamespace
     @AppStorage("albumSortOrder") private var albumSortOrder = "alphabetical"
@@ -58,6 +59,9 @@ struct LibraryView: View {
             .onChange(of: vm.source) { _, _ in exitSelection() }
             .onChange(of: albumSortOrder) { _, value in
                 vm.setSort(LibraryViewModel.sortOrder(from: value))
+            }
+            .onChange(of: hiddenAlbums.revision) { _, _ in
+                exitSelection()
             }
         }
         .tint(Theme.accent)
@@ -350,7 +354,7 @@ struct LibraryView: View {
             Button {
                 appState.audioPlayer.playQueue(vm.filteredSongs, startIndex: 0, source: "Library Songs")
             } label: {
-                Label("Play", systemImage: Symbols.play)
+                Label(L(.action_play), systemImage: Symbols.play)
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
@@ -362,7 +366,7 @@ struct LibraryView: View {
             Button {
                 appState.audioPlayer.playQueue(vm.filteredSongs.shuffled(), startIndex: 0, source: "Library Songs")
             } label: {
-                Label("Shuffle", systemImage: Symbols.shuffle)
+                Label(L(.action_shuffle), systemImage: Symbols.shuffle)
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
@@ -409,14 +413,17 @@ struct LibraryView: View {
                 leadingArtwork: true,
                 onSwipePlayNext: {
                     appState.audioPlayer.playNext(song)
-                    showToast("Playing Next")
                 }
             ) {
                 SongMenu(
                     song: song,
                     onGoToAlbum: song.albumId == nil ? nil : { goToAlbum(song) },
                     onGoToArtist: song.artistId == nil ? nil : { goToArtist(song) },
-                    onAddToPlaylist: { addToPlaylistSong = song }
+                    onAddToPlaylist: { addToPlaylistSong = song },
+                    onDelete: vm.source == .downloaded ? {
+                        DownloadService.shared.removeDownload(for: song)
+                    } : nil,
+                    deleteLabel: L(.action_remove_download)
                 )
             }
             .padding(.horizontal, Theme.Layout.screenPadding)
@@ -451,7 +458,7 @@ struct LibraryView: View {
     private var selectionBar: some View {
         VStack(spacing: 14) {
             HStack {
-                Button("Done") { exitSelection() }
+                Button(L(.action_done)) { exitSelection() }
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.accent)
                 Spacer()
@@ -465,7 +472,7 @@ struct LibraryView: View {
                     .foregroundStyle(Theme.accent)
             }
             HStack(spacing: 0) {
-                batchButton("Play Next", "text.line.first.and.arrowtriangle.forward") {
+                batchButton(L(.action_play_next), "text.line.first.and.arrowtriangle.forward") {
                     appState.audioPlayer.playNext(selectedSongs)
                     finishBatch("Playing \(selectedSongs.count) next")
                 }
@@ -476,12 +483,20 @@ struct LibraryView: View {
                 batchButton("Playlist", Symbols.addToPlaylist) {
                     showBatchPlaylistSheet = true
                 }
-                batchButton("Download", Symbols.download) {
-                    let songs = selectedSongs
-                    for s in songs where DownloadService.shared.state(for: s) == .notDownloaded {
-                        DownloadService.shared.download(song: s)
+                if vm.source == .downloaded {
+                    batchButton(L(.action_remove), Symbols.trash) {
+                        let songs = selectedSongs
+                        for s in songs { DownloadService.shared.removeDownload(for: s) }
+                        exitSelection()
                     }
-                    finishBatch("Downloading \(songs.count)")
+                } else {
+                    batchButton(L(.action_download), Symbols.download) {
+                        let songs = selectedSongs
+                        for s in songs where DownloadService.shared.state(for: s) == .notDownloaded {
+                            DownloadService.shared.download(song: s)
+                        }
+                        finishBatch("Downloading \(songs.count)")
+                    }
                 }
             }
         }

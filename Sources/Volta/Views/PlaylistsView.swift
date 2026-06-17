@@ -970,7 +970,6 @@ private struct SmartPlaylistDetailView: View {
                     leadingArtwork: showTrackArtwork,
                     onSwipePlayNext: {
                         appState.audioPlayer.playNext(song)
-                        showToast("Playing Next")
                     }
                 ) {
                     SongMenu(

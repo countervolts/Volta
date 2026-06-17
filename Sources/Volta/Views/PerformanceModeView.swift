@@ -1,8 +1,6 @@
 import SwiftUI
 
-// Battery-saver submenu. The master switch turns Performance Mode on; the
-// per-feature toggles choose what it overrides. Overrides never rewrite the
-// user's real settings — they're applied at each read point in PerformanceMode.
+// Battery-saver overrides. User settings stay untouched.
 struct PerformanceModeView: View {
     @AppStorage("performanceModeEnabled") private var enabled = false
 
