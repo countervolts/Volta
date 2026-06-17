@@ -56,11 +56,11 @@ struct StatsView: View {
     private func exportStats() {
         do {
             let urls = try StatsExporter.exportURLs()
-            VoltaNotificationCenter.shared.post("Stats exported", tone: .success)
+            VoltaNotificationCenter.shared.post(L(.notif_stats_exported), tone: .success)
             ShareSheet.present(urls)
         } catch {
             AppLogger.shared.log("Stats export failed: \(error.localizedDescription)", category: .other, level: .error)
-            VoltaNotificationCenter.shared.post("Stats export failed", tone: .error)
+            VoltaNotificationCenter.shared.post(L(.notif_stats_export_failed), tone: .error)
         }
     }
 

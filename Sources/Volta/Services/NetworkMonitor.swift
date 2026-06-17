@@ -13,7 +13,7 @@ final class NetworkMonitor {
     var isCellular: Bool { connection == .cellular }
 
     private let monitor = NWPathMonitor()
-    private let queue = DispatchQueue(label: "com.ayo.music.network-monitor")
+    private let queue = DeveloperExperiments.queue(label: "com.ayo.music.network-monitor")
     private var onChange: [(Connection) -> Void] = []
 
     private init() {

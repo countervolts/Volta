@@ -56,7 +56,7 @@ final class StatsViewModel {
     var period: StatsPeriod = .allTime
     var offset: Int = 0   // navigate backwards (0 = current)
 
-    // computed stats refreshed when period/offset changes
+    // refreshed when period/offset changes
     private(set) var totalPlays: Int = 0
     private(set) var totalSeconds: Int = 0
     private(set) var uniqueSongs: Int = 0
@@ -205,8 +205,7 @@ final class StatsViewModel {
         var dur: [String: Int] = [:]
         var meta: [String: (String, String?)] = [:]
         for e in events {
-            // group by the primary artist so "Artist1, Artist2" features count toward
-            // the lead artist instead of becoming their own bogus artist entry
+            // Group features under the lead artist.
             let key = Self.primaryArtist(e.artist)
             plays[key, default: 0] += 1
             dur[key, default: 0] += e.duration
@@ -220,7 +219,7 @@ final class StatsViewModel {
             }
     }
 
-    // the lead artist from a combined credit like "A, B" / "A feat. B" / "A & B"
+    // Lead artist from "A, B" / "A feat. B" / "A & B".
     static func primaryArtist(_ s: String) -> String {
         var name = s
         let separators = [",", " feat.", " feat ", " ft.", " ft ", " featuring ", " & ", " x ", ";", " with "]

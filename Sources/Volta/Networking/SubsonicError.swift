@@ -1,7 +1,6 @@
 import Foundation
 
-// errors are split so the login screen can react differently to an unreachable
-// server vs. bad credentials, per the spec.
+// Split enough for login to distinguish network vs. credential failures.
 enum SubsonicError: LocalizedError, Sendable, Equatable {
     case serverUnreachable
     case invalidCredentials

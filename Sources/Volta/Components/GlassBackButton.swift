@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-// Keeps edge swipe-back working while avoiding mid-transition pops.
+// Back affordance that keeps edge-swipe intact.
 struct SwipeBackEnabler: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> _VC { _VC() }
     func updateUIViewController(_ v: _VC, context: Context) {}

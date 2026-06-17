@@ -3,44 +3,162 @@ import Darwin
 import SwiftUI
 import UIKit
 
+enum PerformanceOverlayItem: String, CaseIterable, Identifiable {
+    case frameRate
+    case frameTime
+    case frameChart
+    case memory
+    case cpu
+    case threads
+    case cpuPower
+    case thermal
+    case battery
+    case lowPower
+    case queue
+    case queueIndex
+    case transition
+    case autoplay
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .frameRate: return "Frame Rate"
+        case .frameTime: return "Frame Time"
+        case .frameChart: return "Frame Chart"
+        case .memory: return "RAM"
+        case .cpu: return "CPU"
+        case .threads: return "Threads"
+        case .cpuPower: return "CPU Power"
+        case .thermal: return "Thermal State"
+        case .battery: return "Battery"
+        case .lowPower: return "Low Power Mode"
+        case .queue: return "Queue Length"
+        case .queueIndex: return "Queue Index"
+        case .transition: return "Transition"
+        case .autoplay: return "Autoplay"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .frameRate: return "FPS"
+        case .frameTime: return "Frame"
+        case .frameChart: return "Chart"
+        case .memory: return "RAM"
+        case .cpu: return "CPU"
+        case .threads: return "Thr"
+        case .cpuPower: return "CPU Pwr"
+        case .thermal: return "Therm"
+        case .battery: return "Batt"
+        case .lowPower: return "LowPwr"
+        case .queue: return "Q"
+        case .queueIndex: return "Idx"
+        case .transition: return "Trans"
+        case .autoplay: return "Auto"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .frameRate: return "Current FPS and VSync mode."
+        case .frameTime: return "Frame duration in milliseconds."
+        case .frameChart: return "Recent frame pacing graph."
+        case .memory: return "Current app memory footprint."
+        case .cpu: return "Estimated process CPU load."
+        case .threads: return "Active process threads over total threads."
+        case .cpuPower: return "Approximate CPU power draw."
+        case .thermal: return "System thermal pressure."
+        case .battery: return "Battery level and charging state."
+        case .lowPower: return "System Low Power Mode state."
+        case .queue: return "Number of queued tracks."
+        case .queueIndex: return "Current queue position."
+        case .transition: return "Active playback transition mode."
+        case .autoplay: return "Autoplay mode."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .frameRate: return "speedometer"
+        case .frameTime: return "timer"
+        case .frameChart: return "chart.xyaxis.line"
+        case .memory: return "memorychip"
+        case .cpu: return "cpu"
+        case .threads: return "cpu.fill"
+        case .cpuPower: return "bolt"
+        case .thermal: return "thermometer.medium"
+        case .battery: return "battery.75percent"
+        case .lowPower: return "leaf"
+        case .queue: return "text.line.first.and.arrowtriangle.forward"
+        case .queueIndex: return "number"
+        case .transition: return "point.topleft.down.curvedto.point.bottomright.up"
+        case .autoplay: return "infinity"
+        }
+    }
+
+    var isGridMetric: Bool {
+        switch self {
+        case .frameRate, .frameTime, .frameChart: return false
+        default: return true
+        }
+    }
+}
+
+enum PerformanceOverlayConfiguration {
+    static let itemsKey = "performanceOverlayItems"
+    static let defaultRaw = PerformanceOverlayItem.allCases.map(\.rawValue).joined(separator: ",")
+    private static let legacyDefaultRaw = PerformanceOverlayItem.allCases
+        .filter { $0 != .threads }
+        .map(\.rawValue)
+        .joined(separator: ",")
+
+    static func items(from raw: String) -> [PerformanceOverlayItem] {
+        if raw == legacyDefaultRaw { return PerformanceOverlayItem.allCases }
+        return raw.split(separator: ",").compactMap { PerformanceOverlayItem(rawValue: String($0)) }
+    }
+
+    static func raw(from items: [PerformanceOverlayItem]) -> String {
+        items.map(\.rawValue).joined(separator: ",")
+    }
+}
+
 struct PerformanceOverlay: View {
     @Environment(AppState.self) private var appState
     @AppStorage("performanceModeEnabled") private var performanceModeEnabled = false
     @AppStorage("pmHalfFrameRate") private var halfFrameRate = true
+    @AppStorage(PerformanceOverlayConfiguration.itemsKey) private var overlayItemsRaw = PerformanceOverlayConfiguration.defaultRaw
     @StateObject private var monitor = PerformanceOverlayMonitor()
 
     private var audio: AudioPlayer { appState.audioPlayer }
+    private var selectedItems: [PerformanceOverlayItem] {
+        PerformanceOverlayConfiguration.items(from: overlayItemsRaw)
+    }
+    private var selectedSet: Set<PerformanceOverlayItem> { Set(selectedItems) }
+    private var selectedGridMetrics: [PerformanceOverlayItem] {
+        selectedItems.filter(\.isGridMetric)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("\(Int(monitor.fps.rounded())) FPS")
-                        .font(.system(.headline, design: .monospaced).weight(.bold))
-                        .foregroundStyle(color(for: monitor.fps, target: monitor.targetFPS))
-                    Text(monitor.frameRateLabel)
-                        .font(.system(.caption2, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                Spacer(minLength: 10)
-                Text("\(Int(monitor.frameMS.rounded())) ms")
-                    .font(.system(.caption, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(Theme.secondaryText)
+            if selectedSet.contains(.frameRate) || selectedSet.contains(.frameTime) {
+                frameHeader
             }
 
-            frameChart
+            if selectedSet.contains(.frameChart) {
+                frameChart
+            }
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 6) {
-                metric("RAM", ByteCountFormatter.string(fromByteCount: Int64(monitor.memoryBytes), countStyle: .memory))
-                metric("CPU", "\(Int(monitor.cpuPercent.rounded()))%")
-                metric("CPU Pwr", String(format: "%.2f W", monitor.cpuPowerWatts))
-                metric("Therm", monitor.thermalState)
-                metric("Batt", monitor.batterySummary)
-                metric("LowPwr", ProcessInfo.processInfo.isLowPowerModeEnabled ? "On" : "Off")
-                metric("Q", "\(audio.queue.count)")
-                metric("Idx", audio.queue.isEmpty ? "-" : "\(audio.currentIndex + 1)")
-                metric("Trans", audio.transitionMode.settingsLabel)
-                metric("Auto", autoplayLabel)
+            if !selectedGridMetrics.isEmpty {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 6) {
+                    ForEach(selectedGridMetrics) { item in
+                        metric(item.shortLabel, value(for: item))
+                    }
+                }
+            } else if selectedItems.isEmpty {
+                Text("No metrics selected")
+                    .font(.system(.caption, design: .monospaced).weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
             }
         }
         .padding(10)
@@ -55,6 +173,27 @@ struct PerformanceOverlay: View {
         }
         .onChange(of: halfFrameRate) { _, _ in
             monitor.refreshFrameRate(resetSamples: true)
+        }
+    }
+
+    private var frameHeader: some View {
+        HStack(alignment: .firstTextBaseline) {
+            if selectedSet.contains(.frameRate) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(Int(monitor.fps.rounded())) FPS")
+                        .font(.system(.headline, design: .monospaced).weight(.bold))
+                        .foregroundStyle(color(for: monitor.fps, target: monitor.targetFPS))
+                    Text(monitor.frameRateLabel)
+                        .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+            Spacer(minLength: 10)
+            if selectedSet.contains(.frameTime) {
+                Text("\(Int(monitor.frameMS.rounded())) ms")
+                    .font(.system(.caption, design: .monospaced).weight(.semibold))
+                    .foregroundStyle(Theme.secondaryText)
+            }
         }
     }
 
@@ -105,6 +244,39 @@ struct PerformanceOverlay: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func value(for item: PerformanceOverlayItem) -> String {
+        switch item {
+        case .frameRate:
+            return "\(Int(monitor.fps.rounded())) FPS"
+        case .frameTime:
+            return "\(Int(monitor.frameMS.rounded())) ms"
+        case .frameChart:
+            return ""
+        case .memory:
+            return ByteCountFormatter.string(fromByteCount: Int64(monitor.memoryBytes), countStyle: .memory)
+        case .cpu:
+            return "\(Int(monitor.cpuPercent.rounded()))%"
+        case .threads:
+            return monitor.threadSummary
+        case .cpuPower:
+            return String(format: "%.2f W", monitor.cpuPowerWatts)
+        case .thermal:
+            return monitor.thermalState
+        case .battery:
+            return monitor.batterySummary
+        case .lowPower:
+            return ProcessInfo.processInfo.isLowPowerModeEnabled ? "On" : "Off"
+        case .queue:
+            return "\(audio.queue.count)"
+        case .queueIndex:
+            return audio.queue.isEmpty ? "-" : "\(audio.currentIndex + 1)"
+        case .transition:
+            return audio.transitionMode.settingsLabel
+        case .autoplay:
+            return autoplayLabel
+        }
+    }
+
     private func color(for fps: Double, target: Double) -> Color {
         let target = max(1, target)
         if fps >= target * 0.9 { return .green }
@@ -119,6 +291,7 @@ private final class PerformanceOverlayMonitor: NSObject, ObservableObject {
     @Published var frameMS: Double = 0
     @Published var memoryBytes: UInt64 = 0
     @Published var cpuPercent: Double = 0
+    @Published var threadSummary: String = "0/0"
     @Published var cpuPowerWatts: Double = 0
     @Published var thermalState: String = "Nom"
     @Published var batterySummary: String = "--"
@@ -144,6 +317,7 @@ private final class PerformanceOverlayMonitor: NSObject, ObservableObject {
         guard displayLink == nil else { return }
         UIDevice.current.isBatteryMonitoringEnabled = true
         memoryBytes = Self.memoryFootprintBytes()
+        threadSummary = Self.threadSummary()
         lastCPUTime = Self.processCPUTime()
         refreshFrameRate(resetSamples: true)
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
@@ -194,6 +368,7 @@ private final class PerformanceOverlayMonitor: NSObject, ObservableObject {
         if elapsed >= 0.5 {
             fps = Double(frames) / elapsed
             memoryBytes = Self.memoryFootprintBytes()
+            threadSummary = Self.threadSummary()
             updateCPUAndPower(elapsed: elapsed)
             thermalState = Self.thermalStateLabel(ProcessInfo.processInfo.thermalState)
             batterySummary = Self.batterySummary()
@@ -231,6 +406,42 @@ private final class PerformanceOverlayMonitor: NSObject, ObservableObject {
         let user = TimeInterval(usage.ru_utime.tv_sec) + TimeInterval(usage.ru_utime.tv_usec) / 1_000_000
         let system = TimeInterval(usage.ru_stime.tv_sec) + TimeInterval(usage.ru_stime.tv_usec) / 1_000_000
         return user + system
+    }
+
+    private static func threadSummary() -> String {
+        let counts = threadCounts()
+        return "\(counts.active)/\(counts.total)"
+    }
+
+    private static func threadCounts() -> (active: Int, total: Int) {
+        var threadList: thread_act_array_t?
+        var threadCount = mach_msg_type_number_t(0)
+        let result = task_threads(mach_task_self_, &threadList, &threadCount)
+        guard result == KERN_SUCCESS, let threadList else { return (0, 0) }
+        defer {
+            let size = vm_size_t(Int(threadCount) * MemoryLayout<thread_t>.stride)
+            vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: threadList)), size)
+        }
+
+        var active = 0
+        for index in 0..<Int(threadCount) {
+            var info = thread_basic_info_data_t()
+            var count = mach_msg_type_number_t(MemoryLayout<thread_basic_info_data_t>.size / MemoryLayout<natural_t>.size)
+            let infoResult = withUnsafeMutablePointer(to: &info) { pointer in
+                pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rebound in
+                    thread_info(threadList[index], thread_flavor_t(THREAD_BASIC_INFO), rebound, &count)
+                }
+            }
+            guard infoResult == KERN_SUCCESS else { continue }
+            let idle = (info.flags & TH_FLAGS_IDLE) != 0
+            let workingState = info.run_state == TH_STATE_RUNNING
+                || info.run_state == TH_STATE_UNINTERRUPTIBLE
+                || info.cpu_usage > 0
+            if !idle, workingState {
+                active += 1
+            }
+        }
+        return (active, Int(threadCount))
     }
 
     private static func thermalStateLabel(_ state: ProcessInfo.ThermalState) -> String {

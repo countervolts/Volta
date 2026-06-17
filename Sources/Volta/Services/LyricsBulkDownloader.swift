@@ -23,8 +23,13 @@ final class LyricsBulkDownloader: ObservableObject {
         return min(1, Double(completed) / Double(total))
     }
 
-    func start(client: SubsonicClient) {
+    func start(client: any MusicService) {
         guard !isRunning else { return }
+        // Demo servers are stream-only; don't bulk-pull their lyrics to disk.
+        if DemoServers.isDemo(client.config.baseURL) {
+            VoltaNotificationCenter.shared.post(L(.notif_demo_no_downloads), tone: .info)
+            return
+        }
         isRunning = true
         completed = 0; found = 0; total = 0; skipped = 0
         statusText = "Scanning library…"
@@ -35,7 +40,7 @@ final class LyricsBulkDownloader: ObservableObject {
         task?.cancel()
     }
 
-    private func run(client: SubsonicClient) async {
+    private func run(client: any MusicService) async {
         let songs = await Self.allSongs(client: client)
         if Task.isCancelled { finish(cancelled: true); return }
 
@@ -52,14 +57,15 @@ final class LyricsBulkDownloader: ObservableObject {
             statusText = songs.isEmpty
                 ? "No songs found"
                 : "All \(songs.count) songs already have lyrics"
-            VoltaNotificationCenter.shared.post("Lyrics already up to date", tone: .success)
+            VoltaNotificationCenter.shared.post(L(.notif_lyrics_up_to_date), tone: .success)
             return
         }
         statusText = "Downloading \(total) missing…"
 
         await withTaskGroup(of: Bool.self) { group in
             var iterator = pending.makeIterator()
-            for _ in 0..<Self.maxConcurrent {
+            let maxConcurrent = DeveloperExperiments.constrainedConcurrency(default: Self.maxConcurrent)
+            for _ in 0..<maxConcurrent {
                 guard let song = iterator.next() else { break }
                 group.addTask { await Self.fetch(song, client: client) }
             }
@@ -87,19 +93,19 @@ final class LyricsBulkDownloader: ObservableObject {
             ? "Stopped · added \(found)\(skippedNote)"
             : "Done · added \(found) of \(total)\(skippedNote)"
         VoltaNotificationCenter.shared.post(
-            cancelled ? "Lyrics download stopped" : "Lyrics download complete",
+            cancelled ? L(.notif_lyrics_download_stopped) : L(.notif_lyrics_download_complete),
             tone: cancelled ? .warning : .success
         )
     }
 
     // fetch (and persist) lyrics for one song; true when any were found
-    private nonisolated static func fetch(_ song: Song, client: SubsonicClient) async -> Bool {
+    private nonisolated static func fetch(_ song: Song, client: any MusicService) async -> Bool {
         let lines = await LyricsService.shared.lyrics(for: song, client: client)
         return !lines.isEmpty
     }
 
     // walks all albums and collects their unique songs
-    private nonisolated static func allSongs(client: SubsonicClient) async -> [Song] {
+    private nonisolated static func allSongs(client: any MusicService) async -> [Song] {
         var albums: [Album] = []
         var offset = 0
         while true {
@@ -117,14 +123,10 @@ final class LyricsBulkDownloader: ObservableObject {
         while index < albums.count {
             if Task.isCancelled { break }
             let slice = Array(albums[index..<min(index + batchSize, albums.count)])
-            let results = await withTaskGroup(of: [Song].self) { group in
-                for album in slice {
-                    group.addTask { (try? await client.album(id: album.id))?.song ?? album.song ?? [] }
-                }
-                var acc: [Song] = []
-                for await s in group { acc.append(contentsOf: s) }
-                return acc
+            let batches = await DeveloperExperiments.runConcurrently(slice, defaultMaxConcurrent: batchSize) { album in
+                (try? await client.album(id: album.id))?.song ?? album.song ?? []
             }
+            let results = batches.flatMap { $0 }
             for s in results where seen.insert(s.id).inserted { songs.append(s) }
             index += batchSize
         }

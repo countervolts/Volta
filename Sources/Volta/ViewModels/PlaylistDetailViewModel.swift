@@ -16,7 +16,7 @@ final class PlaylistDetailViewModel {
         self.songs = playlist.entry ?? []
     }
 
-    func load(client: SubsonicClient) async {
+    func load(client: any MusicService) async {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
@@ -26,16 +26,15 @@ final class PlaylistDetailViewModel {
         }
     }
 
-    func removeSong(at index: Int, client: SubsonicClient) async {
+    func removeSong(at index: Int, client: any MusicService) async {
         guard index >= 0, index < songs.count else { return }
         songs.remove(at: index)
         try? await client.removeFromPlaylist(playlistID: playlist.id, index: index)
         await PlaylistBackupStore.shared.backup(playlistID: playlist.id, client: client)
     }
 
-    // edit sheet: name + description in one go (the cover is stored locally by the
-    // view via PlaylistCoverStore, since Subsonic can't accept a playlist cover).
-    func update(name: String, comment: String, client: SubsonicClient) async {
+    // Edit sheet state. Covers stay local via PlaylistCoverStore.
+    func update(name: String, comment: String, client: any MusicService) async {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         if !trimmed.isEmpty, trimmed != playlist.name {
             try? await client.renamePlaylist(playlistID: playlist.id, name: trimmed)

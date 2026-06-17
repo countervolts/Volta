@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Mini player content shared by the iOS 26 tab accessory and older fallback bar.
+// Mini player used by both the tab accessory and fallback bar.
 struct MiniPlayerAccessory: View {
     @Environment(AppState.self) private var appState
     var onExpand: () -> Void
@@ -44,10 +44,7 @@ struct MiniPlayerAccessory: View {
                 .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragX)
             }
             .buttonStyle(.plain)
-            // swipe left > next, swipe right > previous, with a slide animation.
-            // highPriorityGesture (not simultaneous) so an actual swipe pre-empts
-            // the expand tap — otherwise a swipe both skipped AND opened the player,
-            // which then left the open/close state stuck.
+            // Swipe changes tracks; high priority keeps it from also opening the player.
             .highPriorityGesture(
                 DragGesture(minimumDistance: 24)
                     .onChanged { v in

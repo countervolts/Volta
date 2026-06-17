@@ -4,13 +4,12 @@ import Observation
 struct ArtistDetailView: View {
     @Environment(AppState.self) private var appState
     @State private var vm: ArtistDetailViewModel
+    @State private var hiddenAlbums = HiddenAlbumStore.shared
     @State private var drillAlbum: Album?
     @State private var addToPlaylistSong: Song? = nil
     @State private var toastMessage: String? = nil
     @State private var showBioSheet = false
-    // local mirror of the VM's profile photo. updating @State guarantees a body
-    // re-render (so the picture appears as soon as it loads, without needing the
-    // user to interact with the page first).
+    // Local mirror so the profile photo appears as soon as it loads.
     @State private var profileImage: UIImage? = nil
     @State private var scrollState = ArtistProfileScrollState()
 
@@ -77,7 +76,7 @@ struct ArtistDetailView: View {
         }
         .onChange(of: vm.artistImage) { _, img in profileImage = img }
         .navigationDestination(item: $drillAlbum) { album in
-            AlbumDetailView(album: album)
+            AlbumDetailView(album: album, fromArtist: true)
         }
         .sheet(item: $addToPlaylistSong) { song in
             AddToPlaylistSheet(song: song, onAdded: { name in
@@ -95,6 +94,9 @@ struct ArtistDetailView: View {
             )
         }
         .task { if let c = appState.client { await vm.load(client: c) } }
+        .onChange(of: hiddenAlbums.revision) { _, _ in
+            Task { if let c = appState.client { await vm.load(client: c) } }
+        }
     }
 
     @ViewBuilder
@@ -132,6 +134,7 @@ struct ArtistDetailView: View {
                 artistActionRow
                 topSongsSection
                 albumsSection
+                singlesSection
                 appearedOnSection
                 similarArtistsSection
                 aboutSection
@@ -187,7 +190,7 @@ struct ArtistDetailView: View {
         appState.audioPlayer.playArtist(shuffled ? songs.shuffled() : songs, artist: vm.displayArtist)
     }
 
-    // MARK: - Top Songs (compact rows, horizontal peek — next column shows beside)
+    // MARK: - Top Songs
 
     private static let rowHeight: CGFloat = 52
     private static let pageSize = 5
@@ -295,7 +298,7 @@ struct ArtistDetailView: View {
 
     @ViewBuilder
     private var albumsSection: some View {
-        if !vm.albums.isEmpty {
+        if !vm.albumReleases.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
                 SectionHeaderView("Albums")
                     .padding(.horizontal, 20)
@@ -303,7 +306,46 @@ struct ArtistDetailView: View {
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 14) {
-                        ForEach(vm.albums) { album in
+                        ForEach(vm.albumReleases) { album in
+                            Button { drillAlbum = album } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ArtworkView(coverArtID: album.coverArt, size: 300, cornerRadius: 8)
+                                        .frame(width: 130, height: 130)
+
+                                    Text(album.name)
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.white)
+                                        .lineLimit(2)
+                                        .frame(width: 130, alignment: .leading)
+
+                                    if let year = album.year {
+                                        Text(String(year))
+                                            .font(.caption2)
+                                            .foregroundStyle(.white.opacity(0.5))
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+            }
+            .padding(.bottom, 8)
+        }
+    }
+
+    @ViewBuilder
+    private var singlesSection: some View {
+        if !vm.singles.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionHeaderView(L(.artist_singles))
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 14) {
+                        ForEach(vm.singles) { album in
                             Button { drillAlbum = album } label: {
                                 VStack(alignment: .leading, spacing: 6) {
                                     ArtworkView(coverArtID: album.coverArt, size: 300, cornerRadius: 8)

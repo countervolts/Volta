@@ -27,8 +27,12 @@ struct NowPlayingScreen: View {
     @State private var isFetchingAlbum = false
     @State private var tasteStore = TasteStore.shared
     @AppStorage("showLosslessBadge") private var showLosslessBadge = true
+    @AppStorage(DeveloperExperiments.preciseTimestampsKey) private var preciseTimestamps = false
     @AppStorage("artworkAnimation") private var artworkAnimation = true
     @AppStorage("dynamicBackground") private var dynamicBackground = true
+    // present a normal (static) cover with the same edge-to-edge, gradient-fade
+    // look animated covers get
+    @AppStorage("stylizedPlayerCover") private var stylizedPlayerCover = false
     // observe accent so player controls retint live on change
     @AppStorage("accentColorName") private var accentColorName = "purple"
 
@@ -73,10 +77,7 @@ struct NowPlayingScreen: View {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { dragOffset = 0 }
                 }
         )
-        // offset tracks the finger 1:1 during the drag (snap-back animated on release).
-        // no implicit .animation(value:) here — it wrapped the whole subtree, so the
-        // per-frame TimelineView scrubber/time labels got the spring applied to every
-        // redraw and visibly bounced while dragging.
+        // Track the finger directly; only release gets the spring.
         .offset(y: dragOffset)
         .sheet(item: $infoSheet) { which in
             switch which {
@@ -136,12 +137,73 @@ struct NowPlayingScreen: View {
         .preferredColorScheme(Theme.colorScheme)
     }
 
+    @ViewBuilder
     private var phoneLayout: some View {
-        VStack(spacing: 0) {
-            dragHandle
-            tabContent
-            Spacer(minLength: 0).frame(maxHeight: 40)
-            controls
+        if usesFullBleedCover {
+            fullBleedLayout()
+        } else {
+            VStack(spacing: 0) {
+                dragHandle
+                tabContent
+                Spacer(minLength: 0)
+                transportControls
+                Spacer(minLength: 0)
+                bottomControls
+            }
+        }
+    }
+
+    // Full-bleed artwork header for live/stylized covers.
+    private var usesFullBleedCover: Bool {
+        guard activeTab == .nowPlaying else { return false }
+        if audio.currentLiveArtwork != nil { return true }
+        return stylizedPlayerCover && audio.currentArtwork != nil
+    }
+
+    private func fullBleedLayout() -> some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let topInset = geo.safeAreaInsets.top
+            VStack(spacing: 0) {
+                ZStack(alignment: .top) {
+                    fullBleedCoverContent
+                        .frame(width: w, height: w + topInset)
+                        .clipped()
+                        .overlay(alignment: .bottom) {
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .clear, location: 0),
+                                    .init(color: playerBackground.opacity(0.55), location: 0.72),
+                                    .init(color: playerBackground, location: 1)
+                                ],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                            .frame(height: w * 0.30)
+                        }
+                        .id(audio.currentSong?.id)
+                    // the whole header is offset up by topInset, so doubling the
+                    // inset puts the handle just below the status bar
+                    dragHandle.padding(.top, topInset * 2)
+                }
+                .frame(width: w, height: w + topInset)
+                .offset(y: -topInset)
+                .padding(.bottom, -topInset)
+
+                trackInfo
+                    .padding(.horizontal, 24)
+                    .padding(.top, 18)
+                    .padding(.bottom, 20)
+
+                scrubber
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 4)
+
+                Spacer(minLength: 0)
+                transportControls
+                Spacer(minLength: 0)
+                bottomControls
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }
     }
 
@@ -152,8 +214,10 @@ struct NowPlayingScreen: View {
                 VStack(spacing: 0) {
                     dragHandle
                     nowPlayingContent
-                    Spacer(minLength: 0).frame(maxHeight: 40)
-                    controls
+                    Spacer(minLength: 0)
+                    transportControls
+                    Spacer(minLength: 0)
+                    bottomControls
                 }
                 .frame(width: 420)
 
@@ -174,8 +238,10 @@ struct NowPlayingScreen: View {
             VStack(spacing: 0) {
                 dragHandle
                 nowPlayingContent
-                Spacer(minLength: 0).frame(maxHeight: 40)
-                controls
+                Spacer(minLength: 0)
+                transportControls
+                Spacer(minLength: 0)
+                bottomControls
             }
             .frame(maxWidth: 480)
             .frame(maxWidth: .infinity, alignment: .center)
@@ -321,35 +387,35 @@ struct NowPlayingScreen: View {
                     Button {
                         if let s = audio.currentSong { tasteStore.toggleLove(s.id) }
                     } label: {
-                        Label(currentTaste == .loved ? "Unlove" : "Love",
+                        Label(currentTaste == .loved ? L(.action_unlove) : L(.action_love),
                               systemImage: currentTaste == .loved ? "heart.fill" : "heart")
                     }
                     Button {
                         if let s = audio.currentSong { tasteStore.toggleDislike(s.id) }
                     } label: {
-                        Label(currentTaste == .disliked ? "Remove Dislike" : "Dislike",
+                        Label(currentTaste == .disliked ? L(.action_remove_dislike) : L(.action_dislike),
                               systemImage: currentTaste == .disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                     }
                     Divider()
                     Button {
                         if let s = audio.currentSong { audio.playNext(s) }
                     } label: {
-                        Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                        Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
                     }
                     Button {
                         if let s = audio.currentSong { audio.addToQueue(s) }
                     } label: {
-                        Label("Play Last", systemImage: "text.line.last.and.arrowtriangle.forward")
+                        Label(L(.action_play_last), systemImage: "text.line.last.and.arrowtriangle.forward")
                     }
                     Divider()
-                    Button { infoSheet = .info } label: { Label("Info", systemImage: Symbols.info) }
-                    Button { infoSheet = .credits } label: { Label("View Credits", systemImage: "list.star") }
-                    Button { shareCurrentSong() } label: { Label("Share", systemImage: Symbols.share) }
+                    Button { infoSheet = .info } label: { Label(L(.action_info), systemImage: Symbols.info) }
+                    Button { infoSheet = .credits } label: { Label(L(.action_view_credits), systemImage: "list.star") }
+                    Button { shareCurrentSong() } label: { Label(L(.action_share), systemImage: Symbols.share) }
                     if audio.currentSong?.albumId != nil {
                         Button {
                             guard let albumId = audio.currentSong?.albumId else { return }
                             Task { albumToShow = try? await appState.client?.album(id: albumId) }
-                        } label: { Label("Go to Album", systemImage: "square.stack") }
+                        } label: { Label(L(.action_go_to_album), systemImage: "square.stack") }
                     }
                     if audio.currentSong?.artistId != nil {
                         Button {
@@ -359,7 +425,7 @@ struct NowPlayingScreen: View {
                                 defer { isFetchingArtist = false }
                                 artistToShow = try? await appState.client?.artist(id: artistId)
                             }
-                        } label: { Label("Go to Artist", systemImage: "person.fill") }
+                        } label: { Label(L(.action_go_to_artist), systemImage: "person.fill") }
                     }
                 } label: {
                     Image(systemName: Symbols.more)
@@ -397,9 +463,9 @@ struct NowPlayingScreen: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color(white: 0.12))
                 .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
-            if let animated = audio.currentAnimatedArtwork {
+            if let live = audio.currentLiveArtwork {
                 // live (animated) cover art — full player only
-                AnimatedImageView(image: animated)
+                liveArtworkView(live)
             } else if let image = audio.currentArtwork {
                 Image(uiImage: image)
                     .resizable()
@@ -419,6 +485,24 @@ struct NowPlayingScreen: View {
             insertion: .scale(scale: 0.92).combined(with: .opacity),
             removal: .scale(scale: 0.92).combined(with: .opacity)
         ))
+    }
+
+    @ViewBuilder
+    private func liveArtworkView(_ live: LiveArtworkAsset) -> some View {
+        AnimatedImageView(image: live.animatedImage)
+    }
+
+    // header artwork for the full-bleed layout: the animated cover if present,
+    // otherwise the static cover (stylized-cover option) presented the same way
+    @ViewBuilder
+    private var fullBleedCoverContent: some View {
+        if let live = audio.currentLiveArtwork {
+            liveArtworkView(live)
+        } else if let image = audio.currentArtwork {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        }
     }
 
     private var trackInfo: some View {
@@ -479,30 +563,30 @@ struct NowPlayingScreen: View {
                     Button {
                         if let s = audio.currentSong { tasteStore.toggleLove(s.id) }
                     } label: {
-                        Label(currentTaste == .loved ? "Unlove" : "Love",
+                        Label(currentTaste == .loved ? L(.action_unlove) : L(.action_love),
                               systemImage: currentTaste == .loved ? "heart.fill" : "heart")
                     }
                     Button {
                         if let s = audio.currentSong { tasteStore.toggleDislike(s.id) }
                     } label: {
-                        Label(currentTaste == .disliked ? "Remove Dislike" : "Dislike",
+                        Label(currentTaste == .disliked ? L(.action_remove_dislike) : L(.action_dislike),
                               systemImage: currentTaste == .disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                     }
                     Divider()
                     Button {
                         if let s = audio.currentSong { audio.playNext(s) }
                     } label: {
-                        Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                        Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
                     }
                     Button {
                         if let s = audio.currentSong { audio.addToQueue(s) }
                     } label: {
-                        Label("Play Last", systemImage: "text.line.last.and.arrowtriangle.forward")
+                        Label(L(.action_play_last), systemImage: "text.line.last.and.arrowtriangle.forward")
                     }
                     Divider()
-                    Button { infoSheet = .info } label: { Label("Info", systemImage: Symbols.info) }
-                    Button { infoSheet = .credits } label: { Label("View Credits", systemImage: "list.star") }
-                    Button { shareCurrentSong() } label: { Label("Share", systemImage: Symbols.share) }
+                    Button { infoSheet = .info } label: { Label(L(.action_info), systemImage: Symbols.info) }
+                    Button { infoSheet = .credits } label: { Label(L(.action_view_credits), systemImage: "list.star") }
+                    Button { shareCurrentSong() } label: { Label(L(.action_share), systemImage: Symbols.share) }
                     Divider()
                     if audio.currentSong?.albumId != nil {
                         Button {
@@ -512,7 +596,7 @@ struct NowPlayingScreen: View {
                                 defer { isFetchingAlbum = false }
                                 albumToShow = try? await appState.client?.album(id: albumId)
                             }
-                        } label: { Label("Go to Album", systemImage: "square.stack") }
+                        } label: { Label(L(.action_go_to_album), systemImage: "square.stack") }
                     }
                     if audio.currentSong?.artistId != nil {
                         Button {
@@ -522,7 +606,7 @@ struct NowPlayingScreen: View {
                                 defer { isFetchingArtist = false }
                                 artistToShow = try? await appState.client?.artist(id: artistId)
                             }
-                        } label: { Label("Go to Artist", systemImage: "person.fill") }
+                        } label: { Label(L(.action_go_to_artist), systemImage: "person.fill") }
                     }
                 } label: {
                     Image(systemName: Symbols.more)
@@ -551,7 +635,7 @@ struct NowPlayingScreen: View {
             // remaining always agree (and remaining uses the live item duration so
             // it can't read 0:00 while audio is still playing). paused while
             // scrubbing — then scrubTime drives them instead.
-            TimelineView(.animation(minimumInterval: 0.2, paused: scrubbing)) { _ in
+            TimelineView(.animation(minimumInterval: preciseTimestamps ? 1.0 / 30.0 : 0.2, paused: scrubbing)) { _ in
                 let total = audio.liveDuration()
                 let t = scrubbing ? scrubTime : audio.liveTime()
                 let losslessStatus = LosslessBadgeResolver.status(for: audio.currentSong)
@@ -592,53 +676,56 @@ struct NowPlayingScreen: View {
 
     // MARK: - Playback controls
 
-    private var controls: some View {
-        VStack(spacing: 0) {
-            // transport: prev | play/pause | next
-            HStack(spacing: 0) {
-                Spacer()
+    // transport row (prev | play/pause | next) — lives on its own so the layouts
+    // can centre it vertically between the progress bar and the volume slider.
+    private var transportControls: some View {
+        HStack(spacing: 0) {
+            Spacer()
 
-                Button {
-                    animatePrev()
-                    audio.skipPrevious()
-                } label: {
-                    Image(systemName: Symbols.previous)
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 68, height: 68)
-                        .offset(x: prevNudge)
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                Button { audio.togglePlayPause() } label: {
-                    Image(systemName: audio.isPlaying ? Symbols.pause : Symbols.play)
-                        .font(.system(size: 42, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 84, height: 84)
-                        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: audio.isPlaying)
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                Button {
-                    animateSkip()
-                    audio.skipNext()
-                } label: {
-                    Image(systemName: Symbols.next)
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 68, height: 68)
-                        .offset(x: skipNudge)
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
+            Button {
+                animatePrev()
+                audio.skipPrevious()
+            } label: {
+                Image(systemName: Symbols.previous)
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 68, height: 68)
+                    .offset(x: prevNudge)
             }
-            .padding(.bottom, 8)
+            .buttonStyle(.plain)
 
+            Spacer()
+
+            Button { audio.togglePlayPause() } label: {
+                Image(systemName: audio.isPlaying ? Symbols.pause : Symbols.play)
+                    .font(.system(size: 42, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 84, height: 84)
+                    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: audio.isPlaying)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Button {
+                animateSkip()
+                audio.skipNext()
+            } label: {
+                Image(systemName: Symbols.next)
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 68, height: 68)
+                    .offset(x: skipNudge)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+        }
+    }
+
+    // volume slider + bottom action bar, pinned below the centred transport row
+    private var bottomControls: some View {
+        VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: Symbols.volumeLow)
                     .font(.system(size: 13))
@@ -734,7 +821,13 @@ struct NowPlayingScreen: View {
     }
 
     private func formatTime(_ t: TimeInterval) -> String {
-        guard t.isFinite, t >= 0 else { return "0:00" }
+        guard t.isFinite, t >= 0 else { return preciseTimestamps ? "0:00.0000" : "0:00" }
+        if preciseTimestamps {
+            let minutes = Int(t) / 60
+            let seconds = t - Double(minutes * 60)
+            // %07.4f keeps a leading zero on the seconds so it reads 0:05.1234
+            return String(format: "%d:%07.4f", minutes, seconds)
+        }
         let s = Int(t)
         return String(format: "%d:%02d", s / 60, s % 60)
     }
@@ -888,13 +981,10 @@ private struct AudioVisualizerScreen: View {
     }
 }
 
-// MARK: - Scrub bar (larger track for Apple Music feel)
+// MARK: - Scrub bar
 
 private struct ScrubBar: View {
-    let duration: () -> TimeInterval     // LIVE item duration, sampled per frame — the
-                                         // same source the time labels read, so the fill
-                                         // can't reach 100% while audio keeps playing and
-                                         // scrubbing can't drift from the remaining label
+    let duration: () -> TimeInterval     // live item duration
     let liveTime: () -> TimeInterval     // sampled per frame so the fill can't drift
     @Binding var scrubbing: Bool
     @Binding var scrubTime: TimeInterval
@@ -903,9 +993,7 @@ private struct ScrubBar: View {
     var body: some View {
         GeometryReader { geo in
             let trackHeight: CGFloat = scrubbing ? 9 : 5
-            // redraw the fill ~30×/s straight from the player's real position. there
-            // is no implicit fill animation to lag behind or detach from the track —
-            // the width is recomputed from the source of truth every frame instead.
+            // Redraw from the live player position instead of animating stale state.
             TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: scrubbing)) { _ in
                 let total = duration()
                 let t = scrubbing ? scrubTime : liveTime()
@@ -939,13 +1027,26 @@ private struct ScrubBar: View {
     }
 }
 
-// MARK: - System volume (MPVolumeView — actually sets device volume)
+// MARK: - System volume (MPVolumeView)
 
 private struct SystemVolumeSlider: UIViewRepresentable {
+    final class SliderOnlyVolumeView: MPVolumeView {
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            guard let slider = subviews.compactMap({ $0 as? UISlider }).first else { return }
+            for subview in subviews where subview !== slider {
+                subview.isHidden = true
+                subview.frame = .zero
+            }
+            slider.isHidden = false
+            slider.frame = bounds
+        }
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeUIView(context: Context) -> MPVolumeView {
-        let v = MPVolumeView()
+    func makeUIView(context: Context) -> SliderOnlyVolumeView {
+        let v = SliderOnlyVolumeView()
         v.tintColor = .white
         let blank = UIImage()
         v.setVolumeThumbImage(blank, for: .normal)
@@ -958,35 +1059,45 @@ private struct SystemVolumeSlider: UIViewRepresentable {
         v.addGestureRecognizer(tap)
         return v
     }
-    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
+    func updateUIView(_ uiView: SliderOnlyVolumeView, context: Context) {}
 
     final class Coordinator: NSObject {
         weak var volumeView: MPVolumeView?
         private var panStartVolume: Float = 0
+        private var panActive = false
 
         private var slider: UISlider? {
             volumeView?.subviews.compactMap { $0 as? UISlider }.first
         }
 
+        // Only the real slider track should catch taps.
+        private func onTrack(_ point: CGPoint, _ slider: UISlider) -> Bool {
+            point.x >= 0 && point.x <= slider.bounds.width
+        }
+
         @objc func handleTap(_ g: UITapGestureRecognizer) {
-            guard let v = volumeView, let slider, v.bounds.width > 0 else { return }
-            let x = g.location(in: v).x
-            let frac = Float(max(0, min(1, x / v.bounds.width)))
+            guard let slider, slider.bounds.width > 0 else { return }
+            let p = g.location(in: slider)
+            guard onTrack(p, slider) else { return }   // tap off the track does nothing
+            let frac = Float(max(0, min(1, p.x / slider.bounds.width)))
             slider.setValue(frac, animated: false)
             slider.sendActions(for: .valueChanged)
         }
 
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
-            guard let v = volumeView, let slider, v.bounds.width > 0 else { return }
+            guard let slider, slider.bounds.width > 0 else { return }
             switch g.state {
             case .began:
+                panActive = onTrack(g.location(in: slider), slider)
                 panStartVolume = slider.value
             case .changed:
-                let delta = Float(g.translation(in: v).x / v.bounds.width)
+                guard panActive else { return }
+                let delta = Float(g.translation(in: slider).x / slider.bounds.width)
                 let frac = max(0, min(1, panStartVolume + delta))
                 slider.setValue(frac, animated: false)
                 slider.sendActions(for: .valueChanged)
             default:
+                panActive = false
                 panStartVolume = slider.value
             }
         }
@@ -995,40 +1106,116 @@ private struct SystemVolumeSlider: UIViewRepresentable {
 
 // MARK: - Animated (live) artwork
 
-// Plays a multi-frame UIImage (animated GIF / APNG) via UIImageView, which animates
-// natively. Low layout priorities so it fills its SwiftUI frame instead of imposing
-// the image's intrinsic size.
-private struct AnimatedImageView: UIViewRepresentable {
-    let image: UIImage
+// Plays the locally cached live-artwork mp4 on a muted, looping AVPlayerLayer.
+// Hardware-decoded, so frame count/size don't matter (unlike UIImageView frame
+// animation). The still frame sits behind the layer to cover the brief moment
+// before the first video frame is ready.
+private struct LiveArtworkVideoView: UIViewRepresentable {
+    let url: URL
+    let stillFrame: UIImage
 
-    func makeUIView(context: Context) -> UIImageView {
-        let v = UIImageView()
-        v.contentMode = .scaleAspectFill
+    final class Coordinator {
+        var url: URL?
+        var player: AVQueuePlayer?
+        var looper: AVPlayerLooper?
+        var foregroundObserver: NSObjectProtocol?
+
+        deinit {
+            if let foregroundObserver {
+                NotificationCenter.default.removeObserver(foregroundObserver)
+            }
+            player?.pause()
+        }
+    }
+
+    final class PlayerLayerView: UIView {
+        final class VideoLayerView: UIView {
+            override static var layerClass: AnyClass { AVPlayerLayer.self }
+            var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+        }
+
+        let stillView = UIImageView()
+        let videoView = VideoLayerView()
+        var playerLayer: AVPlayerLayer { videoView.playerLayer }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            stillView.contentMode = .scaleAspectFill
+            stillView.clipsToBounds = true
+            videoView.clipsToBounds = true
+            videoView.isOpaque = false
+            videoView.backgroundColor = .clear
+            stillView.backgroundColor = .clear
+            addSubview(stillView)
+            addSubview(videoView)
+        }
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            stillView.frame = bounds
+            videoView.frame = bounds
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> PlayerLayerView {
+        let v = PlayerLayerView()
         v.clipsToBounds = true
+        v.playerLayer.videoGravity = .resizeAspectFill
         v.setContentHuggingPriority(.defaultLow, for: .horizontal)
         v.setContentHuggingPriority(.defaultLow, for: .vertical)
         v.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         v.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        configure(v)
+        configure(v, context: context)
         return v
     }
 
-    func updateUIView(_ uiView: UIImageView, context: Context) {
-        if uiView.image !== image { configure(uiView) }
+    func updateUIView(_ uiView: PlayerLayerView, context: Context) {
+        guard context.coordinator.url != url else { return }
+        configure(uiView, context: context)
     }
 
-    private func configure(_ v: UIImageView) {
-        if let frames = image.images, frames.count > 1 {
-            v.animationImages = frames
-            v.animationDuration = image.duration
-            v.animationRepeatCount = 0
-            v.image = frames.first
-            v.startAnimating()
-        } else {
-            v.image = image
+    private func configure(_ v: PlayerLayerView, context: Context) {
+        let co = context.coordinator
+        co.player?.pause()
+        if let old = co.foregroundObserver {
+            NotificationCenter.default.removeObserver(old)
+        }
+
+        v.stillView.image = stillFrame
+
+        let player = AVQueuePlayer()
+        // silent video-only asset; never let it touch audio playback or sleep
+        player.isMuted = true
+        player.preventsDisplaySleepDuringVideoPlayback = false
+        co.looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        co.player = player
+        co.url = url
+        v.playerLayer.player = player
+        player.play()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak player, weak co] in
+            guard let player else { return }
+            let item = player.currentItem
+            let error = item?.error?.localizedDescription ?? co?.looper?.error?.localizedDescription ?? "none"
+            AppLogger.shared.log("Live artwork: video layer after 1.5s — itemStatus=\(item?.status.rawValue ?? -1) rate=\(player.rate) error=\(error)", category: .other)
+        }
+
+        // AVPlayer pauses video when the app backgrounds and won't resume itself
+        co.foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak player] _ in
+            player?.play()
         }
     }
 }
+
+// AnimatedImageView / FrameSteppingImageView live in Components/AnimatedArtworkView.swift
 
 // MARK: - AirPlay button
 
@@ -1074,25 +1261,25 @@ struct SongInfoSheet: View {
         NavigationStack {
             List {
                 if let song {
-                    row("Title", song.title)
-                    row("Artist", song.artist)
-                    row("Album", song.album)
-                    row("Year", song.year.map(String.init))
-                    row("Genre", song.genre)
-                    row("Duration", song.duration.map { "\($0 / 60):\(String(format: "%02d", $0 % 60))" })
-                    row("Bit Rate", song.bitRate.map { "\($0) kbps" })
-                    row("Sample Rate", song.samplingRate.map { String(format: "%.1f kHz", Double($0) / 1000) })
-                    row("Bit Depth", song.bitDepth.map { "\($0)-bit" })
-                    row("Format", song.contentType)
-                    row("File Type", song.suffix?.uppercased())
-                    row("File Size", song.size.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) })
-                    row("Play Count", song.playCount.map(String.init))
-                    row("Path", song.path)
+                    row(L(.media_title), song.title)
+                    row(L(.media_artist), song.artist)
+                    row(L(.media_album), song.album)
+                    row(L(.media_year), song.year.map(String.init))
+                    row(L(.media_genre), song.genre)
+                    row(L(.media_duration), song.duration.map { "\($0 / 60):\(String(format: "%02d", $0 % 60))" })
+                    row(L(.media_bit_rate), song.bitRate.map { "\($0) kbps" })
+                    row(L(.media_sample_rate), song.samplingRate.map { String(format: "%.1f kHz", Double($0) / 1000) })
+                    row(L(.media_bit_depth), song.bitDepth.map { "\($0)-bit" })
+                    row(L(.media_format), song.contentType)
+                    row(L(.media_file_type), song.suffix?.uppercased())
+                    row(L(.media_file_size), song.size.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) })
+                    row(L(.media_play_count), song.playCount.map(String.init))
+                    row(L(.media_path), song.path)
                 }
             }
-            .navigationTitle("Song Info")
+            .navigationTitle(L(.song_info_title))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L(.action_done)) { dismiss() } } }
         }
     }
 

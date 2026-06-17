@@ -31,12 +31,16 @@ actor LyricsService {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    func lyrics(for song: Song, client: SubsonicClient) async -> [LyricLine] {
+    func lyrics(for song: Song, client: any MusicService) async -> [LyricLine] {
         if let cached = cache[song.id] { return cached }
         if let local = loadLocalLyrics(for: song) {
             cache[song.id] = local
             return local
         }
+
+        // Demo servers are stream-only: cache lyrics in memory for live display
+        // but never write them to disk.
+        let allowSave = !DemoServers.isDemo(client.config.baseURL)
 
         // try OpenSubsonic structured lyrics
         if let list = try? await client.lyricsBySongId(id: song.id),
@@ -46,7 +50,7 @@ actor LyricsService {
                 LyricLine(id: i, time: Double(l.start ?? 0) / 1000.0, text: l.value)
             }
             cache[song.id] = result
-            saveLocalLyrics(result, for: song, source: "OpenSubsonic")
+            if allowSave { saveLocalLyrics(result, for: song, source: "OpenSubsonic") }
             return result
         }
 
@@ -57,14 +61,14 @@ actor LyricsService {
         ), !plain.isEmpty {
             let result = parsePlain(plain)
             cache[song.id] = result
-            saveLocalLyrics(result, for: song, source: "Subsonic")
+            if allowSave { saveLocalLyrics(result, for: song, source: "Subsonic") }
             return result
         }
 
         // fall back to lrclib
         if let lines = await fetchLRCLib(song: song) {
             cache[song.id] = lines
-            saveLocalLyrics(lines, for: song, source: "LRCLib")
+            if allowSave { saveLocalLyrics(lines, for: song, source: "LRCLib") }
             return lines
         }
 

@@ -1,6 +1,6 @@
 import Foundation
 
-// json-file backed store. no swiftdata macros needed; works with xtool cross-compilation.
+// JSON-backed server store; xtool-friendly.
 @MainActor
 final class ServerStore {
     private let serversURL: URL
@@ -28,8 +28,7 @@ final class ServerStore {
     }
 
     func config(for record: ServerRecord, cellular: Bool = false) -> SubsonicConfig? {
-        // on cellular, prefer the per-connection URL when one is set; otherwise fall
-        // back to the primary URL so behaviour is unchanged for single-URL servers.
+        // Cellular can use its own URL/login when configured.
         let chosen = (cellular ? record.cellularURLString?.nonBlank : nil) ?? record.urlString
         let username = cellular ? (record.cellularUsername?.nonBlank ?? record.username) : record.username
         guard let url = URL(string: chosen),
@@ -42,7 +41,7 @@ final class ServerStore {
         KeychainService.password(for: Self.cellularAccount(for: record.id))
     }
 
-    // updates the cellular-only URL/login for a record and returns the updated record.
+    // Save the cellular-only connection override.
     @discardableResult
     func setCellularConnection(
         urlString: String?,
@@ -63,15 +62,16 @@ final class ServerStore {
     }
 
     @discardableResult
-    func upsert(config: SubsonicConfig, displayName: String) -> ServerRecord {
+    func upsert(config: SubsonicConfig, displayName: String, backend: MusicBackendKind = .subsonic) -> ServerRecord {
         let urlString = config.baseURL.absoluteString
         if let idx = servers.firstIndex(where: { $0.urlString == urlString && $0.username == config.username }) {
             servers[idx].displayName = displayName
+            servers[idx].backend = backend
             KeychainService.save(password: config.password, for: servers[idx].id)
             setCurrent(servers[idx])
             return servers[idx]
         }
-        var record = ServerRecord(displayName: displayName, urlString: urlString, username: config.username)
+        var record = ServerRecord(displayName: displayName, urlString: urlString, username: config.username, backend: backend)
         KeychainService.save(password: config.password, for: record.id)
         servers.append(record)
         setCurrent(record)
@@ -136,8 +136,7 @@ final class ServerStore {
 }
 
 extension String {
-    // trimmed value, or nil when empty/whitespace — keeps blank URL fields from
-    // masquerading as a real cellular override.
+    // Blank fields mean "no override".
     var nonBlank: String? {
         let t = trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : t

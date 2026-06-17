@@ -11,7 +11,7 @@ final class ArtistDetailViewModel {
     var topSongs: [Song] = []
     var allSongs: [Song] = []
     var info: ArtistInfo?
-    // Keep HTML parsing out of SwiftUI's render path.
+    // Keep HTML parsing out of the render path.
     var biography: String?
     var dominantColor: UIColor = .black
     var isLoading = false
@@ -26,11 +26,13 @@ final class ArtistDetailViewModel {
     var similarArtists: [Artist] { info?.similarArtist ?? [] }
 
     var appearsOn: [Album] = []
+    var albumReleases: [Album] { albums.filter { !Self.isSingle($0) } }
+    var singles: [Album] { albums.filter { Self.isSingle($0) } }
 
     var artistImage: UIImage?
     var artworkResolved = false
 
-    func load(client: SubsonicClient) async {
+    func load(client: any MusicService) async {
         isLoading = true
         defer { isLoading = false }
 
@@ -41,17 +43,27 @@ final class ArtistDetailViewModel {
             await applyImage(from: seedArtist.artistImageUrl)
         }
 
-        async let artistReq  = client.artist(id: seedArtist.id)
-        async let infoReq    = client.artistInfo(id: seedArtist.id)
-        async let songsReq   = client.topSongs(artistName: seedArtist.name, count: 15)
-        async let allSongsReq = client.songsForArtist(id: seedArtist.id)
-        let loadedArtist = try? await artistReq
-        fullArtist = loadedArtist
-        albums = Self.sortedAlbums(loadedArtist?.album ?? [])
-        info       = try? await infoReq
-        topSongs   = (try? await songsReq) ?? []
-        allSongs   = (try? await allSongsReq) ?? topSongs
+        if DeveloperExperiments.constrainedConcurrency(default: 4) < 4 {
+            let loadedArtist = try? await client.artist(id: seedArtist.id)
+            fullArtist = loadedArtist
+            albums = Self.sortedAlbums(loadedArtist?.album ?? [])
+            info = try? await client.artistInfo(id: seedArtist.id)
+            topSongs = (try? await client.topSongs(artistName: seedArtist.name, count: 15)) ?? []
+            allSongs = (try? await client.songsForArtist(id: seedArtist.id)) ?? topSongs
+        } else {
+            async let artistReq  = client.artist(id: seedArtist.id)
+            async let infoReq    = client.artistInfo(id: seedArtist.id)
+            async let songsReq   = client.topSongs(artistName: seedArtist.name, count: 15)
+            async let allSongsReq = client.songsForArtist(id: seedArtist.id)
+            let loadedArtist = try? await artistReq
+            fullArtist = loadedArtist
+            albums = Self.sortedAlbums(loadedArtist?.album ?? [])
+            info       = try? await infoReq
+            topSongs   = (try? await songsReq) ?? []
+            allSongs   = (try? await allSongsReq) ?? topSongs
+        }
         applyDownloadedFallbackIfNeeded()
+        applyHiddenAlbumFilters()
 
         let stripped = info?.biography?.strippingHTML
         biography = (stripped?.isEmpty == false) ? stripped : nil
@@ -70,7 +82,18 @@ final class ArtistDetailViewModel {
         let ownAlbumIDs = Set(albums.map(\.id))
         let ownID = fullArtist?.id ?? seedArtist.id
         if let found = try? await client.search(query: seedArtist.name, artistCount: 0, albumCount: 30, songCount: 0).albums {
-            appearsOn = found.filter { !ownAlbumIDs.contains($0.id) && $0.artistId != ownID }
+            HiddenAlbumStore.shared.register(albums: found)
+            appearsOn = HiddenAlbumStore.shared.visibleAlbums(found).filter { !ownAlbumIDs.contains($0.id) && $0.artistId != ownID }
+        }
+    }
+
+    private func applyHiddenAlbumFilters() {
+        HiddenAlbumStore.shared.register(albums: albums)
+        albums = HiddenAlbumStore.shared.visibleAlbums(albums)
+        topSongs = HiddenAlbumStore.shared.visibleSongs(topSongs)
+        allSongs = HiddenAlbumStore.shared.visibleSongs(allSongs)
+        if let fullArtist {
+            self.fullArtist = fullArtist.replacingAlbums(albums)
         }
     }
 
@@ -179,5 +202,11 @@ final class ArtistDetailViewModel {
             ($0.year ?? Int.min, $0.createdDate ?? .distantPast) >
             ($1.year ?? Int.min, $1.createdDate ?? .distantPast)
         }
+    }
+
+    private static func isSingle(_ album: Album) -> Bool {
+        if let songCount = album.songCount { return songCount == 1 }
+        if let songs = album.song { return songs.count == 1 }
+        return false
     }
 }

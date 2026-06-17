@@ -1,7 +1,6 @@
 import SwiftUI
 
-// where a folder listing comes from: the root index of a music folder (getIndexes)
-// or the contents of a specific directory (getMusicDirectory).
+// Folder listing source.
 enum FolderSource: Hashable, Sendable {
     case indexes(musicFolderID: String?)
     case directory(id: String, name: String)
@@ -9,16 +8,15 @@ enum FolderSource: Hashable, Sendable {
 
 // MARK: - Folder contents (embeddable list)
 
-// Renders one level of the file tree as a list of rows. Intentionally has NO
-// ScrollView / background of its own so it can be dropped straight into the
-// Library scroll view (root) or wrapped by FolderBrowseScreen (pushed directory).
+// One level of the file tree; caller owns ScrollView/background.
 struct FolderBrowseView: View {
     let source: FolderSource
-    // optional name filter, used by the Library search field at the root level
+    // Optional root-level search filter.
     var filterText: String = ""
 
     @Environment(AppState.self) private var appState
     @AppStorage("showTrackArtwork") private var showTrackArtwork = true
+    @State private var hiddenAlbums = HiddenAlbumStore.shared
     @State private var entries: [BrowseEntry] = []
     @State private var isLoading = true
     @State private var addToPlaylistSong: Song? = nil
@@ -31,8 +29,12 @@ struct FolderBrowseView: View {
 
     private var filtered: [BrowseEntry] {
         let q = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return entries }
-        return entries.filter { $0.name.localizedCaseInsensitiveContains(q) }
+        let visible = entries.filter { entry in
+            guard let song = entry.song else { return true }
+            return !hiddenAlbums.isSongHidden(song)
+        }
+        guard !q.isEmpty else { return visible }
+        return visible.filter { $0.name.localizedCaseInsensitiveContains(q) }
     }
 
     var body: some View {
@@ -93,7 +95,7 @@ struct FolderBrowseView: View {
             Button {
                 appState.audioPlayer.playQueue(songs, startIndex: 0, source: sourceTitle)
             } label: {
-                Label("Play", systemImage: Symbols.play)
+                Label(L(.action_play), systemImage: Symbols.play)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.background)
                     .frame(maxWidth: .infinity)
@@ -105,7 +107,7 @@ struct FolderBrowseView: View {
             Button {
                 appState.audioPlayer.playQueue(songs.shuffled(), startIndex: 0, source: sourceTitle)
             } label: {
-                Label("Shuffle", systemImage: Symbols.shuffle)
+                Label(L(.action_shuffle), systemImage: Symbols.shuffle)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.primaryText)
                     .frame(maxWidth: .infinity)

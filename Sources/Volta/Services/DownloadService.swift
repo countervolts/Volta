@@ -25,6 +25,7 @@ private struct PendingDownloadResume {
     let url: URL
     let dest: URL
     let manifestURL: URL
+    let method: String
     let resumeData: Data?
 }
 
@@ -41,7 +42,7 @@ final class DownloadService {
     private var lastProgress: [String: Double] = [:]
     private var pendingResumes: [String: PendingDownloadResume] = [:]
     private var userCancelledDownloads: Set<String> = []
-    private var client: SubsonicClient?
+    private var client: (any MusicService)?
 
     private var pinnedCovers: Set<String> = []
     private var pinnedArtists: Set<String> = []
@@ -63,7 +64,7 @@ final class DownloadService {
         }
     }
 
-    func updateClient(_ client: SubsonicClient?) {
+    func updateClient(_ client: (any MusicService)?) {
         self.client = client
     }
 
@@ -83,8 +84,17 @@ final class DownloadService {
             return
         }
         guard case .notDownloaded = state(for: song) else { return }
-        guard let client,
-              let streamURL = client.downloadURL(id: song.id) else { return }
+        guard let client, let streamURL = client.downloadURL(id: song.id) else { return }
+        // Demo servers are stream-only; never save their content to the device.
+        if DemoServers.isDemo(client.config.baseURL) {
+            VoltaNotificationCenter.shared.post(L(.notif_demo_no_downloads), tone: .info)
+            return
+        }
+        startDownload(song: song, streamURL: streamURL, client: client)
+    }
+
+    private func startDownload(song: Song, streamURL: URL, client: any MusicService) {
+        guard case .notDownloaded = state(for: song) else { return }
 
         states[song.id] = .downloading(progress: 0)
         startTimes[song.id] = Date()
@@ -94,16 +104,21 @@ final class DownloadService {
 
         let songID   = song.id
         let title    = song.title
-        let suffix   = song.suffix ?? "mp3"
-        let total    = song.size ?? 0
+        let progressiveDownload = client.downloadIsProgressive(id: songID)
+        let suffix   = Self.downloadFileSuffix(for: song, client: client)
+        let total    = progressiveDownload ? 0 : (song.size ?? 0)
         let destURL  = directory.appendingPathComponent(Self.safeFileName(id: songID, suffix: suffix))
         let manifestURL = manifestURL
         let mode = UserDefaults.standard.string(forKey: "downloadThreadingMode") ?? "multi"
 
         let speedLimit = UserDefaults.standard.integer(forKey: "downloadSpeedLimitKBps") * 1024
+        let useSegmentedTransfer = !progressiveDownload
+            && total > 0
+            && !DeveloperExperiments.isAppWorkerSerialized
+            && ((mode != "single" && total > 1_048_576) || speedLimit > 0)
 
-        if total > 0, (mode != "single" && total > 1_048_576) || speedLimit > 0 {
-            let segments = max(2, min(6, total / (512 * 1024)))
+        if useSegmentedTransfer {
+            let segments = max(2, min(DeveloperExperiments.constrainedConcurrency(default: 6), total / (512 * 1024)))
             AppLogger.shared.log("⬇ \(title) — starting (\(segments) segments, \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))\(speedLimit > 0 ? ", limited" : ""))", category: .other)
             let task = Task { [self] in
                 do {
@@ -116,7 +131,7 @@ final class DownloadService {
                     fail(songID, removing: destURL)
                 } catch {
                     if DownloadService.isTransientNetworkError(error) {
-                        pauseForResume(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, resumeData: nil)
+                        pauseForResume(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, method: "single thread", resumeData: nil)
                     } else {
                         AppLogger.shared.log("⚠ \(title) — segmented failed (\(error.localizedDescription)), falling back to single", category: .other, level: .warning)
                         startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL)
@@ -124,6 +139,9 @@ final class DownloadService {
                 }
             }
             segmentTasks[songID] = task
+        } else if progressiveDownload {
+            AppLogger.shared.log("⬇ \(title) — starting (\(Self.progressiveDownloadMethod), \(suffix))", category: .other)
+            startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, method: Self.progressiveDownloadMethod)
         } else {
             AppLogger.shared.log("⬇ \(title) — starting (single thread\(total > 0 ? ", \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))" : ""))", category: .other)
             startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL)
@@ -133,7 +151,7 @@ final class DownloadService {
     func cancelDownload(for song: Song) {
         AppLogger.shared.log("✗ \(song.title) — download cancelled", category: .other)
         if case .downloading = state(for: song) {
-            VoltaNotificationCenter.shared.post("Download cancelled", tone: .warning)
+            VoltaNotificationCenter.shared.post(L(.notif_download_cancelled), tone: .warning)
         }
         userCancelledDownloads.insert(song.id)
         activeTasks[song.id]?.cancel()
@@ -149,7 +167,7 @@ final class DownloadService {
 
     func removeDownload(for song: Song) {
         AppLogger.shared.log("🗑 \(song.title) — download removed", category: .other)
-        VoltaNotificationCenter.shared.post("Download removed", tone: .info)
+        VoltaNotificationCenter.shared.post(L(.notif_download_removed), tone: .info)
         cancelDownload(for: song)
         if let rec = manifest[song.id] {
             try? FileManager.default.removeItem(atPath: rec.path)
@@ -164,15 +182,15 @@ final class DownloadService {
         if let cover = song.coverArt, !remaining.contains(where: { $0.coverArt == cover }) {
             pinnedCovers.remove(cover)
             let urls = Self.artworkSizes.compactMap { client?.coverArtURL(id: cover, size: $0) }
-            Task.detached(priority: .utility) { await ArtworkLoader.shared.unpin(urls) }
+            DeveloperExperiments.launch(priority: .utility) { await ArtworkLoader.shared.unpin(urls) }
         }
         if let artistId = song.artistId, !remaining.contains(where: { $0.artistId == artistId }) {
             pinnedArtists.remove(artistId)
-            Task.detached(priority: .utility) { await ArtworkLoader.shared.unpinArtist(id: artistId) }
+            DeveloperExperiments.launch(priority: .utility) { await ArtworkLoader.shared.unpinArtist(id: artistId) }
         }
     }
 
-    // Avoid letting a server-supplied song id become a path.
+    // Never trust song ids as paths.
     private nonisolated static func safeFileName(id: String, suffix: String) -> String {
         func clean(_ s: String) -> String {
             s.replacingOccurrences(of: "/", with: "_")
@@ -180,6 +198,17 @@ final class DownloadService {
              .replacingOccurrences(of: "\0", with: "_")
         }
         return "\(clean(id)).\(clean(suffix))"
+    }
+
+    // Label for progressive, length-unknown downloads.
+    private nonisolated static let progressiveDownloadMethod = "Plex transcode"
+
+    private nonisolated static func downloadFileSuffix(for song: Song, client: any MusicService) -> String {
+        // Progressive downloads use the transcode container extension.
+        if client.downloadIsProgressive(id: song.id) {
+            return StreamingPreferences.plexUniversalTranscodeExtension
+        }
+        return song.suffix ?? "mp3"
     }
 
     private nonisolated static func resumeData(from error: Error?) -> Data? {
@@ -207,18 +236,27 @@ final class DownloadService {
         startSingle(song: song, url: url, dest: dest, manifestURL: manifestURL, resumeData: nil)
     }
 
-    private func startSingle(song: Song, url: URL, dest: URL, manifestURL: URL, resumeData: Data?) {
+    private func startSingle(song: Song, url: URL, dest: URL, manifestURL: URL, method: String = "single thread", resumeData: Data? = nil) {
         let songID = song.id
         let title = song.title
         let task: URLSessionDownloadTask
-        let completion: @Sendable (URL?, URLResponse?, Error?) -> Void = { [weak self] tempURL, _, error in
+        let completion: @Sendable (URL?, URLResponse?, Error?) -> Void = { [weak self] tempURL, response, error in
             guard let self else { return }
             if let tempURL, error == nil {
+                if let failure = DownloadService.downloadValidationFailure(tempURL: tempURL, response: response, method: method) {
+                    try? FileManager.default.removeItem(at: tempURL)
+                    Task { @MainActor in
+                        AppLogger.shared.log("✗ \(title) — download rejected: \(failure)", category: .other, level: .error)
+                        self.fail(songID, removing: dest)
+                    }
+                    return
+                }
+
                 try? FileManager.default.removeItem(at: dest)
                 let moved = (try? FileManager.default.moveItem(at: tempURL, to: dest)) != nil
                 Task { @MainActor in
                     if moved {
-                        self.complete(songID, song: song, path: dest.path, manifestURL: manifestURL, method: "single thread")
+                        self.complete(songID, song: song, path: dest.path, manifestURL: manifestURL, method: method)
                     } else {
                         AppLogger.shared.log("✗ \(title) — failed to save file", category: .other, level: .error)
                         self.fail(songID, removing: dest)
@@ -234,7 +272,7 @@ final class DownloadService {
                     }
                     let resumeData = DownloadService.resumeData(from: error)
                     if resumeData != nil || DownloadService.isTransientNetworkError(error) {
-                        self.pauseForResume(song: song, url: url, dest: dest, manifestURL: manifestURL, resumeData: resumeData)
+                        self.pauseForResume(song: song, url: url, dest: dest, manifestURL: manifestURL, method: method, resumeData: resumeData)
                     } else {
                         AppLogger.shared.log("✗ \(title) — download failed: \(msg)", category: .other, level: .error)
                         self.fail(songID, removing: dest)
@@ -245,7 +283,12 @@ final class DownloadService {
         if let resumeData {
             task = URLSession.shared.downloadTask(withResumeData: resumeData, completionHandler: completion)
         } else {
-            task = URLSession.shared.downloadTask(with: url, completionHandler: completion)
+            var req = URLRequest(url: url)
+            // Plex's transcoder needs identity headers; others no-op.
+            for (k, v) in client?.mediaRequestHeaders() ?? [:] {
+                req.setValue(v, forHTTPHeaderField: k)
+            }
+            task = URLSession.shared.downloadTask(with: req, completionHandler: completion)
         }
 
         let obs = task.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
@@ -258,7 +301,45 @@ final class DownloadService {
         task.resume()
     }
 
+    private nonisolated static func downloadValidationFailure(
+        tempURL: URL,
+        response: URLResponse?,
+        method: String
+    ) -> String? {
+        let bytes = fileSize(at: tempURL)
+        if let http = response as? HTTPURLResponse,
+           !(200...299).contains(http.statusCode) {
+            return "HTTP \(http.statusCode)\(smallTextPreview(at: tempURL))"
+        }
+
+        if method == progressiveDownloadMethod, bytes < 1_024 {
+            return "Plex returned only \(bytes) bytes\(smallTextPreview(at: tempURL))"
+        }
+
+        return nil
+    }
+
+    private nonisolated static func smallTextPreview(at url: URL) -> String {
+        guard let data = try? Data(contentsOf: url),
+              !data.isEmpty,
+              data.count <= 4_096,
+              let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return "" }
+        let oneLine = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        return " (\(String(oneLine.prefix(180))))"
+    }
+
+    private nonisolated static func fileSize(at url: URL) -> Int {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+    }
+
     private func pauseForResume(song: Song, url: URL, dest: URL, manifestURL: URL, resumeData: Data?) {
+        pauseForResume(song: song, url: url, dest: dest, manifestURL: manifestURL, method: "single thread", resumeData: resumeData)
+    }
+
+    private func pauseForResume(song: Song, url: URL, dest: URL, manifestURL: URL, method: String, resumeData: Data?) {
         let songID = song.id
         activeTasks.removeValue(forKey: songID)
         observations.removeValue(forKey: songID)
@@ -268,6 +349,7 @@ final class DownloadService {
             url: url,
             dest: dest,
             manifestURL: manifestURL,
+            method: method,
             resumeData: resumeData
         )
         let progress = lastProgress[songID] ?? 0
@@ -298,6 +380,7 @@ final class DownloadService {
             url: pending.url,
             dest: pending.dest,
             manifestURL: pending.manifestURL,
+            method: pending.method,
             resumeData: pending.resumeData
         )
     }
@@ -341,7 +424,7 @@ final class DownloadService {
         }
 
         do {
-            if speedLimit > 0 {
+            if speedLimit > 0 || DeveloperExperiments.isAppWorkerSerialized {
                 let started = Date()
                 var downloaded = 0
                 for i in 0..<segments {
@@ -409,21 +492,23 @@ final class DownloadService {
         } else {
             AppLogger.shared.log("✓ \(song.title) — complete (\(method), \(sizeStr))", category: .other)
         }
-        VoltaNotificationCenter.shared.post("Downloaded \(song.title)", tone: .success)
+        VoltaNotificationCenter.shared.post(L(.notif_downloaded, song.title), tone: .success)
     }
 
     private func prefetchArtwork(for song: Song) {
         guard let client else { return }
 
         if let cover = song.coverArt, pinnedCovers.insert(cover).inserted {
-            let urls = Self.artworkSizes.compactMap { client.coverArtURL(id: cover, size: $0) }
-            Task.detached(priority: .utility) {
+            // Save the original first so downloaded live covers work offline.
+            let originalURL = client.coverArtURL(id: cover)
+            let urls = ([originalURL].compactMap { $0 }) + Self.artworkSizes.compactMap { client.coverArtURL(id: cover, size: $0) }
+            DeveloperExperiments.launch(priority: .utility) {
                 for url in urls { await ArtworkLoader.shared.persist(url) }
             }
         }
 
         if let artistId = song.artistId, pinnedArtists.insert(artistId).inserted {
-            Task.detached(priority: .utility) { [client] in
+            DeveloperExperiments.launch(priority: .utility) { [client] in
                 guard let info = try? await client.artistInfo(id: artistId),
                       let urlStr = info.bestImageUrl, let url = URL(string: urlStr) else { return }
                 await ArtworkLoader.shared.persistArtistImage(id: artistId, from: url)
@@ -491,7 +576,7 @@ final class DownloadService {
             states[id] = .notDownloaded
             total -= size
             AppLogger.shared.log("🗑 Evicted '\(rec.song?.title ?? id)' to stay under \(capMB)MB cap", category: .other)
-            VoltaNotificationCenter.shared.post("Evicted old download", tone: .info)
+            VoltaNotificationCenter.shared.post(L(.notif_evicted_old_download), tone: .info)
         }
         saveManifest(to: manifestURL)
     }
@@ -511,11 +596,29 @@ final class DownloadService {
         } else if let legacy = try? JSONDecoder().decode([String: String].self, from: data) {
             manifest = legacy.mapValues { Record(path: $0, song: nil) }
         }
+        var invalidIDs: [String] = []
         for (id, rec) in manifest {
-            if FileManager.default.fileExists(atPath: rec.path) {
+            let url = URL(fileURLWithPath: rec.path)
+            if Self.isObviouslyInvalidAudioDownload(url) {
+                try? FileManager.default.removeItem(at: url)
+                invalidIDs.append(id)
+                AppLogger.shared.log("Removed invalid tiny download '\(rec.song?.title ?? id)'", category: .other, level: .warning)
+            } else if FileManager.default.fileExists(atPath: rec.path) {
                 states[id] = .downloaded
             }
         }
+        for id in invalidIDs { manifest.removeValue(forKey: id) }
+        saveManifest(to: manifestURL)
+    }
+
+    private nonisolated static func isObviouslyInvalidAudioDownload(_ url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        let ext = url.pathExtension.lowercased()
+        guard ["aac", "alac", "flac", "m4a", "mp3", "ogg", "opus", "wav", "webma"].contains(ext) else {
+            return false
+        }
+        let bytes = fileSize(at: url)
+        return bytes > 0 && bytes < 1_024
     }
 
     private func saveManifest(to url: URL) {

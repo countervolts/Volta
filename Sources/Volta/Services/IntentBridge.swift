@@ -1,20 +1,19 @@
 import Foundation
 
-// Singleton that lets App Intents (which run in-process) reach the live client
-// and audio player without importing SwiftUI or touching @MainActor state directly.
+// App Intents bridge to the live client/player.
 final class IntentBridge: @unchecked Sendable {
     static let shared = IntentBridge()
     private init() {}
 
     private let lock = NSLock()
-    private var _client: SubsonicClient?
+    private var _client: (any MusicService)?
     private var _audioPlayer: AudioPlayer?
 
-    var client: SubsonicClient? {
+    var client: (any MusicService)? {
         lock.withLock { _client }
     }
 
-    func setup(client: SubsonicClient, audioPlayer: AudioPlayer) {
+    func setup(client: any MusicService, audioPlayer: AudioPlayer) {
         lock.withLock {
             _client = client
             _audioPlayer = audioPlayer
@@ -28,7 +27,7 @@ final class IntentBridge: @unchecked Sendable {
         }
     }
 
-    // Must be called from MainActor — dispatches and waits
+    // MainActor caller; dispatches and waits.
     func playQueue(_ songs: [Song], source: String) async {
         await MainActor.run {
             _audioPlayer?.playQueue(songs, source: source)

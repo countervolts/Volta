@@ -14,8 +14,7 @@ struct PickCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // a clear square forces the art to a true 1:1 at full card width,
-            // so non-square server covers can't leave a black bar on the side
+            // Reserve a true square even for odd server artwork.
             GeometryReader { geo in
                 ArtworkView(coverArtID: album.coverArt, size: 600, cornerRadius: 0,
                             onImageLoaded: { image in
@@ -30,16 +29,12 @@ struct PickCard: View {
             .clipped()
 
             VStack(alignment: .leading, spacing: 4) {
-                // always reserve the caption line (a blank space when there's no
-                // genre/year) so every pick card — albums and mixes alike — has
-                // an identical three-line text block and the same overall height.
+                // Reserve the caption line so cards stay the same height.
                 Text(topLabel ?? " ")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.white.opacity(0.75))
                     .lineLimit(1)
-                // single line + tail truncation keeps every card the same height
-                // so a long title can't make this card taller than its neighbours
-                // (which is what left the squished art / side black bar).
+                // Truncate titles rather than stretching the card.
                 Text(album.name)
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)

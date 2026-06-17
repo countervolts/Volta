@@ -1,9 +1,7 @@
 import SwiftUI
 import AVFoundation
 
-// Settings → AutoMix → Preview. Picks two of the user's tracks, shows how much of
-// each plays and where the blend (orange) lands on a timeline, and can play the
-// transition out loud so the AutoMix tuning can be auditioned before committing.
+// Settings AutoMix preview.
 struct AutoMixPreviewView: View {
     @Environment(AppState.self) private var appState
     @State private var engine = AutoMixPreviewEngine()
@@ -91,7 +89,7 @@ struct AutoMixPreviewView: View {
         .background(Capsule().fill(Theme.secondaryBackground))
     }
 
-    // Camelot harmonic-match badge shown between the two tracks.
+    // Camelot match badge.
     @ViewBuilder private var harmonicBadge: some View {
         if let compat = engine.harmonicCompatibility {
             let (text, color, icon): (String, Color, String) =
@@ -131,19 +129,19 @@ struct AutoMixPreviewView: View {
                 let gap: CGFloat = 8
 
                 ZStack(alignment: .topLeading) {
-                    // Song A occupies the first part of the timeline (top row)
+                    // Song A on the top row.
                     Capsule()
                         .fill(Theme.accent.opacity(0.55))
                         .frame(width: max(0, songAW), height: barHeight)
                         .offset(x: 0, y: 0)
 
-                    // Song B starts at the blend and runs to the end (bottom row)
+                    // Song B starts at the blend.
                     Capsule()
                         .fill(Color(red: 0.30, green: 0.62, blue: 0.95).opacity(0.65))
                         .frame(width: max(0, songBW), height: barHeight)
                         .offset(x: leadInW, y: barHeight + gap)
 
-                    // The blend window — where AutoMix is actually happening.
+                    // Active blend window.
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(Color.orange.opacity(0.30))
                         .overlay(
@@ -252,9 +250,7 @@ struct AutoMixPreviewView: View {
     }
 }
 
-// Drives the audible + visual AutoMix preview. Mirrors the live AudioPlayer blend
-// (volume crossfade + optional beat-match via AutoMixTempo) over a short clip of
-// two tracks, without disturbing the main queue.
+// Audible + visual AutoMix preview, separate from the main queue.
 @MainActor
 @Observable
 final class AutoMixPreviewEngine {
@@ -264,15 +260,17 @@ final class AutoMixPreviewEngine {
     private(set) var keyB: MusicalKey?
     private var gridA: AutoMixBeatGrid?
     private var gridB: AutoMixBeatGrid?
+    private var analysisA: AutoMixTrackAnalysis?
+    private var analysisB: AutoMixTrackAnalysis?
+    // Incoming preview duck; preview path has no ReplayGain.
+    private var volumeMatchB: Float = 1
     private(set) var isLoading = false
     private(set) var isPlaying = false
     private(set) var isBlending = false
     private(set) var progress: Double = 0
     private(set) var errorMessage: String?
 
-    // Timeline (seconds). Side clips are fixed so there's musical context either
-    // side; the blend tracks the user's AutoMix duration so the orange section
-    // grows/shrinks with the setting.
+    // Timeline seconds with fixed context on each side.
     private(set) var leadIn: TimeInterval = 5
     private(set) var leadOut: TimeInterval = 5
     private(set) var blend: TimeInterval = 8
@@ -295,11 +293,11 @@ final class AutoMixPreviewEngine {
         stop()
         songA = nil; songB = nil
         keyA = nil; keyB = nil; gridA = nil; gridB = nil; errorMessage = nil
+        analysisA = nil; analysisB = nil; volumeMatchB = 1
         await pickSongs()
     }
 
-    // Camelot compatibility of the two previewed tracks, 0…1 (nil if a key is
-    // unknown). Drives the harmonic badge + how long the blend runs.
+    // Camelot compatibility for the preview pair.
     var harmonicCompatibility: Double? {
         guard let keyA, let keyB else { return nil }
         return MusicalKey.compatibility(keyA, keyB)
@@ -322,7 +320,7 @@ final class AutoMixPreviewEngine {
             errorMessage = "Add or download some music to preview AutoMix."
             return
         }
-        // Downloaded candidates first (fast, cached); only fall back to streamed.
+        // Prefer downloaded candidates.
         pool.sort { (DownloadService.shared.localURL(for: $0) != nil ? 0 : 1)
                   < (DownloadService.shared.localURL(for: $1) != nil ? 0 : 1) }
         if pool.allSatisfy({ DownloadService.shared.localURL(for: $0) != nil }) { pool.shuffle() }
@@ -331,11 +329,9 @@ final class AutoMixPreviewEngine {
         songA = a
         let aAnalysis = await appState?.audioPlayer.autoMixAnalysis(for: a)
         guard songA?.id == a.id else { return }
-        keyA = aAnalysis?.key; gridA = aAnalysis?.grid
+        keyA = aAnalysis?.key; gridA = aAnalysis?.grid; analysisA = aAnalysis
 
-        // Audition the feature at its best: from a handful of candidates, pick the
-        // Up Next track that mixes most smoothly with A (harmonic + lockable tempo)
-        // rather than a fully random pair — most random pairs clash on key.
+        // Pick a decent pair instead of two fully random tracks.
         let candidates = Array(pool.dropFirst().prefix(6))
         var best: (song: Song, analysis: AutoMixTrackAnalysis?, score: Double)?
         for cand in candidates {
@@ -343,7 +339,7 @@ final class AutoMixPreviewEngine {
             let ca = await appState?.audioPlayer.autoMixAnalysis(for: cand)
             let score = Self.mixScore(aKey: keyA, aGrid: gridA, bKey: ca?.key, bGrid: ca?.grid)
             if best == nil || score > best!.score { best = (cand, ca, score) }
-            if score >= 0.85 { break }   // great match — stop early
+            if score >= 0.85 { break }   // good enough
         }
         guard songA?.id == a.id, let chosen = best else {
             errorMessage = "Add or download some music to preview AutoMix."
@@ -352,11 +348,11 @@ final class AutoMixPreviewEngine {
         songB = chosen.song
         keyB = chosen.analysis?.key
         gridB = chosen.analysis?.grid
+        analysisB = chosen.analysis
         computePlan(a: a)
     }
 
-    // How well two tracks would mix: Camelot harmonic compatibility plus a bonus
-    // when their tempos can actually lock into a beat-match.
+    // Rough mix score: key compatibility plus lockable tempo.
     private static func mixScore(aKey: MusicalKey?, aGrid: AutoMixBeatGrid?, bKey: MusicalKey?, bGrid: AutoMixBeatGrid?) -> Double {
         var score = (aKey != nil && bKey != nil) ? MusicalKey.compatibility(aKey, bKey) : 0.5
         if let aGrid, let bGrid, AutoMixTempo.outgoingRate(currentBPM: aGrid.bpm, nextBPM: bGrid.bpm) != nil {
@@ -367,34 +363,94 @@ final class AutoMixPreviewEngine {
 
     private func computePlan(a: Song) {
         var b = Self.crossSongBlend()
-        // Harmonic length scaling — mirrors the live engine.
+        // Match the live engine's cold/arrhythmic handling.
+        if analysisA?.endsCold == true {
+            b = min(b, 3.2)
+        } else if gridA == nil, gridB == nil {
+            let raw = UserDefaults.standard.double(forKey: "automixMaxBlendSeconds")
+            let maxBlend = min(18, max(4, raw > 0 ? raw : 10))
+            b = min(maxBlend, max(b, 10))
+        }
+        // Match live harmonic length scaling.
         let harmonicOn = UserDefaults.standard.object(forKey: "automixHarmonic") as? Bool ?? true
         if harmonicOn, let compat = harmonicCompatibility {
             if compat < 0.5 { b = max(2.5, b * 0.6) }
             else if compat < 0.85 { b = max(3, b * 0.85) }
         }
+        // Beat-locked pairs blend in whole bars.
+        if let ga = gridA, let gb = gridB,
+           AutoMixTempo.outgoingRate(currentBPM: ga.bpm, nextBPM: gb.bpm) != nil {
+            let bar = gb.period * 4
+            if bar > 0.5 {
+                let raw = UserDefaults.standard.double(forKey: "automixMaxBlendSeconds")
+                let maxBlend = min(18, max(4, raw > 0 ? raw : 10))
+                let bars = max(1, (b / bar).rounded())
+                b = min(maxBlend, max(2, bars * bar))
+            }
+        }
+        // Vocal guard for double-vocal handoffs.
+        if let durA = analysisA?.duration, durA > 0,
+           let vocalTail = analysisA?.vocalTailEnd, vocalTail > durA - 3 {
+            let entryEst = max(gridB?.firstStrongBeat ?? 0, analysisB?.mixInPoint ?? 0)
+            if let vocalIn = analysisB?.vocalIntroStart, vocalIn < entryEst + b + 1 {
+                b = min(b, 4)
+            }
+        }
         blend = b
         leadIn = 5
         leadOut = 5
-        let durA = Double(a.duration ?? 180)
+        let sweetSpotOn = UserDefaults.standard.object(forKey: "automixSweetSpot") as? Bool ?? true
+        let analysedDurA = analysisA?.duration ?? 0
+        let durA = analysedDurA > 0 ? analysedDurA : Double(a.duration ?? 180)
         let need = leadIn + blend + 1
-        let ideal = max(20, durA * 0.35)
+        // Anchor near the live engine's outro exit.
+        let ideal: TimeInterval
+        if sweetSpotOn, var out = analysisA?.mixOutPoint, out > 0 {
+            // Do not exit mid-line.
+            if let vocalTail = analysisA?.vocalTailEnd, vocalTail > out, vocalTail < durA - 2 {
+                out = min(durA - 2, vocalTail + 0.3)
+            }
+            ideal = max(20, out - leadIn)
+        } else {
+            ideal = max(20, durA * 0.35)
+        }
         var startA = max(0, min(ideal, durA - need))
-        // Snap so the blend opens on a downbeat of track A (the phase-locked drop).
+        // Open on A's downbeat.
         if let ga = gridA {
             let open = ga.downbeat(atOrAfter: startA + leadIn)
             startA = max(0, min(open - leadIn, durA - need))
         }
         clipStartA = startA
-        // Start track B on its first strong downbeat (skip soft intro, land on beat).
+        // Start B on its first strong downbeat.
         if let gb = gridB {
-            clipStartB = gb.downbeat(atOrAfter: max(0, gb.firstStrongBeat))
+            var entryFloor = max(0, gb.firstStrongBeat)
+            if sweetSpotOn, let inPoint = analysisB?.mixInPoint, inPoint > entryFloor + 1.0 {
+                entryFloor = inPoint
+            }
+            var entry = gb.downbeat(atOrAfter: entryFloor)
+            // Prefer a nearby 4-bar phrase boundary.
+            let bar = gb.period * 4
+            let phrase = bar * 4
+            let anchor = gb.downbeat(atOrAfter: gb.firstStrongBeat)
+            if phrase > 0, entry > anchor + 0.01 {
+                let k = ((entry - anchor) / phrase).rounded(.up)
+                let phraseEntry = anchor + k * phrase
+                if phraseEntry - entry <= bar * 2 + 0.01 { entry = phraseEntry }
+            }
+            clipStartB = entry
         } else {
             clipStartB = 0
         }
+        // Duck a hotter incoming master.
+        volumeMatchB = 1
+        let loudnessOn = UserDefaults.standard.object(forKey: "automixLoudnessMatch") as? Bool ?? true
+        if loudnessOn, let ra = analysisA?.rms, let rb = analysisB?.rms, ra > 0, rb > 0 {
+            let ratio = ra / rb
+            if ratio < 0.95 { volumeMatchB = max(0.7, ratio) }
+        }
     }
 
-    // Mirrors PlaybackTransitionSettings.automixDuration for two unrelated tracks.
+    // Same duration rule as live AutoMix for unrelated tracks.
     private static func crossSongBlend() -> TimeInterval {
         let style = UserDefaults.standard.string(forKey: "automixStyle") ?? "balanced"
         let raw = UserDefaults.standard.double(forKey: "automixMaxBlendSeconds")
@@ -408,8 +464,7 @@ final class AutoMixPreviewEngine {
         return min(maxBlend, max(3, base))
     }
 
-    // Constant rate for the outgoing track so its beats match the incoming track's
-    // tempo, or nil when BPM Match is off / tempos aren't known or close enough.
+    // Outgoing-track tempo bend, when the tempos are close enough.
     private func outgoingRate() -> Float? {
         let enabled = UserDefaults.standard.object(forKey: "automixTempoMatch") as? Bool ?? true
         guard enabled, let a = gridA?.bpm, let b = gridB?.bpm,
@@ -426,8 +481,7 @@ final class AutoMixPreviewEngine {
         appState?.audioPlayer.pause()
         try? AVAudioSession.sharedInstance().setActive(true)
 
-        // One cheap pitch-preserving algorithm for both, fixed at creation — never
-        // switched mid-playback (which re-primes the unit and drops to silence).
+        // Pick the pitch algorithm once.
         let outgoingRate = self.outgoingRate()
         let itemA = AVPlayerItem(url: urlA)
         itemA.audioTimePitchAlgorithm = .timeDomain
@@ -441,9 +495,7 @@ final class AutoMixPreviewEngine {
         playerA = pa
         playerB = pb
 
-        // Both players start together so the incoming track is already rolling
-        // (warmed up, past any leading silence) by the time the blend begins —
-        // that's what keeps the start of the mix from being silent then jumping in.
+        // Start both players together so B is already rolling at the blend.
         pa.seek(to: CMTime(seconds: clipStartA, preferredTimescale: 600))
         pb.seek(to: CMTime(seconds: clipStartB, preferredTimescale: 600))
 
@@ -468,14 +520,12 @@ final class AutoMixPreviewEngine {
                 self.progress = min(1, t / total)
 
                 if t < leadIn {
-                    // intro: only track A is heard, track B plays underneath muted
+                    // Intro: A audible, B muted.
                     pa.volume = 1
                     pb.volume = 0
                 } else if !blendDone {
                     self.isBlending = true
-                    // At the instant the blend opens, nudge B onto its nearest
-                    // downbeat (still muted, so inaudible) so its beats land on A's —
-                    // the same phase lock the live engine performs.
+                    // Muted downbeat seek for B.
                     if !phaseLocked {
                         phaseLocked = true
                         if let gb = self.gridB {
@@ -489,15 +539,12 @@ final class AutoMixPreviewEngine {
                     }
                     let x = min(1, max(0, (t - leadIn) / blend))
                     if x < 1 {
-                        // constant-power (equal-power) eased blend — no mid dip, so
-                        // loudness stays steady; matches the live AutoMix character.
+                        // Equal-power eased blend.
                         let phase = x * x * (3 - 2 * x)
                         let theta = phase * (Double.pi / 2)
                         pa.volume = Float(cos(theta))
-                        pb.volume = Float(sin(theta))
-                        // Bend the outgoing track (A) once, ~15% into the fade so it's
-                        // already ducking (masks the engage). Single change = no stutter;
-                        // incoming (B) plays clean at its true tempo.
+                        pb.volume = Float(sin(theta)) * self.volumeMatchB
+                        // Bend A once after it is already ducking.
                         if let outgoingRate, !blendStarted, x >= 0.15 {
                             blendStarted = true
                             pa.rate = outgoingRate
@@ -507,7 +554,7 @@ final class AutoMixPreviewEngine {
                         self.isBlending = false
                         pa.volume = 0
                         pa.pause()
-                        pb.volume = 1
+                        pb.volume = self.volumeMatchB
                     }
                 }
 

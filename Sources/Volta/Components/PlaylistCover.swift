@@ -1,8 +1,6 @@
 import SwiftUI
 
-// playlist artwork that prefers a user-set custom cover (stored on-device via
-// PlaylistCoverStore) and falls back to the server cover art. drop-in for the
-// ArtworkView used elsewhere; keeps dominant-colour extraction working.
+// Playlist artwork with local custom-cover support.
 struct PlaylistCover: View {
     let playlist: Playlist
     var size: Int?
@@ -20,7 +18,7 @@ struct PlaylistCover: View {
         self.size = size
         self.cornerRadius = cornerRadius
         self.onImageLoaded = onImageLoaded
-        // seed synchronously so a custom cover never flashes the server art first
+        // Avoid flashing server art before a custom cover loads.
         _custom = State(initialValue: PlaylistCoverStore.shared.cachedImage(for: playlist.id))
         _hasCustom = State(initialValue: PlaylistCoverStore.shared.hasCover(for: playlist.id))
     }
@@ -38,8 +36,7 @@ struct PlaylistCover: View {
                 }
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             } else if hasCustom {
-                // a custom cover exists on disk but isn't decoded yet — show a
-                // placeholder rather than fetching/flashing the server cover
+                // Custom cover exists but has not decoded yet.
                 placeholder
             } else {
                 ArtworkView(coverArtID: playlist.coverArt, size: size,

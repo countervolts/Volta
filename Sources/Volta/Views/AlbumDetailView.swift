@@ -15,13 +15,19 @@ struct AlbumDetailView: View {
     @State private var drillAlbum: Album? = nil
     @State private var drillArtist: Artist? = nil
     @State private var showAlbumLosslessInfo = false
+    @State private var animatedCover: UIImage?
+
+    // when opened from an artist profile, the animated header gets the same
+    // pull-to-zoom (stretchy) behaviour the artist profile header has
+    private let fromArtist: Bool
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var iPadPanel: iPadDetailPanel = .songs
 
-    init(album: Album) {
+    init(album: Album, fromArtist: Bool = false) {
         _vm = State(wrappedValue: AlbumDetailViewModel(album: album))
+        self.fromArtist = fromArtist
     }
 
     private var bg: Color {
@@ -69,15 +75,42 @@ struct AlbumDetailView: View {
                 }
             })
         }
-        .task { if let c = appState.client { await vm.load(client: c) } }
+        .task {
+            if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
+                if let c = appState.client { await vm.load(client: c) }
+                await loadAnimatedCover()
+            } else {
+                // Fetch animated cover alongside the song list.
+                async let cover: Void = loadAnimatedCover()
+                if let c = appState.client { await vm.load(client: c) }
+                await cover
+            }
+        }
+    }
+
+    // Album detail gets live artwork; grids stay static.
+    private func loadAnimatedCover() async {
+        guard LiveArtworkSettings.shouldShowAnimatedArtwork,
+              LiveArtworkSettings.animateAlbumHeaders,
+              let client = appState.client,
+              let url = client.coverArtURL(id: vm.album.coverArt) else { return }
+        guard let image = await ArtworkLoader.shared.animatedImage(for: url) else { return }
+        animatedCover = image
+        if let first = image.images?.first {
+            vm.setDominantColor(ColorExtractor.dominantColor(from: first))
+        }
     }
 
     private var phoneScrollView: some View {
         ScrollView {
             VStack(spacing: 0) {
-                artworkSection
-                infoSection
-                actionRow
+                if let animated = animatedCover {
+                    animatedHeader(animated)
+                } else {
+                    artworkSection
+                    infoSection
+                    actionRow
+                }
                 descriptionSection
                 trackList
                 footer
@@ -86,6 +119,39 @@ struct AlbumDetailView: View {
             }
         }
         .scrollIndicators(.hidden)
+        .coordinateSpace(name: Self.scrollSpace)
+        // Full-bleed animated header.
+        .ignoresSafeArea(.container, edges: animatedCover != nil ? .top : [])
+    }
+
+    private static let scrollSpace = "albumScroll"
+
+    // Taller animated header with the normal album controls over it.
+    private func animatedHeader(_ animated: UIImage) -> some View {
+        // Stretch on pull-down when opened from an artist profile.
+        GeometryReader { geo in
+            let stretch = fromArtist ? max(0, geo.frame(in: .named(Self.scrollSpace)).minY) : 0
+            ZStack(alignment: .bottom) {
+                AnimatedImageView(image: animated)
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.38),
+                        .init(color: bg.opacity(0.55), location: 0.62),
+                        .init(color: bg.opacity(0.9), location: 0.82),
+                        .init(color: bg, location: 1)
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
+                VStack(spacing: 0) {
+                    infoSection
+                    actionRow
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height + stretch)
+            .clipped()
+            .offset(y: -stretch)
+        }
+        .aspectRatio(1 / 1.35, contentMode: .fit)
     }
 
     private var iPadLayout: some View {
@@ -141,16 +207,28 @@ struct AlbumDetailView: View {
 
     // MARK: - Artwork
 
+    @ViewBuilder
     private var artworkSection: some View {
-        ArtworkView(coverArtID: vm.album.coverArt, size: 800, cornerRadius: 14,
-                    onImageLoaded: { image in
-                        let color = ColorExtractor.dominantColor(from: image)
-                        vm.setDominantColor(color)
-                    })
-            .aspectRatio(1, contentMode: .fit)
-            .padding(.horizontal, 36)
-            .shadow(color: .black.opacity(0.45), radius: 28, x: 0, y: 10)
-            .padding(.top, 32)
+        if let animated = animatedCover, sizeClass == .regular {
+            // iPad keeps the card layout; only the artwork inside animates
+            // (compact animated covers use animatedHeader instead)
+            ZStack { AnimatedImageView(image: animated) }
+                .aspectRatio(1, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.horizontal, 36)
+                .shadow(color: .black.opacity(0.45), radius: 28, x: 0, y: 10)
+                .padding(.top, 32)
+        } else {
+            ArtworkView(coverArtID: vm.album.coverArt, size: 800, cornerRadius: 14,
+                        onImageLoaded: { image in
+                            let color = ColorExtractor.dominantColor(from: image)
+                            vm.setDominantColor(color)
+                        })
+                .aspectRatio(1, contentMode: .fit)
+                .padding(.horizontal, 36)
+                .shadow(color: .black.opacity(0.45), radius: 28, x: 0, y: 10)
+                .padding(.top, 32)
+        }
     }
 
     // MARK: - Info
@@ -319,7 +397,6 @@ struct AlbumDetailView: View {
                 },
                 onSwipePlayNext: {
                     appState.audioPlayer.playNext(song)
-                    showToast("Playing Next")
                 }
             ) {
                 SongMenu(

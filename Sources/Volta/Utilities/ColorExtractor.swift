@@ -2,8 +2,7 @@ import UIKit
 import CoreImage
 import SwiftUI
 
-// extracts a representative color from a UIImage using CIAreaAverage.
-// returns a darkened version suitable for use as a full-screen background.
+// Tiny color helpers for artwork-driven backgrounds.
 enum ColorExtractor {
 
     static func dominantColor(from image: UIImage) -> UIColor {
@@ -32,15 +31,15 @@ enum ColorExtractor {
         )
     }
 
-    // darkened variant for full-screen backgrounds
+    // dark full-screen variant
     static func backgroundVariant(of color: UIColor) -> UIColor {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         color.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-        // pull saturation up slightly, brightness way down for dark aesthetic
+        // A little saturation, then enough darkness for white UI.
         return UIColor(hue: h, saturation: min(s * 1.15, 1.0), brightness: max(b * 0.52, 0.12), alpha: 1)
     }
 
-    // whether a color is perceptually light (use dark text on top)
+    // true when dark text will read better
     static func isLight(_ color: UIColor) -> Bool {
         var r: CGFloat = 0, g: CGFloat = 0, bl: CGFloat = 0, a: CGFloat = 0
         color.getRed(&r, green: &g, blue: &bl, alpha: &a)

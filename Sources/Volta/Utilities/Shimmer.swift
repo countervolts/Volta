@@ -1,6 +1,6 @@
 import SwiftUI
 
-// animated shimmer for skeleton loading states.
+// Skeleton loading shimmer.
 struct Shimmer: ViewModifier {
     @State private var phase: CGFloat = -1
 

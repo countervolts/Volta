@@ -25,15 +25,7 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                if isServerUnavailable {
-                    serverUnavailableState
-                } else if vm.isLoading && !vm.hasLoaded {
-                    loadingState
-                } else if isEmpty {
-                    emptyState
-                } else {
-                    sections
-                }
+                homeBody
             }
             .background(Theme.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
@@ -67,11 +59,11 @@ struct HomeView: View {
             MixDetailView(mix: mix)
                 .zoomNavigationTransition(sourceID: mix.id, in: heroNamespace)
         case .recentlyPlayedAll:
-            FullMediaGrid(title: "Recently Played", items: vm.recentlyPlayed) { item in
+            FullMediaGrid(title: L(.home_recently_played), items: vm.recentlyPlayed) { item in
                 navigate(to: item)
             }
         case .newReleasesAll:
-            FullMediaGrid(title: "Recently Added", items: vm.newReleases.map(MediaItem.init(album:))) { item in
+            FullMediaGrid(title: L(.home_recently_added), items: vm.newReleases.map(MediaItem.init(album:))) { item in
                 navigate(to: item)
             }
         }
@@ -97,12 +89,134 @@ struct HomeView: View {
         networkMonitor.connection == .none || vm.serverUnavailable
     }
 
+    @ViewBuilder
+    private var homeBody: some View {
+        if isServerUnavailable {
+            let downloads = downloadedSongs
+            if downloads.isEmpty {
+                serverUnavailableState
+            } else {
+                offlineHome(downloads)
+            }
+        } else if vm.isLoading && !vm.hasLoaded {
+            loadingState
+        } else if isEmpty {
+            emptyState
+        } else {
+            sections
+        }
+    }
+
+    // MARK: - Offline home (built from downloaded music)
+
+    private var downloadedSongs: [Song] {
+        DownloadService.shared.downloadedSongs()
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    private func downloadedAlbums(from songs: [Song]) -> [Album] {
+        var byID: [String: Album] = [:]
+        for song in songs {
+            guard let aid = song.albumId, byID[aid] == nil else { continue }
+            byID[aid] = Album(
+                id: aid, name: song.album ?? "Unknown Album", artist: song.artist,
+                artistId: song.artistId, coverArt: song.coverArt, songCount: nil,
+                duration: nil, playCount: nil, created: nil, year: song.year,
+                genre: song.genre, starred: nil, comment: nil, recordLabel: nil, song: nil
+            )
+        }
+        return byID.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func offlineHome(_ songs: [Song]) -> some View {
+        let albums = downloadedAlbums(from: songs)
+        return VStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L(.home_offline))
+                        .font(.largeTitle.bold())
+                        .foregroundStyle(Theme.primaryText)
+                        .lineLimit(1)
+                    Text(L(.home_downloaded_music))
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                Spacer()
+                ServerMenuButton(onOpenSettings: { showSettings = true })
+            }
+            .padding(.horizontal, pad)
+            .padding(.top, 2)
+
+            HStack(spacing: 12) {
+                Button {
+                    appState.audioPlayer.playQueue(songs, startIndex: 0, source: "Downloads")
+                } label: {
+                    Label(L(.action_play), systemImage: Symbols.play)
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Theme.accent, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    appState.audioPlayer.playQueue(songs.shuffled(), startIndex: 0, source: "Downloads")
+                } label: {
+                    Label(L(.action_shuffle), systemImage: Symbols.shuffle)
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Theme.secondaryBackground, in: Capsule())
+                        .foregroundStyle(Theme.primaryText)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, pad)
+
+            if !albums.isEmpty {
+                section(title: L(.home_downloaded_albums)) {
+                    HorizontalMediaRow(items: albums.map(MediaItem.init(album:))) { item in
+                        if let album = item.albumRef { path.append(.album(album)) }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 14) {
+                SectionHeaderView(L(.home_downloaded_songs))
+                    .padding(.horizontal, pad)
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
+                        TrackRow(
+                            song: song,
+                            index: index + 1,
+                            isCurrentlyPlaying: appState.audioPlayer.currentSong?.id == song.id,
+                            onTap: { appState.audioPlayer.playQueue(songs, startIndex: index, source: "Downloads") },
+                            showArtist: true,
+                            leadingArtwork: true,
+                            onSwipePlayNext: { appState.audioPlayer.playNext(song) }
+                        ) {
+                            SongMenu(
+                                song: song,
+                                onDelete: { DownloadService.shared.removeDownload(for: song) },
+                                deleteLabel: L(.action_remove_download)
+                            )
+                        }
+                        .padding(.horizontal, pad)
+                    }
+                }
+            }
+        }
+        .padding(.top, -10)
+        .padding(.bottom, 120)
+    }
+
     private var sections: some View {
         VStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
             homeHeader
 
             if !vm.picksFeed.isEmpty {
-                section(title: "Picks for You") {
+                section(title: L(.home_picks_for_you)) {
                     HorizontalPickRow(items: vm.picksFeed,
                         onSelectAlbum: { path.append(.album($0)) },
                         onSelectMix: { path.append(.mix($0)) },
@@ -113,7 +227,7 @@ struct HomeView: View {
 
             if !vm.recentlyPlayed.isEmpty {
                 VStack(alignment: .leading, spacing: 14) {
-                    SectionHeaderView("Recently Played") {
+                    SectionHeaderView(L(.home_recently_played)) {
                         path.append(.recentlyPlayedAll)
                     }
                     .padding(.horizontal, pad)
@@ -124,7 +238,7 @@ struct HomeView: View {
             }
 
             if !vm.topArtists.isEmpty {
-                section(title: "Artists") {
+                section(title: L(.home_artists)) {
                     ArtistScrollRow(artists: vm.topArtists) { artist in
                         path.append(.artist(artist))
                     }
@@ -132,7 +246,7 @@ struct HomeView: View {
             }
 
             ForEach(vm.moreLike) { item in
-                section(title: "More Like \(item.artistName)") {
+                section(title: L(.home_more_like, item.artistName)) {
                     HorizontalMediaRow(items: item.albums.map(MediaItem.init(album:))) { mediaItem in
                         if let album = mediaItem.albumRef { path.append(.album(album)) }
                     }
@@ -140,7 +254,7 @@ struct HomeView: View {
             }
 
             if !vm.discover.isEmpty {
-                section(title: "Discover") {
+                section(title: L(.home_discover)) {
                     HorizontalMediaRow(items: vm.discover.map(MediaItem.init(album:))) { mediaItem in
                         if let album = mediaItem.albumRef { path.append(.album(album)) }
                     }
@@ -148,7 +262,7 @@ struct HomeView: View {
             }
 
             if !vm.newReleases.isEmpty {
-                section(title: "Recently Added", seeAll: { path.append(.newReleasesAll) }) {
+                section(title: L(.home_recently_added), seeAll: { path.append(.newReleasesAll) }) {
                     HorizontalMediaRow(items: vm.newReleases.map(MediaItem.init(album:))) { mediaItem in
                         if let album = mediaItem.albumRef { path.append(.album(album)) }
                     }
@@ -169,7 +283,7 @@ struct HomeView: View {
 
     private var homeHeader: some View {
         HStack(alignment: .center, spacing: 12) {
-            Text("Home")
+            Text(L(.tab_home))
                 .font(.largeTitle.bold())
                 .foregroundStyle(Theme.primaryText)
                 .lineLimit(1)
@@ -242,10 +356,10 @@ struct HomeView: View {
             Image(systemName: Symbols.warning)
                 .font(.system(size: 34))
                 .foregroundStyle(Theme.secondaryText)
-            Text("Nothing here yet")
+            Text(L(.home_nothing_here))
                 .font(.headline)
                 .foregroundStyle(Theme.primaryText)
-            Text("Your library looks empty or the server is unreachable.")
+            Text(L(.home_empty_message))
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
                 .multilineTextAlignment(.center)
@@ -260,17 +374,17 @@ struct HomeView: View {
             Image(systemName: "wifi.slash")
                 .font(.system(size: 38, weight: .ultraLight))
                 .foregroundStyle(Theme.secondaryText)
-            Text("Server Unreachable")
+            Text(L(.home_server_unreachable))
                 .font(.headline)
                 .foregroundStyle(Theme.primaryText)
-            Text("Picks for You needs the server. Try reconnecting, or listen to downloaded music from the Library tab.")
+            Text(L(.home_server_unreachable_message))
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
                 .multilineTextAlignment(.center)
             Button {
                 Task { await vm.load(appState: appState, force: true) }
             } label: {
-                Label("Retry Connection", systemImage: "arrow.clockwise")
+                Label(L(.action_retry_connection), systemImage: "arrow.clockwise")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
@@ -288,20 +402,21 @@ struct HomeView: View {
     private func saveMixAsPlaylist(_ mix: MusicMix) {
         guard !savingMixIDs.contains(mix.id), let client = appState.client else { return }
         savingMixIDs.insert(mix.id)
-        showToast("Saving \(mix.title)")
+        let title = mix.localizedTitle
+        showToast(L(.home_saving_mix, title))
 
         Task {
             do {
-                let name = try await PlaylistWriter.saveMixAsPlaylist(mix, client: client)
+                let name = try await PlaylistWriter.saveMixAsPlaylist(mix, client: client, title: title)
                 await MainActor.run {
                     savingMixIDs.remove(mix.id)
-                    showToast("Saved to \(name)")
+                    showToast(L(.home_saved_to, name))
                 }
             } catch {
                 AppLogger.shared.log("Failed saving mix '\(mix.title)' as playlist: \(error.localizedDescription)", category: .other, level: .error)
                 await MainActor.run {
                     savingMixIDs.remove(mix.id)
-                    showToast("Couldn't save mix")
+                    showToast(L(.home_save_mix_failed))
                 }
             }
         }

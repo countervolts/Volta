@@ -8,10 +8,9 @@ struct TrackRow<Trailing: View>: View {
     var onTap: () -> Void = {}
     var showDownloadState: Bool = true
     var showArtist: Bool = false
-    // show the song's cover art on the left instead of the track number
+    // cover art instead of track number
     var leadingArtwork: Bool = false
-    // swipe-right to play next (these rows aren't in a List, so we drive it
-    // with a drag gesture instead of native swipeActions)
+    // custom swipe, since these rows are not List rows
     var onSwipePlayNext: (() -> Void)? = nil
     @State private var dragX: CGFloat = 0
     @State private var swipeAxis: SwipeAxis?
@@ -36,7 +35,7 @@ struct TrackRow<Trailing: View>: View {
         Double(min(1, max(0, (dragX - 36) / 42)))
     }
 
-    // subtitle under the title: artist (for playlists) and/or featured artists
+    // artist/features line under the title
     private var subtitle: String? {
         let extra = song.contributes.flatMap { $0.isEmpty ? nil : $0 }
         if showArtist {

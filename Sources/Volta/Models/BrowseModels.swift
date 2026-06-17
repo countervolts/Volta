@@ -1,8 +1,7 @@
 import Foundation
 
-// Models for the folder/directory browser (getMusicFolders / getIndexes /
-// getMusicDirectory). These mirror the raw Subsonic file tree, which is useful on
-// servers where the tag-based (id3) metadata is messy or incomplete.
+// Raw folder tree models for getMusicFolders / getIndexes / getMusicDirectory.
+// Handy when tags are messy but folders are clean.
 
 struct MusicFolder: Identifiable, Hashable, Sendable, Decodable {
     let id: String
@@ -14,9 +13,15 @@ struct MusicFolder: Identifiable, Hashable, Sendable, Decodable {
         id = c.flexibleID(.id)
         name = (try? c.decode(String.self, forKey: .name)) ?? "Music"
     }
+
+    // Needed by backends that build folders directly.
+    init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
 }
 
-// a node in the file tree: either a sub-directory to drill into or a playable song.
+// File tree node: folder or playable song.
 struct BrowseEntry: Identifiable, Hashable, Sendable {
     let id: String
     let name: String
@@ -25,8 +30,7 @@ struct BrowseEntry: Identifiable, Hashable, Sendable {
     let song: Song?   // present when !isDirectory
 }
 
-// raw getMusicDirectory / getIndexes child. Decoded leniently because servers vary
-// wildly in which fields they populate and whether ids arrive as strings or ints.
+// Raw getMusicDirectory / getIndexes child. Server payloads vary a lot.
 struct Child: Decodable, Sendable {
     let id: String
     let isDir: Bool
@@ -95,8 +99,7 @@ struct Child: Decodable, Sendable {
     }
 }
 
-// getIndexes nests its top-level directories under `index[].artist[]` — a shortcut
-// with just id + name (and sometimes a cover).
+// getIndexes puts top-level directories under `index[].artist[]`.
 struct DirectoryRef: Decodable, Sendable {
     let id: String
     let name: String
@@ -148,8 +151,7 @@ struct DirectoryContainer: Decodable, Sendable {
 // MARK: - Flexible id decoding
 
 extension KeyedDecodingContainer {
-    // Subsonic ids are usually strings, but a few (notably music-folder ids) come
-    // back as integers. Accept either and normalise to a String.
+    // Music-folder ids sometimes come back as ints.
     func flexibleID(_ key: Key) -> String {
         if let s = try? decode(String.self, forKey: key) { return s }
         if let i = try? decode(Int.self, forKey: key) { return String(i) }

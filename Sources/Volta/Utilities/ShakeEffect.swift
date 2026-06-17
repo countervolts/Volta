@@ -1,6 +1,6 @@
 import SwiftUI
 
-// horizontal shake used for invalid login fields.
+// Login-field shake.
 struct ShakeEffect: GeometryEffect {
     var amount: CGFloat = 8
     var shakesPerUnit = 3
@@ -13,7 +13,7 @@ struct ShakeEffect: GeometryEffect {
 }
 
 extension View {
-    // bumps the shake whenever `trigger` increments.
+    // `trigger` increments to replay the shake.
     func shake(with trigger: Int) -> some View {
         modifier(ShakeModifier(trigger: trigger))
     }

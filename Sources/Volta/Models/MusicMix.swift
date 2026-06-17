@@ -1,7 +1,6 @@
 import Foundation
 
-// a locally-generated mix shown in "Picks for You" (e.g. "Rock Mix", "Artist Mix").
-// regenerated daily from the user's library.
+// Daily local mix, shown in Picks for You.
 struct MusicMix: Identifiable, Hashable, Codable, Sendable {
     let id: String
     let title: String
@@ -10,8 +9,58 @@ struct MusicMix: Identifiable, Hashable, Codable, Sendable {
     let songs: [Song]
 }
 
-// one entry in the unified "Picks for You" row — either a daily mix or a pick
-// album. they share the same card size and are interleaved randomly.
+@MainActor
+extension MusicMix {
+    var localizedTitle: String {
+        if id.hasPrefix("station-discovery-") { return L(.home_discovery_station) }
+        if id.hasPrefix("station-heavy-") { return L(.home_heavy_rotation) }
+        if let genre = genreName { return L(.home_genre_mix_title, genre) }
+        if let artist = artistName { return L(.home_artist_mix_title, artist) }
+        return title
+    }
+
+    var localizedSubtitle: String {
+        if id.hasPrefix("station-discovery-") { return L(.home_discovery_station_subtitle) }
+        if id.hasPrefix("station-heavy-") { return L(.home_heavy_rotation_subtitle) }
+        if let genre = genreName { return L(.home_genre_mix_subtitle, genre.lowercased()) }
+        if let artist = artistName { return L(.home_artist_mix_subtitle, artist) }
+        return subtitle
+    }
+
+    private var genreName: String? {
+        guard id.hasPrefix("genre-") else { return nil }
+        let titleSuffix = " Mix"
+        if title.hasSuffix(titleSuffix) {
+            return String(title.dropLast(titleSuffix.count))
+        }
+        let dailyPrefix = "Daily "
+        let dailySuffix = " mix"
+        if subtitle.hasPrefix(dailyPrefix), subtitle.hasSuffix(dailySuffix) {
+            return String(subtitle.dropFirst(dailyPrefix.count).dropLast(dailySuffix.count))
+        }
+        let madePrefix = "Made from "
+        let madeSuffix = " songs"
+        if subtitle.hasPrefix(madePrefix), subtitle.hasSuffix(madeSuffix) {
+            return String(subtitle.dropFirst(madePrefix.count).dropLast(madeSuffix.count))
+        }
+        return String(id.dropFirst("genre-".count)).removingPercentEncoding
+            ?? String(id.dropFirst("genre-".count))
+    }
+
+    private var artistName: String? {
+        let prefix = "Based on "
+        if subtitle.hasPrefix(prefix) {
+            return String(subtitle.dropFirst(prefix.count))
+        }
+        let suffix = " Mix"
+        if id.hasPrefix("artist-"), title.hasSuffix(suffix) {
+            return String(title.dropLast(suffix.count))
+        }
+        return nil
+    }
+}
+
+// One Picks for You card: either a mix or an album.
 enum PickFeedItem: Identifiable, Hashable {
     case album(Album)
     case mix(MusicMix)
@@ -24,7 +73,7 @@ enum PickFeedItem: Identifiable, Hashable {
     }
 }
 
-// deterministic RNG so a day's mixes are stable but change each day (SplitMix64).
+// Stable for a day, different tomorrow.
 struct SeededRNG: RandomNumberGenerator {
     private var state: UInt64
     init(seed: UInt64) { state = seed &+ 0x9E3779B97F4A7C15 }
@@ -37,7 +86,7 @@ struct SeededRNG: RandomNumberGenerator {
         return z ^ (z >> 31)
     }
 
-    // seed derived from the current day > rotates once per day
+    // one seed per UTC day
     static func daySeed() -> UInt64 {
         UInt64(Int(Date().timeIntervalSince1970) / 86_400)
     }

@@ -18,7 +18,7 @@ final class AlbumDetailViewModel {
         return set.sorted()
     }
 
-    // album counts as lossless when every track is in a lossless format
+    // Lossless only when every track is lossless.
     var isLossless: Bool {
         !songs.isEmpty && songs.allSatisfy(\.isLossless)
     }
@@ -33,19 +33,30 @@ final class AlbumDetailViewModel {
         self.songs = album.song ?? []
     }
 
-    func load(client: SubsonicClient) async {
+    func load(client: any MusicService) async {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
         let albumID = album.id
         let artistID = album.artistId
-        async let fullAlbum = client.album(id: albumID)
-        async let artistAlbums: [Album] = {
+        let loadedAlbum: Album?
+        let relatedAlbums: [Album]
+        let loadArtistAlbums: () async -> [Album] = {
             guard let id = artistID else { return [] }
             let artist = try? await client.artist(id: id)
             return artist?.album ?? []
-        }()
+        }
+
+        if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
+            loadedAlbum = try? await client.album(id: albumID)
+            relatedAlbums = await loadArtistAlbums()
+        } else {
+            async let fullAlbum = client.album(id: albumID)
+            async let artistAlbums = loadArtistAlbums()
+            loadedAlbum = try? await fullAlbum
+            relatedAlbums = await artistAlbums
+        }
 
         let sortTracks: ([Song]) -> [Song] = { list in
             list.sorted {
@@ -55,16 +66,15 @@ final class AlbumDetailViewModel {
             }
         }
 
-        if let loaded = try? await fullAlbum, !(loaded.song ?? []).isEmpty {
+        if let loaded = loadedAlbum, !(loaded.song ?? []).isEmpty {
             album = loaded
             songs = sortTracks(loaded.song ?? [])
         } else if songs.isEmpty {
-            // offline / server unreachable: show this album's downloaded tracks so
-            // the album view isn't empty (the Songs section already worked offline)
+            // Offline fallback: show this album's downloaded tracks.
             let local = DownloadService.shared.downloadedSongs().filter { $0.albumId == album.id }
             if !local.isEmpty { songs = sortTracks(local) }
         }
-        moreBySameArtist = (await artistAlbums).filter { $0.id != album.id }
+        moreBySameArtist = relatedAlbums.filter { $0.id != album.id }
     }
 
     func setDominantColor(_ color: UIColor) {

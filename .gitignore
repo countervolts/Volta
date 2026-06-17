@@ -4,3 +4,6 @@ xtool/
 .devcontainer/
 .vscode/
 sourcekit-lsp/
+
+# full res sources
+img/*.png

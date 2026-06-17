@@ -1,7 +1,6 @@
 import SwiftUI
 
-// adds the top-right account menu and the pushed settings destination to any
-// tab's navigation stack, so every tab behaves the same.
+// Shared account/settings affordance for tab navigation stacks.
 struct AccountToolbar: ViewModifier {
     @State private var showSettings = false
 

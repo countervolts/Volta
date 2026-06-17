@@ -1,13 +1,11 @@
 import SwiftUI
 
-// "View Credits" — shows only data about how the song was *made*: performing
-// artists, writing, and production/engineering. Technical/playback fields live
-// in the separate Info sheet.
+// "View Credits": performers, writing, production, engineering.
 struct SongCreditsSheet: View {
     let song: Song?
     @Environment(\.dismiss) private var dismiss
 
-    // deduped by role+name (servers sometimes repeat a credit)
+    // Servers sometimes repeat credits.
     private var contributors: [Contributor] {
         var seen = Set<String>()
         return (song?.contributors ?? []).filter {

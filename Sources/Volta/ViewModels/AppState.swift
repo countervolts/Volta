@@ -11,19 +11,21 @@ final class AppState {
     }
 
     private(set) var phase: Phase = .loading
-    private(set) var client: SubsonicClient?
+    private(set) var client: (any MusicService)?
     private(set) var currentServer: ServerRecord?
-    // whether the server supports public sharing (probed once on activate)
+    // probed once on activate
     private(set) var sharingAvailable = false
-    // whether the client is currently pointed at the cellular URL
+    // current effective URL is the cellular override
     private var activeIsCellular = false
+    // lets newer activations beat slow auth handshakes
+    private var activationID = UUID()
 
     let audioPlayer = AudioPlayer()
     let store = ServerStore()
     let homeViewModel = HomeViewModel()
 
     func restoreSession() {
-        // re-point the client at the right per-connection URL whenever Wi-Fi/cellular flips
+        // Wi-Fi/cellular can change the effective server URL.
         NetworkMonitor.shared.onConnectionChange { [weak self] conn in
             self?.handleNetworkChange(cellular: conn == .cellular)
         }
@@ -37,10 +39,10 @@ final class AppState {
         }
     }
 
-    func completeLogin(config: SubsonicConfig) {
+    func completeLogin(config: SubsonicConfig, kind: MusicBackendKind = .subsonic) {
         let name = config.baseURL.host ?? "Server"
-        let record = store.upsert(config: config, displayName: name)
-        // honour a cellular override that may already be stored for this record
+        let record = store.upsert(config: config, displayName: name, backend: kind)
+        // Reuse any stored cellular override for this record.
         let cellular = NetworkMonitor.shared.isCellular
         let effective = store.config(for: record, cellular: cellular) ?? config
         activeIsCellular = cellular
@@ -48,8 +50,7 @@ final class AppState {
         phase = .authenticated
     }
 
-    // persist cellular-only URL/login details for the current server and apply
-    // them immediately if they change the connection we should be using now.
+    // Persist and apply the current server's cellular override.
     func updateCellularConnection(urlString: String?, username: String?, password: String?) {
         guard let record = currentServer else { return }
         currentServer = store.setCellularConnection(
@@ -69,8 +70,7 @@ final class AppState {
     private func reapplyNetworkURL() {
         guard phase == .authenticated, let record = currentServer,
               let config = store.config(for: record, cellular: activeIsCellular) else { return }
-        // only rebuild the client when the effective base URL actually changed —
-        // avoids re-probing sharing + reloading home on every harmless path update.
+        // Rebuild only when the effective base URL changes.
         guard config != client?.config else { return }
         AppLogger.shared.log("🔀 Switching to \(activeIsCellular ? "cellular" : "Wi-Fi") URL: \(config.baseURL.absoluteString)", category: .networking)
         activate(config: config, record: record)
@@ -90,6 +90,12 @@ final class AppState {
         store.allServers()
     }
 
+    func removeServer(_ record: ServerRecord) {
+        // Never delete the server we're currently connected to.
+        guard record.id != currentServer?.id else { return }
+        store.remove(record)
+    }
+
     func switchTo(_ record: ServerRecord) {
         let cellular = NetworkMonitor.shared.isCellular
         guard let config = store.config(for: record, cellular: cellular) else {
@@ -104,20 +110,25 @@ final class AppState {
     }
 
     private func activate(config: SubsonicConfig, record: ServerRecord) {
-        let newClient = SubsonicClient(config: config)
-        client = newClient
         currentServer = record
-        audioPlayer.updateClient(newClient)
-        IntentBridge.shared.setup(client: newClient, audioPlayer: audioPlayer)
-        AppLogger.shared.log("Activated server: \(record.displayName)", category: .networking)
         sharingAvailable = false
-        // Eager-load home data in the background
+        AppLogger.shared.log("Activating server: \(record.displayName) [\(record.backend.rawValue)]", category: .networking)
+        // Tag the attempt so newer server switches win.
+        let token = UUID()
+        activationID = token
         Task {
-            await homeViewModel.load(appState: self)
-        }
-        // Probe sharing capability once for the session
-        Task {
-            sharingAvailable = await newClient.sharingAvailable()
+            let service = try? await MusicServiceFactory.make(config: config, kind: record.backend)
+            guard activationID == token else { return }
+            guard let service else {
+                AppLogger.shared.log("✗ Failed to activate \(record.displayName)", category: .networking, level: .error)
+                return
+            }
+            client = service
+            audioPlayer.updateClient(service)
+            IntentBridge.shared.setup(client: service, audioPlayer: audioPlayer)
+            // Probe sharing and warm Home in the background.
+            Task { sharingAvailable = await service.sharingAvailable() }
+            Task { await homeViewModel.load(appState: self) }
         }
     }
 }

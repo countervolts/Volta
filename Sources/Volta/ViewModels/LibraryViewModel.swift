@@ -87,20 +87,21 @@ final class LibraryViewModel {
     // MARK: - Source-aware base sets
 
     private var sourceSongs: [Song] {
-        source == .server ? songs : DownloadService.shared.downloadedSongs().sorted { $0.title < $1.title }
+        let base = source == .server ? songs : DownloadService.shared.downloadedSongs().sorted { $0.title < $1.title }
+        return HiddenAlbumStore.shared.visibleSongs(base)
     }
 
     private var sourceAlbums: [Album] {
-        guard source == .downloaded else { return albums }
+        guard source == .downloaded else { return HiddenAlbumStore.shared.visibleAlbums(albums) }
         let ids = Set(sourceSongs.compactMap { $0.albumId })
         let known = albums.filter { ids.contains($0.id) }
         let knownIDs = Set(known.map { $0.id })
         let synthesized = synthesizedDownloadedAlbums(missing: ids.subtracting(knownIDs))
-        return (known + synthesized).sorted { $0.name < $1.name }
+        return HiddenAlbumStore.shared.visibleAlbums((known + synthesized).sorted { $0.name < $1.name })
     }
 
     private var sourceArtists: [Artist] {
-        guard source == .downloaded else { return collapsingComboArtists(artists) }
+        guard source == .downloaded else { return collapsingComboArtists(HiddenAlbumStore.shared.visibleArtists(artists)) }
         let ids = Set(sourceSongs.compactMap { $0.artistId })
         let known = artists.filter { ids.contains($0.id) }
         let knownIDs = Set(known.map { $0.id })
@@ -108,7 +109,7 @@ final class LibraryViewModel {
         return collapsingComboArtists((known + synthesized).sorted { $0.name < $1.name })
     }
 
-    // Hide combo artists when both named artists already exist separately.
+    // Hide combo artists when both parts exist separately.
     private func collapsingComboArtists(_ list: [Artist]) -> [Artist] {
         let names = Set(list.map { $0.name.lowercased().trimmingCharacters(in: .whitespaces) })
         return list.filter { artist in
@@ -146,7 +147,7 @@ final class LibraryViewModel {
     }
 
     private var sourceGenres: [String] {
-        source == .server ? genres : Set(sourceSongs.compactMap { $0.genre }).sorted()
+        source == .server ? Set(sourceAlbums.compactMap { $0.genre }).sorted() : Set(sourceSongs.compactMap { $0.genre }).sorted()
     }
 
     // MARK: - Filtered (search-applied) sets
@@ -205,7 +206,7 @@ final class LibraryViewModel {
             }
         case .year:                 return list.sorted { ($0.year ?? 0) > ($1.year ?? 0) }
         case .mostPlayed:           return list.sorted { ($0.playCount ?? 0) > ($1.playCount ?? 0) }
-        case .recentlyAdded:        return list   // songs carry no created date; keep source order
+        case .recentlyAdded:        return list   // songs have no created date
         }
     }
     var filteredGenres: [String] {
@@ -245,50 +246,63 @@ final class LibraryViewModel {
         return Array(byID.values)
     }
 
-    func load(client: SubsonicClient) async {
+    func load(client: any MusicService) async {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
-        async let artistsTask = loadArtists(client: client)
-        async let albumsTask = loadAlbums(client: client)
-        async let songsTask = loadSongs(client: client)
-
-        let (a, al, s) = await (artistsTask, albumsTask, songsTask)
+        let a: [Artist]
+        let al: [Album]
+        let s: [Song]
+        if DeveloperExperiments.constrainedConcurrency(default: 3) == 1 {
+            a = await loadArtists(client: client)
+            al = await loadAlbums(client: client)
+            s = await loadSongs(client: client)
+        } else {
+            async let artistsTask = loadArtists(client: client)
+            async let albumsTask = loadAlbums(client: client)
+            async let songsTask = loadSongs(client: client)
+            (a, al, s) = await (artistsTask, albumsTask, songsTask)
+        }
         artists = a.sorted { $0.name < $1.name }
         albums = al.sorted { $0.name < $1.name }
         songs = s.sorted { $0.title < $1.title }
-        let genreSet = Set(al.compactMap { $0.genre })
+        HiddenAlbumStore.shared.register(albums: al)
+        HiddenAlbumStore.shared.register(artists: a)
+
+        let visibleAlbums = HiddenAlbumStore.shared.visibleAlbums(al)
+        let genreSet = Set(visibleAlbums.compactMap { $0.genre })
         genres = genreSet.sorted()
         hasLoaded = true
 
-        // music folders power the optional folder picker (cheap, single request)
+        // Music folders power the optional folder picker.
         if musicFolders.isEmpty {
             musicFolders = (try? await client.musicFolders()) ?? []
         }
 
-        // optionally warm artist profile photos so opening a profile is instant
+        // Optional artist-photo warmup.
         if UserDefaults.standard.bool(forKey: "prefetchArtistImages"), !PerformanceMode.disablePrefetch {
             let toWarm = artists
-            Task.detached(priority: .utility) {
+            DeveloperExperiments.launch(priority: .utility) {
                 for artist in toWarm {
                     guard let s = artist.artistImageUrl, !s.isEmpty, !s.hasSuffix("/"),
                           let url = URL(string: s) else { continue }
-                    _ = await ArtworkLoader.shared.image(for: url)
+                    // Disk only; decoding here is too expensive.
+                    await ArtworkLoader.shared.prefetchToDisk(url)
                 }
             }
         }
     }
 
-    private func loadArtists(client: SubsonicClient) async -> [Artist] {
+    private func loadArtists(client: any MusicService) async -> [Artist] {
         (try? await client.artists()) ?? []
     }
 
-    private func loadSongs(client: SubsonicClient) async -> [Song] {
+    private func loadSongs(client: any MusicService) async -> [Song] {
         (try? await client.randomSongs(size: 500)) ?? []
     }
 
-    private func loadAlbums(client: SubsonicClient) async -> [Album] {
+    private func loadAlbums(client: any MusicService) async -> [Album] {
         var all: [Album] = []
         var offset = 0
         let size = 500
@@ -297,7 +311,7 @@ final class LibraryViewModel {
             all.append(contentsOf: batch)
             if batch.count < size { break }
             offset += size
-            if offset > 10000 { break } // safety cap for enormous libraries
+            if offset > 10000 { break } // safety cap
         }
         return all
     }

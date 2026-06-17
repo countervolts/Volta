@@ -3,17 +3,12 @@ import AVFoundation
 import os
 
 extension Notification.Name {
-    // posted when the EQ is enabled/disabled so the player re-attaches/removes the tap
+    // Player re-attaches/removes taps when this fires.
     static let equalizerToggled = Notification.Name("EqualizerToggled")
 }
 
-// Global 10-band graphic equalizer applied to AVPlayer audio through an
-// MTAudioProcessingTap. Each playing AVPlayerItem gets a tap whose context
-// reads the shared band gains and applies a cascade of peaking biquad filters.
-//
-// Gains live in UserDefaults ("eqBand0"…"eqBand9") and "equalizerEnabled".
-// The EQ is OFF by default and no tap is attached unless enabled, so it can
-// never affect normal playback.
+// Global 10-band EQ through MTAudioProcessingTap.
+// Disabled by default; no tap is attached unless an effect is active.
 final class EqualizerEngine {
     static let shared = EqualizerEngine()
 
@@ -24,25 +19,24 @@ final class EqualizerEngine {
 
     private var lock = os_unfair_lock_s()
     private(set) var gains = [Double](repeating: 0, count: bandCount)   // dB
-    // bumped whenever gains change, so a running tap knows to recompute coeffs
+    // Bumped when running taps need fresh coefficients.
     private(set) var generation: UInt64 = 0
 
     var isEnabled: Bool { UserDefaults.standard.bool(forKey: "equalizerEnabled") }
 
-    // cached audio-effect flags, read on the audio thread via snapshot()
+    // Cached effect flags, read on the audio thread.
     private(set) var eqEnabled = UserDefaults.standard.bool(forKey: "equalizerEnabled")
     private(set) var monoEnabled = UserDefaults.standard.bool(forKey: "monoAudio")
     private(set) var spatialEnabled = UserDefaults.standard.bool(forKey: "spatialWidener")
     private(set) var spatialAmount = (UserDefaults.standard.object(forKey: "spatialWidenerAmount") as? Double) ?? 0.65
 
-    // true whenever any DSP effect needs the processing tap attached
+    // True when any DSP effect needs the tap.
     var isAnyEffectActive: Bool {
         refreshEffectFlags()
         return eqEnabled || monoEnabled || spatialEnabled
     }
 
-    // re-reads the effect toggles from defaults; bumps generation when changed so a
-    // running tap re-snapshots. Call on the main thread after toggling a setting.
+    // Refresh toggles from defaults; call after a setting changes.
     func refreshEffectFlags() {
         let eq = UserDefaults.standard.bool(forKey: "equalizerEnabled")
         let mono = UserDefaults.standard.bool(forKey: "monoAudio")
@@ -92,7 +86,7 @@ final class EqualizerEngine {
         }
     }
 
-    // snapshot used by a tap when (re)computing coefficients + effect state
+    // Tap snapshot for coefficients and effect state.
     func snapshot() -> (gains: [Double], generation: UInt64, eqEnabled: Bool, mono: Bool, spatial: Bool, spatialAmount: Double) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
@@ -101,7 +95,7 @@ final class EqualizerEngine {
 
     // MARK: - Tap creation
 
-    // builds a fresh MTAudioProcessingTap for one AVPlayerItem.
+    // Fresh tap for one AVPlayerItem.
     func makeTap() -> MTAudioProcessingTap? {
         let context = TapContext()
         let clientInfo = UnsafeMutableRawPointer(Unmanaged.passRetained(context).toOpaque())
@@ -118,7 +112,7 @@ final class EqualizerEngine {
         let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
                                                 kMTAudioProcessingTapCreationFlag_PostEffects, &tap)
         guard status == noErr, let tap else {
-            // creation failed > balance the retain we handed to clientInfo
+            // Creation failed; balance the retain passed to clientInfo.
             Unmanaged<TapContext>.fromOpaque(clientInfo).release()
             return nil
         }
@@ -128,13 +122,13 @@ final class EqualizerEngine {
 
 // MARK: - Per-tap DSP state
 
-// holds biquad coefficients + filter state for one tap (one AVPlayerItem).
+// Biquad coefficients and state for one AVPlayerItem tap.
 private final class TapContext {
     var sampleRate: Double = 44_100
     var channels: Int = 2
     var generation: UInt64 = .max   // force first compute
 
-    // cached effect flags (refreshed inside recomputeIfNeeded)
+    // Cached effect flags.
     private var eqEnabled = false
     private var mono = false
     private var spatial = false
@@ -185,15 +179,14 @@ private final class TapContext {
         }
     }
 
-    // processes the source audio buffers in place (non-interleaved Float32).
+    // Process source buffers in place.
     func process(_ bufferList: UnsafeMutablePointer<AudioBufferList>, frames: Int) {
         recomputeIfNeeded()
         guard frames > 0, !state.isEmpty else { return }
 
         let abl = UnsafeMutableAudioBufferListPointer(bufferList)
 
-        // 1) graphic EQ per channel (skipped entirely when the EQ is off so a
-        // mono/spatial-only tap costs almost nothing)
+        // 1) Graphic EQ per channel.
         if eqEnabled {
             for (ch, buffer) in abl.enumerated() {
                 guard ch < channels, let raw = buffer.mData else { continue }
@@ -202,8 +195,7 @@ private final class TapContext {
 
                 for i in 0..<n {
                     var x = Double(samples[i])
-                    // cascade the band biquads (in-place index mutation > no per-sample
-                    // array copies/allocations on the audio thread)
+                    // Cascade bands without per-sample allocation.
                     for b in 0..<EqualizerEngine.bandCount {
                         let x1 = state[ch][b][0], x2 = state[ch][b][1]
                         let y1 = state[ch][b][2], y2 = state[ch][b][3]
@@ -218,7 +210,7 @@ private final class TapContext {
             }
         }
 
-        // 2) stereo-image effects — mono downmix wins over spatial widening.
+        // 2) Stereo image; mono wins over widening.
         guard abl.count >= 2, (mono || spatial),
               let lRaw = abl[0].mData, let rRaw = abl[1].mData else { return }
         let lSamples = lRaw.assumingMemoryBound(to: Float.self)
@@ -233,7 +225,7 @@ private final class TapContext {
                 rSamples[i] = m
             }
         } else {
-            // mid/side widen: side gain 1…2, clamped so widening can't clip
+            // Mid/side widen; clamp so widening cannot clip.
             let w = Float(1.0 + max(0.0, min(1.0, spatialAmount)))
             for i in 0..<n {
                 let l = lSamples[i], r = rSamples[i]

@@ -3,9 +3,7 @@ import AVFoundation
 import CoreMotion
 import Combine
 
-// Watches the active audio output route and exposes an SF Symbol + label so the
-// player's route button can show AirPods / headphones / car / speaker instead of
-// the generic AirPlay glyph. Built-in speaker keeps the default AirPlay icon.
+// Active output-route label and glyph for the player.
 @MainActor
 final class OutputRouteMonitor: ObservableObject {
     static let shared = OutputRouteMonitor()
@@ -56,17 +54,14 @@ final class OutputRouteMonitor: ObservableObject {
         }
     }
 
-    // best-effort device-specific glyph from the route's advertised name. Falls
-    // back to a headphone-motion probe so renamed AirPods/Beats (whose Bluetooth
-    // name no longer contains "AirPods") still show an AirPods glyph instead of
-    // the generic wired-headphones one.
+    // Best-effort specific glyph from advertised route name.
     private static func bluetoothIcon(for name: String) -> String {
         let n = name.lowercased()
         // AirPods family (read the exact model from the advertised name)
         if n.contains("airpods max") { return "airpodsmax" }
         if n.contains("airpods pro") { return "airpodspro" }
         if n.contains("airpod") { return "airpods" }
-        // Beats family — all map to the Beats headphones glyph
+        // Beats family all use the Beats headphones glyph.
         if n.contains("beats") || n.contains("powerbeats") { return "beats.headphones" }
         // Apple speakers
         if n.contains("homepod") { return "homepod.fill" }
@@ -75,15 +70,12 @@ final class OutputRouteMonitor: ObservableObject {
             || n.contains("sonos") || n.contains("jbl") || n.contains("echo") {
             return "hifispeaker.fill"
         }
-        // Unknown Bluetooth name: if motion-capable Apple earbuds are connected,
-        // the headphone motion sensor reports available even after a rename —
-        // use that to still show an AirPods glyph rather than wired headphones.
+        // Motion sensor can reveal renamed AirPods/Beats.
         if appleEarbudsConnected { return "airpods" }
         return "headphones"
     }
 
-    // wired USB-C / Lightning route: distinguish headphone-style outputs from
-    // speakers/interfaces by name so EarPods don't show a speaker glyph.
+    // USB-C/Lightning: distinguish headphones from speakers/interfaces by name.
     private static func wiredIcon(for name: String) -> String {
         let n = name.lowercased()
         if n.contains("headphone") || n.contains("earpods") || n.contains("earphone")
@@ -93,9 +85,7 @@ final class OutputRouteMonitor: ObservableObject {
         return "hifispeaker.fill"
     }
 
-    // CMHeadphoneMotionManager reports motion availability only while AirPods
-    // (Pro / 3 / 4 / Max) or motion-capable Beats are the connected headphones.
-    // Reading availability needs no authorization and shows no prompt.
+    // Motion availability needs no authorization and shows no prompt.
     private static let headphoneMotion = CMHeadphoneMotionManager()
     private static var appleEarbudsConnected: Bool {
         headphoneMotion.isDeviceMotionAvailable

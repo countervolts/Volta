@@ -1,6 +1,6 @@
 import SwiftUI
 
-// horizontally scrolling row showing ~2.5 cards at once (count 5 / span 2).
+// Horizontal row that peeks the next card.
 struct HorizontalMediaRow: View {
     let items: [MediaItem]
     var onSelect: (MediaItem) -> Void = { _ in }
@@ -31,8 +31,7 @@ struct HorizontalMediaRow: View {
     }
 }
 
-// Picks for You: mixes + pick albums interleaved at one card size.
-// Square artwork + colored text panel below; only width is constrained.
+// Picks for You row: album and mix cards share the same footprint.
 struct HorizontalPickRow: View {
     let items: [PickFeedItem]
     var onSelectAlbum: (Album) -> Void = { _ in }
@@ -58,7 +57,7 @@ struct HorizontalPickRow: View {
                                     Button {
                                         onSaveMix(mix)
                                     } label: {
-                                        Label(isSavingMix(mix) ? "Saving..." : "Save as Playlist",
+                                        Label(isSavingMix(mix) ? L(.action_saving) : L(.action_save_as_playlist),
                                               systemImage: Symbols.addToPlaylist)
                                     }
                                     .disabled(isSavingMix(mix))
@@ -80,7 +79,7 @@ struct HorizontalPickRow: View {
     }
 }
 
-// mix card matching PickCard's size + colored-panel styling.
+// Mix version of PickCard.
 struct PickMixCard: View {
     let mix: MusicMix
     var cornerRadius: CGFloat = 16
@@ -102,7 +101,7 @@ struct PickMixCard: View {
             .background(Theme.secondaryBackground)
             .clipped()
                 .overlay(alignment: .topLeading) {
-                    Label("MIX", systemImage: "square.stack.fill")
+                    Label(L(.home_mix_badge), systemImage: "square.stack.fill")
                         .font(.caption2.bold())
                         .foregroundStyle(.white)
                         .padding(.horizontal, 8).padding(.vertical, 4)
@@ -111,21 +110,18 @@ struct PickMixCard: View {
                 }
 
             VStack(alignment: .leading, spacing: 4) {
-                // subtitle fills the same caption slot the album cards use for
-                // genre/year, giving mix cards a matching three-line text block
-                // so they end up the exact same height (and size) as albums.
-                Text(mix.subtitle)
+                // Keep the same three-line block as album pick cards.
+                Text(mix.localizedSubtitle)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.white.opacity(0.75))
                     .lineLimit(1)
-                // single line keeps mix cards the same height as the album pick
-                // cards they're interleaved with, so neither squishes the other.
-                Text(mix.title)
+                // Long titles should truncate, not stretch the card.
+                Text(mix.localizedTitle)
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text("\(mix.songs.count) songs")
+                Text(L(.home_song_count, mix.songs.count))
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(1)

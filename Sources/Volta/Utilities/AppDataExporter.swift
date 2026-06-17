@@ -7,9 +7,9 @@ struct ZipSourceFile {
 
 enum AppDataExporter {
     static func makeArchive() async throws -> URL {
-        try await Task.detached(priority: .utility) {
+        try await DeveloperExperiments.runThrowingSync(priority: .utility) {
             try makeArchiveSync()
-        }.value
+        }
     }
 
     private static func makeArchiveSync() throws -> URL {

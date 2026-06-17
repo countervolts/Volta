@@ -97,7 +97,7 @@ struct QueueView: View {
                                     )
                                 }
                             } label: {
-                                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                                Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
                             }
                             .tint(.orange)
                         }
@@ -105,7 +105,7 @@ struct QueueView: View {
                             Button(role: .destructive) {
                                 audio.removeQueueItem(at: globalIndex)
                             } label: {
-                                Label("Remove", systemImage: Symbols.trash)
+                                Label(L(.action_remove), systemImage: Symbols.trash)
                             }
                         }
                         .listRowBackground(Color.clear)
