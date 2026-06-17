@@ -201,7 +201,9 @@ struct ArtistDetailView: View {
             let pages = stride(from: 0, to: vm.topSongs.count, by: Self.pageSize).map { start in
                 Array(vm.topSongs[start..<min(start + Self.pageSize, vm.topSongs.count)])
             }
-            let pageH = CGFloat(Self.pageSize) * Self.rowHeight
+            // Size to the tallest actual page: a single short page shrinks to fit,
+            // multi-page stays uniform (first page is always full).
+            let pageH = CGFloat(min(vm.topSongs.count, Self.pageSize)) * Self.rowHeight
             let multi = pages.count > 1
 
             VStack(alignment: .leading, spacing: 0) {

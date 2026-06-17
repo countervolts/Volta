@@ -36,9 +36,9 @@
 
 - **Playback** Gapless and crossfade, plus an AutoMix mode that (tries to) beat-match tracks. ReplayGain, a sleep timer, and an infinite autoplay queue. Full lock screen, Control Center, and (WIP) Siri support.
  
-- **Audio** A 10-band graphic EQ, mono downmix, a 3D spatial widener, and an Audio Signal Path sheet so you can see exactly what's happening to the sound. Lossless / Hi-Res / True Hi-Res badges come from real format data, not guesses.
+- **Audio** A 10-band graphic EQ, mono downmix, a 3D spatial widener, and an Audio Signal Path sheet so you can see exactly what's happening to the sound. Lossless / Hi-Res / True Hi-Res badges come from real data.
 
-- **Now Playing** Backgrounds that take their colour from the artwork, animated cover art (GIF, APNG, WebP) on screen *and* the lock screen, a built-in visualiser, and an output icon that changes to match your AirPods / car / speakers.
+- **Now Playing** Backgrounds that take their colour from the artwork, animated cover art (GIF, APNG, WebP) on screen *and* the lock screen.
 
 - **Lyrics** Time-synced lyrics (via [LRCLIB](https://lrclib.net)) with tap-to-seek, on-device translation, bulk download for offline use, and search across the lyrics you've saved.
 
@@ -46,28 +46,34 @@
 
 - **Offline** Multithreaded, resumable downloads with per-track progress, a storage cap that auto-evicts your least-played downloads, and artist profiles that still work with no connection.
 
-- **Multi-server** Save several servers and switch between them on the fly (touch-and-hold to remove one). Each server can have its own cellular URL that kicks in automatically off Wi-Fi. No server? Try a built-in demo.
+- **Multi-server** Save several servers and switch between them on the fly. Each server can have its own cellular URL that kicks in automatically off Wi-Fi. No server? Try a built-in demo.
 
 - **Localized** 17 languages with live, in-app switching.
 
-- **Lightweight** It sits at roughly **30 MB of RAM** idle on the Home tab (more on that below).
+- **Lightweight** It sits at roughly **30 MB of ram** idle on the Home tab (more on that below).
 
 ## Performance
 
-Volta sizes itself to the device it reads the physical RAM tier (3 / 4 / 6 / 8 GB+) and scales every cache and decode budget to match, then leans on disk so very little has to stay in memory.
+Volta sizes itself to the device it reads the physical ram tier (3 / 4 / 6 / 8 GB+) and scales every cache and decode budget to match, then leans on disk so very little has to stay in memory.
 
-- RAM-tiered artwork cache (**48 → 128 MB**) and animated-frame decode caps (**192 → 768 px**)
+- ram-tiered artwork cache (**48 → 128 MB**) and animated-frame decode caps (**192 → 768 px**)
 - Images are never decoded larger than the device's screen
 - Animated artwork runs off one shared frame-stepper with a downsampled on-disk frame cache, and caches get evicted on memory pressure
 - Scroll and drag are throttled to the display refresh, with `CADisplayLink` keeping frame pacing steady
 - An optional **Performance Mode** (battery saver) plus **Image Loading** and **Data Caching** dials if you want to trade quality for battery
 
-Volta tries it's best to be as lightweight as possible constainly, in testing it uses this much ram for the following
+Volta aims to remain as lightweight as possible. During testing, it used approximately the following amount of ram:
 
-- Idle on home tab - about ~30MB of ram
-- Viewing a album (static artwork) - ~40MB of ram (with music playing ~50MB of ram)
-- Viewing a artist (15+ albums) - ~60MB of ram (with music playing ~70MB)
-- Viewing a album with animated artwork - ~170MB of ram (pre-optimizations ~2.3GB of ram)
+| Scenario                                                    | ram usage |
+| ----------------------------------------------------------- | --------: |
+| Idle on the Home tab                                        |    ~30 MB |
+| Viewing an album with static artwork                        |    ~40 MB |
+| Viewing an album with static artwork while playing music    |    ~50 MB |
+| Viewing an artist with 15+ albums                           |    ~60 MB |
+| Viewing an artist with 15+ albums while playing music       |    ~70 MB |
+| Viewing an album with animated artwork                      |   ~170 MB |
+| Viewing an album with animated artwork before optimizations |   ~2.3 GB |
+
 
 ## Supported servers
 
@@ -92,7 +98,7 @@ xtool dev run --udid <DEVICE_UDID>  # build, install, and launch on device
 
 ## Contributing
 
-Issues, ideas, and pull requests are all welcome this is a personal project and I'm happy to have company. If you're reporting a bug, mentioning your server type (Navidrome, Jellyfin, Plex…) and iOS version helps a lot.
+Issues, ideas, and pull requests are all welcome this is a personal project and I'm happy to have company. If you're reporting a bug, mentioning your server type (Navidrome, Jellyfin, Plex…), App version and iOS version helps a lot.
 
 ## Acknowledgements
 
@@ -100,6 +106,8 @@ Issues, ideas, and pull requests are all welcome this is a personal project and 
 - [LRCLIB](https://lrclib.net) community-sourced synced lyrics
 - The [Subsonic](https://www.subsonic.org/pages/api.jsp) / OpenSubsonic, [Jellyfin](https://jellyfin.org), and Plex APIs that make any of this possible
 
-## License
+## Other
 
-Volta is released under the [GNU General Public License v3.0](LICENSE).
+Volta is released under the [GNU General Public License v3.0](LICENSE). 
+
+Volta discord server can be found [here](https://discord.gg/h5Hybq9SJs)

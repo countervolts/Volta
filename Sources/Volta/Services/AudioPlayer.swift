@@ -269,6 +269,9 @@ final class AudioPlayer {
     private var currentBassID: UInt64 = 0
 
     private var gaplessNextItem: AVPlayerItem? = nil
+    // Bumped on every playCurrent so a deferred (warm-then-play) request can detect
+    // it was superseded by a newer skip/track change before it runs.
+    private var playRequestID: UInt64 = 0
     private var autoplayAppendTask: Task<Void, Never>?
     private let autoplayPreloadThreshold = 1
 
@@ -948,7 +951,43 @@ final class AudioPlayer {
     private func playCurrent() {
         guard !queue.isEmpty, currentIndex < queue.count else { return }
         let song = queue[currentIndex]
+        playRequestID &+= 1
+        let token = playRequestID
+
+        // Plex needs the file part key cached before streamURL can serve the
+        // original; warm it (only when streaming and not already ready) so we
+        // never silently fall back to a transcode. The common case stays fully
+        // synchronous, so playback latency is unchanged.
+        if let client,
+           DownloadService.shared.localURL(for: song) == nil,
+           !client.streamMetadataReady(id: song.id) {
+            Task { @MainActor [weak self] in
+                await client.prepareForPlayback(id: song.id)
+                guard let self, token == self.playRequestID else { return }
+                self.startPlaying(song: song)
+                self.warmUpcomingStreams()
+            }
+            return
+        }
+
         startPlaying(song: song)
+        warmUpcomingStreams()
+    }
+
+    // Pre-fetch stream metadata for the next couple of tracks so gapless/transition
+    // preloads also serve the original file rather than a transcode (Plex caches
+    // the file part key here). Best-effort and fire-and-forget.
+    private func warmUpcomingStreams() {
+        guard let client else { return }
+        let upper = min(currentIndex + 3, queue.count)
+        guard currentIndex + 1 < upper else { return }
+        let ids = queue[(currentIndex + 1)..<upper]
+            .filter { DownloadService.shared.localURL(for: $0) == nil && !client.streamMetadataReady(id: $0.id) }
+            .map(\.id)
+        guard !ids.isEmpty else { return }
+        Task { @MainActor in
+            for id in ids { await client.prepareForPlayback(id: id) }
+        }
     }
 
     private func invalidatePreloadedNext() {

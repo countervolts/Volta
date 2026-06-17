@@ -157,13 +157,36 @@ extension SettingsView {
                     .onChange(of: monoAudio) { _, _ in applyAudioEffectChange() }
                 }
 
-                if rowVisible(s, ["spatial widener", "spatial", "3d", "stereo", "widener", "spatialize"]) {
+                if rowVisible(s, ["spatial widener", "spatial", "3d", "stereo", "widener", "spatialize", "width"]) {
                     Toggle(isOn: $spatialWidener) {
                         Label(L(.settings_spatial_widener), systemImage: "airpodspro")
                     }
                     .tint(Theme.accent)
                     .disabled(monoAudio)
                     .onChange(of: spatialWidener) { _, _ in applyAudioEffectChange() }
+
+                    if spatialWidener && !monoAudio {
+                        Picker(selection: $spatialWidenerMode) {
+                            Text("Enhanced").tag("enhanced")
+                            Text("Basic").tag("basic")
+                        } label: {
+                            Label("Widening Mode", systemImage: "waveform")
+                        }
+                        .tint(Theme.accent)
+                        .onChange(of: spatialWidenerMode) { _, _ in
+                            EqualizerEngine.shared.refreshEffectFlags()
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            LabeledContent("Width", value: "\(Int((spatialWidenerAmount * 100).rounded()))%")
+                                .foregroundStyle(Theme.primaryText)
+                            Slider(value: $spatialWidenerAmount, in: 0...1.5, step: 0.05)
+                                .tint(Theme.accent)
+                                .onChange(of: spatialWidenerAmount) { _, _ in
+                                    EqualizerEngine.shared.refreshEffectFlags()
+                                }
+                        }
+                    }
                 }
             }
             .listRowBackground(Theme.secondaryBackground)

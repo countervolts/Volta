@@ -23,6 +23,11 @@ final class AlbumDetailViewModel {
         !songs.isEmpty && songs.allSatisfy(\.isLossless)
     }
 
+    // Hi-res when the album is lossless and contains at least one hi-res track.
+    var isHiResLossless: Bool {
+        isLossless && songs.contains(where: \.isHiResLossless)
+    }
+
     func songs(forDisc disc: Int) -> [Song] {
         if discNumbers.count <= 1 { return songs }
         return songs.filter { ($0.discNumber ?? 1) == disc }

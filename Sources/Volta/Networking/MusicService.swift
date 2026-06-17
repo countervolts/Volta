@@ -125,12 +125,23 @@ protocol MusicService: Sendable {
 
     // Progressive transcodes have no size/range support.
     func downloadIsProgressive(id: String) -> Bool
+
+    // Some backends (Plex) need to fetch per-track metadata before a synchronous
+    // streamURL can point at the original file instead of falling back to a
+    // transcode. Warm that state here ahead of building the URL.
+    func prepareForPlayback(id: String) async
+
+    // True when streamURL(id:) can already build the correct (original or
+    // transcoded, per settings) URL without any further async warm-up.
+    func streamMetadataReady(id: String) -> Bool
 }
 
 // Short call-shape helpers; backends implement only the full forms.
 extension MusicService {
     func mediaRequestHeaders() -> [String: String] { [:] }
     func downloadIsProgressive(id: String) -> Bool { false }
+    func prepareForPlayback(id: String) async {}
+    func streamMetadataReady(id: String) -> Bool { true }
     func coverArtURL(id: String?) -> URL? { coverArtURL(id: id, size: nil) }
     func allAlbums(size: Int) async throws -> [Album] { try await allAlbums(size: size, offset: 0) }
     func songsByGenre(_ genre: String, count: Int) async throws -> [Song] {
@@ -168,6 +179,12 @@ enum StreamingPreferences {
 
     static var plexUniversalTranscodeExtension: String {
         transcodingFormat == "opus" ? "opus" : "mp3"
+    }
+
+    // The user wants a transcode only when they cap the bitrate or pick a target
+    // format; otherwise every backend should serve the original file untouched.
+    static func wantsTranscode(bitrateKbps: Int) -> Bool {
+        bitrateKbps > 0 || transcodingFormat != nil
     }
 }
 

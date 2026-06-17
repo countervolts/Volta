@@ -518,18 +518,22 @@ struct JellyfinClient: MusicService {
         ])
     }
 
-    // 0 kbps means original bytes; otherwise use the universal transcoder.
+    // Original bytes unless the user asked for a transcode (bitrate cap or format).
     private func audioURL(id: String, bitrateKbps: Int) -> URL? {
-        guard bitrateKbps > 0 else { return originalStreamURL(id: id) }
+        guard StreamingPreferences.wantsTranscode(bitrateKbps: bitrateKbps) else {
+            return originalStreamURL(id: id)
+        }
         var q = [
             URLQueryItem(name: "UserId", value: userId),
             URLQueryItem(name: "api_key", value: token),
             URLQueryItem(name: "DeviceId", value: deviceId),
-            URLQueryItem(name: "MaxStreamingBitrate", value: String(bitrateKbps * 1000)),
             URLQueryItem(name: "TranscodingContainer", value: "ts"),
             URLQueryItem(name: "TranscodingProtocol", value: "hls"),
             URLQueryItem(name: "Container", value: "flac,alac,aac,m4a,mp3,opus,ogg,wav,webma"),
         ]
+        if bitrateKbps > 0 {
+            q.append(URLQueryItem(name: "MaxStreamingBitrate", value: String(bitrateKbps * 1000)))
+        }
         if let fmt = StreamingPreferences.transcodingFormat {
             q.append(URLQueryItem(name: "AudioCodec", value: jellyfinCodec(for: fmt)))
         } else {
