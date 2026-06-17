@@ -101,7 +101,7 @@ enum SettingsBackupManager {
         "disableRAMOptimizations", "appWorkerLimit", "singleThreadedMode", "preciseTimestamps",
         "showWarningNotifications", "showOfflineErrorNotifications",
         "autoPlaylistBackupEnabled", "saveLyricsLocally", "forceLiquidGlass",
-        "themeMode", "monoAudio", "spatialWidener", "spatialWidenerAmount",
+        "themeMode", "monoAudio", "spatialWidener", "spatialWidenerAmount", "spatialWidenerMode",
         "equalizerEnabled",
         "performanceModeEnabled", "pmHalfFrameRate", "pmReduceImageQuality",
         "pmDisableLiveArtwork", "pmDisableDynamicBackground", "pmReduceAnimations",

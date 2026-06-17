@@ -50,6 +50,8 @@ struct SettingsView: View {
     @AppStorage("automixTempoMatch")   var automixTempoMatch   = true
     @AppStorage("monoAudio")           var monoAudio           = false
     @AppStorage("spatialWidener")      var spatialWidener      = false
+    @AppStorage("spatialWidenerAmount") var spatialWidenerAmount = 0.65
+    @AppStorage("spatialWidenerMode")  var spatialWidenerMode   = "enhanced"
     @AppStorage("resumeAfterInterruption") var resumeAfterInterruption = true
 
     @AppStorage("streamingBitrate")    var streamingBitrate    = 0

@@ -264,7 +264,7 @@ struct AlbumDetailView: View {
                 if !vm.songs.isEmpty {
                     Text("·").foregroundStyle(.white.opacity(0.3))
                     Button { showAlbumLosslessInfo = true } label: {
-                        Label(vm.isLossless ? "Lossless" : "Lossy",
+                        Label(vm.isHiResLossless ? "Hi-Res Lossless" : (vm.isLossless ? "Lossless" : "Lossy"),
                               systemImage: vm.isLossless ? "waveform" : "music.note")
                             .labelStyle(.titleAndIcon)
                             .foregroundStyle(.white.opacity(0.55))
@@ -663,7 +663,7 @@ private struct AlbumQualityInsightPopover: View {
     private var headline: String {
         if losslessCount == 0 { return "Lossy Album" }
         if losslessCount == songs.count {
-            return hiResCount == songs.count ? "Hi-Res Lossless Album" : "Lossless Album"
+            return hiResCount > 0 ? "Hi-Res Lossless Album" : "Lossless Album"
         }
         return "Mixed Quality Album"
     }

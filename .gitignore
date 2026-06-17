@@ -3,7 +3,7 @@
 xtool/
 .devcontainer/
 .vscode/
-sourcekit-lsp/
+discordbot/
 
 # full res sources
 img/*.png

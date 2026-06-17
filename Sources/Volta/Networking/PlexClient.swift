@@ -568,21 +568,39 @@ final class PlexClient: MusicService, @unchecked Sendable {
 
     func streamURL(id: String) -> URL? {
         let kbps = StreamingPreferences.streamBitrateKbps
-        if kbps == 0, let part = cachedPart(id) { return url(part) }   // original file
+        // Serve the original file unless the user actually asked for a transcode.
+        if !StreamingPreferences.wantsTranscode(bitrateKbps: kbps), let part = cachedPart(id) {
+            return url(part)   // original file, direct play
+        }
         return transcodeURL(id: id, bitrateKbps: kbps > 0 ? kbps : 320)
     }
 
     func downloadURL(id: String) -> URL? {
         let kbps = StreamingPreferences.downloadBitrateKbps
-        if kbps == 0, let part = cachedPart(id) { return url(part) }   // exact original bytes
+        if !StreamingPreferences.wantsTranscode(bitrateKbps: kbps), let part = cachedPart(id) {
+            return url(part)   // exact original bytes
+        }
         return transcodeURL(id: id, bitrateKbps: kbps > 0 ? kbps : 320)
     }
 
-    // Capped downloads use Plex's progressive transcoder; uncapped uses the file part.
+    // Capped/format downloads use Plex's progressive transcoder; original uses the file part.
     func downloadIsProgressive(id: String) -> Bool {
         let kbps = StreamingPreferences.downloadBitrateKbps
-        if kbps == 0, cachedPart(id) != nil { return false }
+        if !StreamingPreferences.wantsTranscode(bitrateKbps: kbps), cachedPart(id) != nil { return false }
         return true
+    }
+
+    // The original-file path needs the cached part key; transcodes don't.
+    func streamMetadataReady(id: String) -> Bool {
+        StreamingPreferences.wantsTranscode(bitrateKbps: StreamingPreferences.streamBitrateKbps)
+            || cachedPart(id) != nil
+    }
+
+    // Fetch+cache the file part key so streamURL can point at the original file
+    // instead of silently falling back to a transcode.
+    func prepareForPlayback(id: String) async {
+        guard cachedPart(id) == nil else { return }
+        _ = try? await song(id: id)
     }
 
     func originalStreamURL(id: String) -> URL? {

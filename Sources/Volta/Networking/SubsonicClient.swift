@@ -153,7 +153,7 @@ struct SubsonicClient: Sendable {
         if bitrate > 0 {
             query.append(URLQueryItem(name: "maxBitRate", value: String(bitrate)))
         }
-        appendTranscodingFormat(to: &query)
+        appendStreamFormat(to: &query, bitrate: bitrate)
         return makeURL(endpoint: "stream", query: query)
     }
 
@@ -164,18 +164,26 @@ struct SubsonicClient: Sendable {
         if bitrate > 0 {
             query.append(URLQueryItem(name: "maxBitRate", value: String(bitrate)))
         }
-        appendTranscodingFormat(to: &query)
+        appendStreamFormat(to: &query, bitrate: bitrate)
         return makeURL(endpoint: "stream", query: query)
     }
 
     // Exact original URL for short-prefix BPM analysis.
     func originalStreamURL(id: String) -> URL? {
-        makeURL(endpoint: "stream", query: [URLQueryItem(name: "id", value: id)])
+        makeURL(endpoint: "stream", query: [
+            URLQueryItem(name: "id", value: id),
+            URLQueryItem(name: "format", value: "raw"),
+        ])
     }
 
-    private func appendTranscodingFormat(to query: inout [URLQueryItem]) {
-        guard let format = StreamingPreferences.transcodingFormat else { return }
-        query.append(URLQueryItem(name: "format", value: format))
+    // Append the target format, or force "raw" so the server doesn't transcode to
+    // its own configured default when the user asked for the original.
+    private func appendStreamFormat(to query: inout [URLQueryItem], bitrate: Int) {
+        if let format = StreamingPreferences.transcodingFormat {
+            query.append(URLQueryItem(name: "format", value: format))
+        } else if bitrate == 0 {
+            query.append(URLQueryItem(name: "format", value: "raw"))
+        }
     }
 }
 

@@ -29,6 +29,7 @@ final class EqualizerEngine {
     private(set) var monoEnabled = UserDefaults.standard.bool(forKey: "monoAudio")
     private(set) var spatialEnabled = UserDefaults.standard.bool(forKey: "spatialWidener")
     private(set) var spatialAmount = (UserDefaults.standard.object(forKey: "spatialWidenerAmount") as? Double) ?? 0.65
+    private(set) var spatialEnhanced = (UserDefaults.standard.string(forKey: "spatialWidenerMode") ?? "enhanced") == "enhanced"
 
     // True when any DSP effect needs the tap.
     var isAnyEffectActive: Bool {
@@ -42,9 +43,10 @@ final class EqualizerEngine {
         let mono = UserDefaults.standard.bool(forKey: "monoAudio")
         let spatial = UserDefaults.standard.bool(forKey: "spatialWidener")
         let amount = (UserDefaults.standard.object(forKey: "spatialWidenerAmount") as? Double) ?? 0.65
+        let enhanced = (UserDefaults.standard.string(forKey: "spatialWidenerMode") ?? "enhanced") == "enhanced"
         os_unfair_lock_lock(&lock)
-        if eq != eqEnabled || mono != monoEnabled || spatial != spatialEnabled || amount != spatialAmount {
-            eqEnabled = eq; monoEnabled = mono; spatialEnabled = spatial; spatialAmount = amount
+        if eq != eqEnabled || mono != monoEnabled || spatial != spatialEnabled || amount != spatialAmount || enhanced != spatialEnhanced {
+            eqEnabled = eq; monoEnabled = mono; spatialEnabled = spatial; spatialAmount = amount; spatialEnhanced = enhanced
             generation &+= 1
         }
         os_unfair_lock_unlock(&lock)
@@ -87,10 +89,10 @@ final class EqualizerEngine {
     }
 
     // Tap snapshot for coefficients and effect state.
-    func snapshot() -> (gains: [Double], generation: UInt64, eqEnabled: Bool, mono: Bool, spatial: Bool, spatialAmount: Double) {
+    func snapshot() -> (gains: [Double], generation: UInt64, eqEnabled: Bool, mono: Bool, spatial: Bool, spatialAmount: Double, enhanced: Bool) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
-        return (gains, generation, eqEnabled, monoEnabled, spatialEnabled, spatialAmount)
+        return (gains, generation, eqEnabled, monoEnabled, spatialEnabled, spatialAmount, spatialEnhanced)
     }
 
     // MARK: - Tap creation
@@ -133,6 +135,12 @@ private final class TapContext {
     private var mono = false
     private var spatial = false
     private var spatialAmount = 0.65
+    private var spatialEnhanced = false
+
+    // Enhanced widener: one-pole high-pass on the side channel (keeps bass centred).
+    private var sideHPAlpha: Float = 0
+    private var sideHPPrevIn: Float = 0
+    private var sideHPPrevOut: Float = 0
 
     // coefficients per band: b0, b1, b2, a1, a2  (a0 normalized to 1)
     private var coeffs = [[Double]](repeating: [1, 0, 0, 0, 0], count: EqualizerEngine.bandCount)
@@ -144,6 +152,12 @@ private final class TapContext {
         self.channels = max(1, channels)
         state = Array(repeating: Array(repeating: [0, 0, 0, 0], count: EqualizerEngine.bandCount),
                       count: self.channels)
+        // One-pole high-pass coefficient (~300 Hz) for the enhanced widener's side channel.
+        let rc = 1.0 / (2.0 * Double.pi * 300.0)
+        let dt = 1.0 / self.sampleRate
+        sideHPAlpha = Float(rc / (rc + dt))
+        sideHPPrevIn = 0
+        sideHPPrevOut = 0
         generation = .max
         recomputeIfNeeded()
     }
@@ -160,6 +174,7 @@ private final class TapContext {
         mono = snap.mono
         spatial = snap.spatial
         spatialAmount = snap.spatialAmount
+        spatialEnhanced = snap.enhanced
         let q = 1.4
         for b in 0..<EqualizerEngine.bandCount {
             let f0 = EqualizerEngine.frequencies[b]
@@ -210,31 +225,89 @@ private final class TapContext {
             }
         }
 
-        // 2) Stereo image; mono wins over widening.
-        guard abl.count >= 2, (mono || spatial),
-              let lRaw = abl[0].mData, let rRaw = abl[1].mData else { return }
-        let lSamples = lRaw.assumingMemoryBound(to: Float.self)
-        let rSamples = rRaw.assumingMemoryBound(to: Float.self)
-        let nL = min(frames, Int(abl[0].mDataByteSize) / MemoryLayout<Float>.size)
-        let nR = min(frames, Int(abl[1].mDataByteSize) / MemoryLayout<Float>.size)
-        let n = min(nL, nR)
+        // 2) Stereo image; mono wins over widening. Handles both interleaved
+        //    (one buffer, L,R,L,R…) and non-interleaved (separate L/R buffers)
+        //    taps; AVPlayer hands us interleaved stereo by default.
+        guard mono || spatial else { return }
+
+        let lPtr: UnsafeMutablePointer<Float>
+        let rPtr: UnsafeMutablePointer<Float>
+        let step: Int   // float distance from one frame's L to the next
+        let n: Int      // frame count
+
+        if abl.count >= 2, let lRaw = abl[0].mData, let rRaw = abl[1].mData {
+            // Non-interleaved: channel 0 = L, channel 1 = R, contiguous.
+            lPtr = lRaw.assumingMemoryBound(to: Float.self)
+            rPtr = rRaw.assumingMemoryBound(to: Float.self)
+            step = 1
+            let nL = Int(abl[0].mDataByteSize) / MemoryLayout<Float>.size
+            let nR = Int(abl[1].mDataByteSize) / MemoryLayout<Float>.size
+            n = min(frames, nL, nR)
+        } else if abl.count == 1, abl[0].mNumberChannels >= 2, let raw = abl[0].mData {
+            // Interleaved: [L, R, …]; R sits one float past L, stride = channels.
+            let base = raw.assumingMemoryBound(to: Float.self)
+            let ch = Int(abl[0].mNumberChannels)
+            lPtr = base
+            rPtr = base + 1
+            step = ch
+            let total = Int(abl[0].mDataByteSize) / MemoryLayout<Float>.size
+            n = min(frames, total / ch)
+        } else {
+            return   // mono source or unexpected layout: nothing to downmix
+        }
+
         if mono {
             for i in 0..<n {
-                let m = (lSamples[i] + rSamples[i]) * 0.5
-                lSamples[i] = m
-                rSamples[i] = m
+                let j = i * step
+                let m = (lPtr[j] + rPtr[j]) * 0.5
+                lPtr[j] = m
+                rPtr[j] = m
             }
-        } else {
-            // Mid/side widen; clamp so widening cannot clip.
-            let w = Float(1.0 + max(0.0, min(1.0, spatialAmount)))
+        } else if spatialEnhanced {
+            // Enhanced: widen only the high-frequency side content so bass stays
+            // centred/mono-safe, then soft-clip instead of hard-clipping the peaks.
+            let w = Float(1.0 + max(0.0, min(1.5, spatialAmount)))
+            let a = sideHPAlpha
+            var prevIn = sideHPPrevIn
+            var prevOut = sideHPPrevOut
             for i in 0..<n {
-                let l = lSamples[i], r = rSamples[i]
+                let j = i * step
+                let l = lPtr[j], r = rPtr[j]
+                let mid = (l + r) * 0.5
+                let side = (l - r) * 0.5
+                // one-pole high-pass; only the high band gets the extra width.
+                let hp = a * (prevOut + side - prevIn)
+                prevIn = side
+                prevOut = hp
+                let wideSide = side + hp * (w - 1)
+                lPtr[j] = Self.softClip(mid + wideSide)
+                rPtr[j] = Self.softClip(mid - wideSide)
+            }
+            sideHPPrevIn = prevIn
+            sideHPPrevOut = prevOut
+        } else {
+            // Basic: flat mid/side gain with hard clamp.
+            let w = Float(1.0 + max(0.0, min(1.5, spatialAmount)))
+            for i in 0..<n {
+                let j = i * step
+                let l = lPtr[j], r = rPtr[j]
                 let mid = (l + r) * 0.5
                 let side = (l - r) * 0.5 * w
-                lSamples[i] = max(-1.0, min(1.0, mid + side))
-                rSamples[i] = max(-1.0, min(1.0, mid - side))
+                lPtr[j] = max(-1.0, min(1.0, mid + side))
+                rPtr[j] = max(-1.0, min(1.0, mid - side))
             }
         }
+    }
+
+    // Linear up to the knee, smooth tanh rounding above; asymptotes to ±1 so
+    // aggressive widening compresses gently instead of clipping harshly.
+    @inline(__always)
+    private static func softClip(_ x: Float) -> Float {
+        let knee: Float = 0.7
+        let ax = abs(x)
+        if ax <= knee { return x }
+        let shaped = knee + (1 - knee) * tanhf((ax - knee) / (1 - knee))
+        return x < 0 ? -shaped : shaped
     }
 }
 
