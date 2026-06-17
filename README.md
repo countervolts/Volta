@@ -102,4 +102,4 @@ Issues, ideas, and pull requests are all welcome this is a personal project and 
 
 ## License
 
-Volta is released under the [GNU General Public License v3.0](LICENSE) the same strong-copyleft licence used by [Amperfy](https://github.com/BLeeEZ/amperfy), [Supersonic](https://github.com/dweymouth/supersonic), and [Feishin](https://github.com/jeffvli/feishin). You're free to use, study, share, and modify it; any distributed derivative has to stay open-source under the GPLv3 too.
+Volta is released under the [GNU General Public License v3.0](LICENSE).
