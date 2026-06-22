@@ -2,7 +2,7 @@ import Foundation
 
 // Generic on-disk cache for Codable API snapshots, stored under Caches/api.
 // Used to hydrate views instantly on launch before the network refresh lands.
-// Lives in Caches so the system can reclaim it under storage pressure.
+// Caches directory storage; the system may reclaim it.
 enum DiskCache {
     static let directory: URL = {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]

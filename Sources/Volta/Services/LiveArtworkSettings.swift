@@ -44,8 +44,18 @@ enum LiveArtworkSettings {
         }
     }
 
-    // Keep native frame cadence; maxPixelSize handles RAM.
-    static var maxFrameCount: Int { 0 }
+    // Keep enough frames for a smooth loop without making first display wait on
+    // hundreds of frames the screen cannot present at the artwork playback rate.
+    static var maxFrameCount: Int {
+        guard !rawAnimatedArtworkEnabled,
+              !DeveloperExperiments.disableRAMOptimizations else { return 0 }
+        switch DeviceMemoryTier.current {
+        case .gb3OrLess: return 60
+        case .gb4: return 75
+        case .gb6: return 90
+        case .gb8Plus: return 120
+        }
+    }
 
     // Full-rate display-link wakeups; accumulator keeps loop timing.
     static var lowPowerPlayback: Bool { false }
@@ -57,10 +67,12 @@ enum LiveArtworkSettings {
         return DeviceMemoryTier.current != .gb3OrLess
     }
 
-    // Decoded animations are large; keep them in RAM only on the top tier.
+    // Album animation is enabled on 6 GB devices, so retain the most recent
+    // decoded sequence there too. NSCache's cost limit still evicts large loops.
     static var keepDecodedFramesInRAM: Bool {
         rawAnimatedArtworkEnabled
             || DeveloperExperiments.disableRAMOptimizations
+            || DeviceMemoryTier.current == .gb6
             || DeviceMemoryTier.current == .gb8Plus
     }
 

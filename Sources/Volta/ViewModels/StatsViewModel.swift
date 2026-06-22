@@ -25,7 +25,7 @@ struct HourlyBucket: Identifiable {
 }
 
 struct DayBucket: Identifiable {
-    let id: Int    // 0=Sun … 6=Sat
+    let id: Int    // 0=Sun ... 6=Sat
     let count: Int
     let label: String
 }

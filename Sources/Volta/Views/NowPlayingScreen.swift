@@ -17,10 +17,10 @@ struct NowPlayingScreen: View {
     @State private var showLosslessInfo = false
     @State private var showAudioSignalPath = false
     @State private var showVisualizer = false
-    // scrub state lifted out of ScrubBar so the time labels share it (so the bar,
-    // elapsed and remaining all read one snapshot and can't drift apart)
+    // Shared scrub state for bar and time labels.
     @State private var scrubbing = false
     @State private var scrubTime: TimeInterval = 0
+    @State private var isAdjustingVolume = false
     @State private var artistToShow: Artist?
     @State private var albumToShow: Album?
     @State private var isFetchingArtist = false
@@ -69,6 +69,10 @@ struct NowPlayingScreen: View {
                 }
                 .onEnded { v in
                     if v.translation.height > 120 || v.predictedEndTranslation.height > 300 {
+                        AppLogger.shared.log(
+                            "Player dismissed by drag; translation=\(Int(v.translation.height)); predicted=\(Int(v.predictedEndTranslation.height))",
+                            category: .playback
+                        )
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
                             isPresented = false
                         }
@@ -116,12 +120,17 @@ struct NowPlayingScreen: View {
             .preferredColorScheme(Theme.colorScheme)
         }
         .onAppear {
+            AppLogger.shared.log(
+                "Full player appeared; songID=\(audio.currentSong?.id ?? "none"); liveArtwork=\(audio.currentLiveArtwork != nil)",
+                category: .playback
+            )
             dragThrottler = VSyncThrottler {
                 dragOffset = pendingDragOffset
             }
             refreshPlayerBackground(animated: false)
         }
         .onDisappear {
+            AppLogger.shared.log("Full player disappeared", category: .playback)
             dragThrottler?.invalidate()
             dragThrottler = nil
         }
@@ -464,7 +473,7 @@ struct NowPlayingScreen: View {
                 .fill(Color(white: 0.12))
                 .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
             if let live = audio.currentLiveArtwork {
-                // live (animated) cover art — full player only
+                // Full-player live artwork.
                 liveArtworkView(live)
             } else if let image = audio.currentArtwork {
                 Image(uiImage: image)
@@ -623,21 +632,26 @@ struct NowPlayingScreen: View {
     // MARK: - Scrubber
 
     private var scrubber: some View {
-        VStack(spacing: 6) {
-            ScrubBar(
-                duration: { audio.liveDuration() },
-                liveTime: { audio.liveTime() },
-                scrubbing: $scrubbing,
-                scrubTime: $scrubTime,
-                onSeek: { audio.seek(to: $0) }
+        // One timeline and one player snapshot drive the fill and both labels.
+        // Keeping the sample atomic prevents each view from landing on a different
+        // player tick, especially when precise timestamps are enabled.
+        TimelineView(
+            .animation(
+                minimumInterval: preciseTimestamps ? 1.0 / 60.0 : 0.2,
+                paused: scrubbing || !audio.isPlaying
             )
-            // labels redraw off the SAME live snapshot as the bar so elapsed and
-            // remaining always agree (and remaining uses the live item duration so
-            // it can't read 0:00 while audio is still playing). paused while
-            // scrubbing — then scrubTime drives them instead.
-            TimelineView(.animation(minimumInterval: preciseTimestamps ? 1.0 / 30.0 : 0.2, paused: scrubbing)) { _ in
-                let total = audio.liveDuration()
-                let t = scrubbing ? scrubTime : audio.liveTime()
+        ) { _ in
+            let snapshot = audio.playbackTimeSnapshot()
+            let total = snapshot.duration
+            let t = scrubbing ? min(scrubTime, total) : snapshot.elapsed
+            VStack(spacing: 6) {
+                ScrubBar(
+                    duration: total,
+                    currentTime: t,
+                    scrubbing: $scrubbing,
+                    scrubTime: $scrubTime,
+                    onSeek: { audio.seek(to: $0) }
+                )
                 let losslessStatus = LosslessBadgeResolver.status(for: audio.currentSong)
                 HStack {
                     Text(formatTime(t))
@@ -676,8 +690,7 @@ struct NowPlayingScreen: View {
 
     // MARK: - Playback controls
 
-    // transport row (prev | play/pause | next) — lives on its own so the layouts
-    // can centre it vertically between the progress bar and the volume slider.
+    // Shared transport row.
     private var transportControls: some View {
         HStack(spacing: 0) {
             Spacer()
@@ -730,8 +743,10 @@ struct NowPlayingScreen: View {
                 Image(systemName: Symbols.volumeLow)
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.5))
-                SystemVolumeSlider()
+                SystemVolumeSlider(isInteracting: $isAdjustingVolume)
                     .frame(height: 20)
+                    .scaleEffect(x: 1, y: isAdjustingVolume ? 1.7 : 1, anchor: .center)
+                    .animation(.spring(response: 0.24, dampingFraction: 0.72), value: isAdjustingVolume)
                 Image(systemName: Symbols.volumeHigh)
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.5))
@@ -739,7 +754,7 @@ struct NowPlayingScreen: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 16)
 
-            // bottom bar: lyrics | airplay | queue — equal thirds
+            // Equal thirds: lyrics, AirPlay, queue.
             HStack(spacing: 0) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -984,8 +999,8 @@ private struct AudioVisualizerScreen: View {
 // MARK: - Scrub bar
 
 private struct ScrubBar: View {
-    let duration: () -> TimeInterval     // live item duration
-    let liveTime: () -> TimeInterval     // sampled per frame so the fill can't drift
+    let duration: TimeInterval
+    let currentTime: TimeInterval
     @Binding var scrubbing: Bool
     @Binding var scrubTime: TimeInterval
     let onSeek: (TimeInterval) -> Void
@@ -993,29 +1008,23 @@ private struct ScrubBar: View {
     var body: some View {
         GeometryReader { geo in
             let trackHeight: CGFloat = scrubbing ? 9 : 5
-            // Redraw from the live player position instead of animating stale state.
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: scrubbing)) { _ in
-                let total = duration()
-                let t = scrubbing ? scrubTime : liveTime()
-                let progress = total > 0 ? min(1, max(0, t / total)) : 0
-                let fillWidth = max(0, min(geo.size.width, geo.size.width * CGFloat(progress)))
-                Capsule().fill(.white.opacity(0.2))
-                    .frame(width: geo.size.width, height: trackHeight)
-                    .overlay(alignment: .leading) {
-                        // scrubber stays white regardless of accent colour
-                        Capsule().fill(.white)
-                            .frame(width: fillWidth, height: trackHeight)
-                    }
-                    .frame(maxHeight: .infinity, alignment: .center)
-            }
+            let progress = duration > 0 ? min(1, max(0, currentTime / duration)) : 0
+            let fillWidth = max(0, min(geo.size.width, geo.size.width * CGFloat(progress)))
+            Capsule().fill(.white.opacity(0.2))
+                .frame(width: geo.size.width, height: trackHeight)
+                .overlay(alignment: .leading) {
+                    // scrubber stays white regardless of accent colour
+                    Capsule().fill(.white)
+                        .frame(width: fillWidth, height: trackHeight)
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
             .contentShape(Rectangle())
             .gesture(
                 // minimumDistance > 0 so parent vertical swipe doesn't activate scrubber
                 DragGesture(minimumDistance: 4)
                     .onChanged { v in
-                        let total = duration()
                         scrubbing = true
-                        scrubTime = max(0, min(total, Double(v.location.x / geo.size.width) * total))
+                        scrubTime = max(0, min(duration, Double(v.location.x / geo.size.width) * duration))
                     }
                     .onEnded { _ in
                         onSeek(scrubTime)
@@ -1030,6 +1039,8 @@ private struct ScrubBar: View {
 // MARK: - System volume (MPVolumeView)
 
 private struct SystemVolumeSlider: UIViewRepresentable {
+    @Binding var isInteracting: Bool
+
     final class SliderOnlyVolumeView: MPVolumeView {
         override func layoutSubviews() {
             super.layoutSubviews()
@@ -1043,7 +1054,7 @@ private struct SystemVolumeSlider: UIViewRepresentable {
         }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeCoordinator() -> Coordinator { Coordinator(isInteracting: $isInteracting) }
 
     func makeUIView(context: Context) -> SliderOnlyVolumeView {
         let v = SliderOnlyVolumeView()
@@ -1063,8 +1074,13 @@ private struct SystemVolumeSlider: UIViewRepresentable {
 
     final class Coordinator: NSObject {
         weak var volumeView: MPVolumeView?
+        private var isInteracting: Binding<Bool>
         private var panStartVolume: Float = 0
         private var panActive = false
+
+        init(isInteracting: Binding<Bool>) {
+            self.isInteracting = isInteracting
+        }
 
         private var slider: UISlider? {
             volumeView?.subviews.compactMap { $0 as? UISlider }.first
@@ -1080,8 +1096,12 @@ private struct SystemVolumeSlider: UIViewRepresentable {
             let p = g.location(in: slider)
             guard onTrack(p, slider) else { return }   // tap off the track does nothing
             let frac = Float(max(0, min(1, p.x / slider.bounds.width)))
+            isInteracting.wrappedValue = true
             slider.setValue(frac, animated: false)
             slider.sendActions(for: .valueChanged)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+                self?.isInteracting.wrappedValue = false
+            }
         }
 
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
@@ -1090,6 +1110,7 @@ private struct SystemVolumeSlider: UIViewRepresentable {
             case .began:
                 panActive = onTrack(g.location(in: slider), slider)
                 panStartVolume = slider.value
+                isInteracting.wrappedValue = panActive
             case .changed:
                 guard panActive else { return }
                 let delta = Float(g.translation(in: slider).x / slider.bounds.width)
@@ -1098,6 +1119,7 @@ private struct SystemVolumeSlider: UIViewRepresentable {
                 slider.sendActions(for: .valueChanged)
             default:
                 panActive = false
+                isInteracting.wrappedValue = false
                 panStartVolume = slider.value
             }
         }
@@ -1219,8 +1241,7 @@ private struct LiveArtworkVideoView: UIViewRepresentable {
 
 // MARK: - AirPlay button
 
-// the underlying route picker is kept for its tap-to-open behaviour but its own
-// glyph is hidden (clear tint) so a dynamic icon can be overlaid on top.
+// Keep the route picker for taps; draw our own glyph over it.
 private struct AirPlayButton: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let v = AVRoutePickerView()

@@ -8,7 +8,7 @@ struct TrackRow<Trailing: View>: View {
     var onTap: () -> Void = {}
     var showDownloadState: Bool = true
     var showArtist: Bool = false
-    // cover art instead of track number
+    // cover art in the track-number slot
     var leadingArtwork: Bool = false
     // custom swipe, since these rows are not List rows
     var onSwipePlayNext: (() -> Void)? = nil

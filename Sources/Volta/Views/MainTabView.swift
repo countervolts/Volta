@@ -169,6 +169,10 @@ struct MainTabView: View {
     }
 
     private func presentNowPlaying() {
+        AppLogger.shared.log(
+            "Player expanded from mini player; songID=\(audio.currentSong?.id ?? "none")",
+            category: .playback
+        )
         withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
             showNowPlaying = true
         }

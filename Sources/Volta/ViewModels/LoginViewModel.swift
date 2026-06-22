@@ -5,8 +5,7 @@ import UIKit
 @MainActor
 @Observable
 final class LoginViewModel {
-    // Lightweight pre-flight result for the server address, shown as an inline
-    // indicator so the user knows the URL is good before typing credentials.
+    // Server-address preflight state.
     enum ServerReachability: Equatable {
         case idle
         case checking
@@ -14,8 +13,7 @@ final class LoginViewModel {
         case unreachable
     }
 
-    // nil => the user is still on the service-selection step. Once a backend is
-    // chosen the credentials form is shown and connect() targets that backend.
+    // nil while choosing a service.
     var selectedBackend: MusicBackendKind?
 
     var serverAddress = ""
@@ -34,8 +32,7 @@ final class LoginViewModel {
     private(set) var serverShake = 0
     private(set) var credentialsShake = 0
 
-    // Short-timeout, non-caching session used only for login probing so a server
-    // that's slow or only speaks http doesn't make the user wait the full default.
+    // Short, uncached session for login probes.
     private static let probeSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 10
@@ -127,8 +124,7 @@ final class LoginViewModel {
         reachability = .unreachable
     }
 
-    // Any HTTP response (even 401/404) means the host is up; only a transport
-    // failure — refused connection, TLS mismatch, timeout — counts as unreachable.
+    // Any HTTP response means the host is reachable.
     private static func hostResponds(_ url: URL) async -> Bool {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -176,9 +172,7 @@ final class LoginViewModel {
         case unreachable(SubsonicError?)
     }
 
-    // Validates credentials against each candidate server root in priority order,
-    // returning the first that connects. An auth failure means a server *was*
-    // reached, so we stop probing instead of falling back to another scheme.
+    // Try candidate roots in order; auth failure stops the search.
     private func probe(
         candidates: [URL],
         kind: MusicBackendKind,

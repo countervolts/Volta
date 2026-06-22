@@ -189,7 +189,7 @@ enum AutoMixDSP {
 
     // MARK: Structure (sweet-spot mix points)
 
-    // Smooth to phrase-level shape instead of per-buffer spikes.
+    // Smooth to phrase-level shape, not buffer spikes.
     static func smoothedEnergy(_ energy: [AutoMixEnergyPoint], window: TimeInterval = 1.0) -> [AutoMixEnergyPoint] {
         guard energy.count > 2 else { return energy }
         var out = [AutoMixEnergyPoint]()

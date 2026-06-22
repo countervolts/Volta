@@ -682,7 +682,7 @@ struct AddSongsToPlaylistSheet: View {
         guard let client = appState.client else { return }
         working = true
         Task {
-            // add sequentially so the server keeps insertion order
+            // Add sequentially to preserve server order.
             for song in songs {
                 try? await client.addToPlaylist(playlistID: pl.id, songID: song.id)
             }

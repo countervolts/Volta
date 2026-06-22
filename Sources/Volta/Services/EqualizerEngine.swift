@@ -225,9 +225,7 @@ private final class TapContext {
             }
         }
 
-        // 2) Stereo image; mono wins over widening. Handles both interleaved
-        //    (one buffer, L,R,L,R…) and non-interleaved (separate L/R buffers)
-        //    taps; AVPlayer hands us interleaved stereo by default.
+        // 2) Stereo image. Mono wins over widening; handle both buffer layouts.
         guard mono || spatial else { return }
 
         let lPtr: UnsafeMutablePointer<Float>
@@ -244,7 +242,7 @@ private final class TapContext {
             let nR = Int(abl[1].mDataByteSize) / MemoryLayout<Float>.size
             n = min(frames, nL, nR)
         } else if abl.count == 1, abl[0].mNumberChannels >= 2, let raw = abl[0].mData {
-            // Interleaved: [L, R, …]; R sits one float past L, stride = channels.
+            // Interleaved: [L, R, ...].
             let base = raw.assumingMemoryBound(to: Float.self)
             let ch = Int(abl[0].mNumberChannels)
             lPtr = base
@@ -264,8 +262,7 @@ private final class TapContext {
                 rPtr[j] = m
             }
         } else if spatialEnhanced {
-            // Enhanced: widen only the high-frequency side content so bass stays
-            // centred/mono-safe, then soft-clip instead of hard-clipping the peaks.
+            // Widen high-frequency side content; keep bass centred.
             let w = Float(1.0 + max(0.0, min(1.5, spatialAmount)))
             let a = sideHPAlpha
             var prevIn = sideHPPrevIn
@@ -299,8 +296,7 @@ private final class TapContext {
         }
     }
 
-    // Linear up to the knee, smooth tanh rounding above; asymptotes to ±1 so
-    // aggressive widening compresses gently instead of clipping harshly.
+    // Linear to the knee, then soft tanh rounding.
     @inline(__always)
     private static func softClip(_ x: Float) -> Float {
         let knee: Float = 0.7

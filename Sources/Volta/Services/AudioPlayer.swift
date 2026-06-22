@@ -8,6 +8,13 @@ import UIKit
 enum RepeatMode: Sendable { case off, one, all }
 enum AutoplayMode: Sendable { case off, random, algorithm }
 
+struct PlaybackTimeSnapshot: Sendable {
+    let elapsed: TimeInterval
+    let duration: TimeInterval
+
+    var remaining: TimeInterval { max(0, duration - elapsed) }
+}
+
 // User-tunable infinite-play fill style.
 enum InfinitePlayStyle: String, CaseIterable, Identifiable, Sendable {
     case random      // any songs from the library
@@ -269,8 +276,7 @@ final class AudioPlayer {
     private var currentBassID: UInt64 = 0
 
     private var gaplessNextItem: AVPlayerItem? = nil
-    // Bumped on every playCurrent so a deferred (warm-then-play) request can detect
-    // it was superseded by a newer skip/track change before it runs.
+    // Lets deferred play requests detect newer track changes.
     private var playRequestID: UInt64 = 0
     private var autoplayAppendTask: Task<Void, Never>?
     private let autoplayPreloadThreshold = 1
@@ -292,6 +298,9 @@ final class AudioPlayer {
 
     init() {
         activePlayer = primaryPlayer
+        // Disable AVQueuePlayer's boundary wait; blend warmup has its own gate.
+        primaryPlayer.automaticallyWaitsToMinimizeStalling = false
+        secondaryPlayer.automaticallyWaitsToMinimizeStalling = false
         autoplayMode = UserDefaults.standard.bool(forKey: "autoplayEnabled") ? .random : .off
         if let raw = UserDefaults.standard.string(forKey: "playbackTransitionMode"),
            let mode = PlaybackTransitionMode(rawValue: raw) {
@@ -320,7 +329,16 @@ final class AudioPlayer {
 
     // Pick the time-stretch algorithm once; switching later audibly re-primes.
     private func makePlayerItem(url: URL) -> AVPlayerItem {
-        let item = AVPlayerItem(url: url)
+        // Ask for precise duration so VBR-encoded originals report their true length
+        // instead of a short header estimate, which is what made the progress bar hit
+        // 0:00 remaining while audio kept playing. Duration resolves asynchronously, so
+        // playback still starts immediately (we fall back to server metadata until it
+        // lands) and the pre-queued gapless item parses well before its hand-off.
+        let asset = AVURLAsset(
+            url: url,
+            options: [AVURLAssetPreferPreciseDurationAndTimingKey: true]
+        )
+        let item = AVPlayerItem(asset: asset)
         item.audioTimePitchAlgorithm = .timeDomain
         return item
     }
@@ -391,11 +409,27 @@ final class AudioPlayer {
     func updateClient(_ client: (any MusicService)?) {
         self.client = client
         DownloadService.shared.updateClient(client)
+        AppLogger.shared.log(
+            "Playback client updated; connected=\(client != nil)",
+            category: .playback
+        )
     }
 
     // MARK: - Playback entry points
 
     func playQueue(_ songs: [Song], startIndex: Int = 0, source: String = "", album: Album? = nil, playlist: Playlist? = nil) {
+        guard songs.indices.contains(startIndex) else {
+            AppLogger.shared.log(
+                "Queue rejected; count=\(songs.count); requestedIndex=\(startIndex)",
+                category: .playback,
+                level: .warning
+            )
+            return
+        }
+        AppLogger.shared.log(
+            "Queue started; count=\(songs.count); index=\(startIndex); source='\(source)'",
+            category: .playback
+        )
         cancelTransitionPlayback()
         gaplessNextItem = nil
         autoplayArtistName = nil
@@ -424,7 +458,7 @@ final class AudioPlayer {
     }
 
     func skipNext() {
-        AppLogger.shared.log("⏭ Skip next (idx \(currentIndex) > \(currentIndex + 1))", category: .playback)
+        AppLogger.shared.log("Skip next; index=\(currentIndex); target=\(currentIndex + 1)", category: .playback)
         suppressTransitionsBriefly()
         cancelTransitionPlayback()
         switch repeatMode {
@@ -450,7 +484,7 @@ final class AudioPlayer {
     }
 
     func skipPrevious() {
-        AppLogger.shared.log("⏮ Skip previous (idx \(currentIndex))", category: .playback)
+        AppLogger.shared.log("Skip previous; index=\(currentIndex); elapsed=\(String(format: "%.3f", currentTime))s", category: .playback)
         suppressTransitionsBriefly()
         cancelTransitionPlayback()
         if currentTime > 3 {
@@ -481,7 +515,10 @@ final class AudioPlayer {
             player.play()
         }
         isPlaying.toggle()
-        AppLogger.shared.log(isPlaying ? "▶ Resume" : "⏸ Pause", category: .playback)
+        AppLogger.shared.log(
+            "Playback \(isPlaying ? "resumed" : "paused"); songID=\(currentSong?.id ?? "none"); elapsed=\(String(format: "%.3f", liveTime()))s",
+            category: .playback
+        )
         updateNowPlaying()
     }
 
@@ -489,11 +526,19 @@ final class AudioPlayer {
         pauseAllPlayers()
         cancelTransitionPlayback(keepPaused: true)
         isPlaying = false
+        AppLogger.shared.log(
+            "Playback paused by command; songID=\(currentSong?.id ?? "none"); elapsed=\(String(format: "%.3f", liveTime()))s",
+            category: .playback
+        )
         updateNowPlaying()
     }
 
     // Full stop for logout.
     func stopAndClear() {
+        AppLogger.shared.log(
+            "Playback stopped and queue cleared; songID=\(currentSong?.id ?? "none"); queueCount=\(queue.count)",
+            category: .playback
+        )
         pauseAllPlayers()
         cancelTransitionPlayback(keepPaused: true)
         primaryPlayer.replaceCurrentItem(with: nil)
@@ -517,21 +562,48 @@ final class AudioPlayer {
     }
 
     func seek(to time: TimeInterval) {
+        let before = liveTime()
+        let total = playbackTimeSnapshot().duration
+        let clamped = total > 0 ? min(max(0, time), total) : max(0, time)
         cancelTransitionPlayback(keepPaused: !isPlaying)
-        let target = CMTime(seconds: time, preferredTimescale: 600)
+        let target = CMTime(seconds: clamped, preferredTimescale: 600)
         player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
-        currentTime = time
+        currentTime = clamped
+        AppLogger.shared.log(
+            "Playback seek; from=\(String(format: "%.4f", before))s; to=\(String(format: "%.4f", clamped))s; duration=\(String(format: "%.4f", total))s",
+            category: .playback
+        )
         updateNowPlayingTime()
     }
 
     func liveTime() -> TimeInterval {
-        let t = player.currentTime().seconds
-        return t.isFinite ? t : currentTime
+        playbackTimeSnapshot().elapsed
     }
 
     func liveDuration() -> TimeInterval {
-        let d = player.currentItem?.duration.seconds ?? duration
-        return (d.isFinite && d > 0) ? d : duration
+        playbackTimeSnapshot().duration
+    }
+
+    // Read the AVPlayer clock and item duration once, normalize them together,
+    // and hand UI consumers one coherent sample.
+    func playbackTimeSnapshot() -> PlaybackTimeSnapshot {
+        let itemDuration = player.currentItem?.duration.seconds ?? .nan
+        // The server's reported duration is reliable; AVPlayer's item duration is a
+        // header-based estimate that under-reports VBR-encoded originals, which made
+        // the bar hit 0:00 remaining while the song kept playing.
+        let metadataDuration = duration > 0
+            ? duration
+            : Double(currentSong?.duration ?? 0)
+
+        let playerTime = player.currentTime().seconds
+        let rawElapsed = max(0, playerTime.isFinite ? playerTime : currentTime)
+
+        // Duration cannot fall behind live playback.
+        var total = max(itemDuration.isFinite ? itemDuration : 0, max(0, metadataDuration))
+        total = max(total, rawElapsed)
+
+        let elapsed = total > 0 ? min(rawElapsed, total) : rawElapsed
+        return PlaybackTimeSnapshot(elapsed: elapsed, duration: total)
     }
 
     // MARK: - Queue manipulation
@@ -694,14 +766,14 @@ final class AudioPlayer {
         }
         RunLoop.main.add(timer, forMode: .common)
         sleepTimer = timer
-        AppLogger.shared.log("😴 Sleep timer set for \(minutes) min", category: .playback)
+        AppLogger.shared.log("Sleep timer set for \(minutes) minutes", category: .playback)
     }
 
     func startSleepTimerEndOfTrack() {
         cancelSleepTimer()
         sleepEndsAtTrackEnd = true
         sleepTimerActive = true
-        AppLogger.shared.log("😴 Sleep timer set: end of track", category: .playback)
+        AppLogger.shared.log("Sleep timer set for end of track", category: .playback)
     }
 
     func cancelSleepTimer() {
@@ -713,7 +785,7 @@ final class AudioPlayer {
     }
 
     private func fireSleep() {
-        AppLogger.shared.log("😴 Sleep timer fired — pausing", category: .playback)
+        AppLogger.shared.log("Sleep timer fired; pausing playback", category: .playback)
         pause()
         cancelSleepTimer()
     }
@@ -974,9 +1046,7 @@ final class AudioPlayer {
         warmUpcomingStreams()
     }
 
-    // Pre-fetch stream metadata for the next couple of tracks so gapless/transition
-    // preloads also serve the original file rather than a transcode (Plex caches
-    // the file part key here). Best-effort and fire-and-forget.
+    // Best-effort metadata warmup for upcoming original streams.
     private func warmUpcomingStreams() {
         guard let client else { return }
         let upper = min(currentIndex + 3, queue.count)
@@ -1005,12 +1075,15 @@ final class AudioPlayer {
         let localURL = DownloadService.shared.localURL(for: song)
         let streamURL = localURL ?? client?.streamURL(id: song.id)
         guard let url = streamURL else {
-            AppLogger.shared.log("✗ No stream URL for '\(song.title)'", category: .playback, level: .error)
+            AppLogger.shared.log("Playback failed: no stream URL for '\(song.title)'", category: .playback, level: .error)
             return
         }
         let src = localURL != nil ? "local" : "stream"
         if localURL != nil { DownloadService.shared.markPlayed(song.id) }
-        AppLogger.shared.log("▶ '\(song.title)' by \(song.artist ?? "?") [\(src)]", category: .playback)
+        AppLogger.shared.log(
+            "Track starting; title='\(song.title)'; artist='\(song.artist ?? "?")'; source=\(src); index=\(currentIndex); queueCount=\(queue.count)",
+            category: .playback
+        )
 
         let gapless = UserDefaults.standard.string(forKey: "gaplessPlayback") ?? "off"
 
@@ -1074,7 +1147,7 @@ final class AudioPlayer {
         if gapless == "on" {
             player.insert(nextItem, after: player.currentItem)
         }
-        AppLogger.shared.log("⏭ Gapless pre-buffer: '\(nextSong.title)' [mode=\(gapless)]", category: .playback)
+        AppLogger.shared.log("Gapless pre-buffer started; title='\(nextSong.title)'; mode=\(gapless)", category: .playback)
     }
 
     private func prepareTransitionPlanIfNeeded() {
@@ -1111,7 +1184,7 @@ final class AudioPlayer {
             guard !Task.isCancelled, self.transitionPlanKey == key else { return }
             self.preparedTransitionPlan = plan
             AppLogger.shared.log(
-                "🌀 AutoMix plan: \(current.title) > \(next.title), \(String(format: "%.1f", plan.duration))s, lead \(String(format: "%.1f", plan.startLead))s, seek \(String(format: "%.1f", plan.nextStart))s [\(plan.reason)]",
+                "AutoMix plan: \(current.title) > \(next.title), \(String(format: "%.1f", plan.duration))s, lead \(String(format: "%.1f", plan.startLead))s, seek \(String(format: "%.1f", plan.nextStart))s [\(plan.reason)]",
                 category: .playback
             )
         }
@@ -1414,7 +1487,7 @@ final class AudioPlayer {
         }
         p.play()   // muted warmup
         primedSongID = song.id
-        AppLogger.shared.log("🔥 Prime next: '\(song.title)'", category: .playback)
+        AppLogger.shared.log("Priming next track: '\(song.title)'", category: .playback)
     }
 
     private func clearPriming() {
@@ -1512,7 +1585,7 @@ final class AudioPlayer {
         isTransitioning = true
         isMixing = true
         let fadeDuration = max(0.75, plan.duration)
-        AppLogger.shared.log("🌀 \(plan.mode.settingsLabel): '\(nextSong.title)' over \(String(format: "%.1f", fadeDuration))s [\(plan.reason)]", category: .playback)
+        AppLogger.shared.log("\(plan.mode.settingsLabel) transition: '\(nextSong.title)' over \(String(format: "%.1f", fadeDuration))s [\(plan.reason)]", category: .playback)
         transitionTask = Task { @MainActor [weak self, weak oldPlayer, weak newPlayer] in
             guard let self, let oldPlayer, let newPlayer else { return }
 
@@ -1608,10 +1681,19 @@ final class AudioPlayer {
     }
 
     private func loadArtwork(for song: Song) async {
+        let started = ProcessInfo.processInfo.systemUptime
         let url = client?.coverArtURL(id: song.coverArt, size: 600)
-        let image = await ArtworkLoader.shared.image(for: url, maxPixelSize: 600)
+        async let staticImage = ArtworkLoader.shared.image(for: url, maxPixelSize: 600)
+        async let visualLiveArtwork = resolveVisualLiveArtwork(for: song)
+
+        let image = await staticImage
         guard currentSong?.id == song.id else { return }
         currentArtwork = image
+        AppLogger.shared.log(
+            "Static artwork \(image == nil ? "unavailable" : "ready"); songID=\(song.id); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+            category: .playback,
+            level: image == nil ? .warning : .info
+        )
         if let image {
             let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
@@ -1619,35 +1701,62 @@ final class AudioPlayer {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         }
 
-        let liveEnabled = LiveArtworkSettings.shouldShowAnimatedArtwork
-        guard liveEnabled else { return }
-
-        var live = await ArtworkLoader.shared.liveArtwork(for: client?.coverArtURL(id: song.coverArt))
-        if live == nil, let albumID = song.albumId {
-            let albumCoverArt: String?
-            if queueSourceAlbum?.id == albumID {
-                albumCoverArt = queueSourceAlbum?.coverArt
-            } else if let client {
-                albumCoverArt = (try? await client.album(id: albumID))?.coverArt
-            } else {
-                albumCoverArt = nil
-            }
-            if albumCoverArt != song.coverArt {
-                live = await ArtworkLoader.shared.liveArtwork(for: client?.coverArtURL(id: albumCoverArt))
-            }
-        }
+        let (live, liveURL) = await visualLiveArtwork
         guard currentSong?.id == song.id else { return }
         currentLiveArtwork = live
         currentAnimatedArtwork = live?.animatedImage
         applyNowPlayingAnimatedArtwork(live)
-        if live?.videoURL != nil {
+        AppLogger.shared.log(
+            "Live artwork \(live == nil ? "unavailable" : "ready for display"); songID=\(song.id); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+            category: .playback,
+            level: live == nil && LiveArtworkSettings.shouldShowAnimatedArtwork ? .warning : .info
+        )
+
+        // Do not make the visible animation wait for lock-screen video encoding.
+        guard live != nil, let liveURL, LiveArtworkSettings.prepareVideoAsset else { return }
+        let videoReady = await ArtworkLoader.shared.liveArtwork(for: liveURL, includeVideo: true)
+        guard currentSong?.id == song.id else { return }
+        if let videoReady {
+            currentLiveArtwork = videoReady
+            currentAnimatedArtwork = videoReady.animatedImage
+            applyNowPlayingAnimatedArtwork(videoReady)
+        }
+        AppLogger.shared.log(
+            "Lock-screen artwork preparation finished; songID=\(song.id); videoReady=\(videoReady?.videoURL != nil); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+            category: .playback
+        )
+        if videoReady?.videoURL != nil {
             scheduleAnimatedArtworkReattach(for: song)
         }
     }
 
-    // The OS's supportedAnimatedArtworkKeys set reads empty right at song start and
-    // populates a beat later; re-attach the (already built) animated artwork once it
-    // turns on so the lock screen actually picks it up.
+    private func resolveVisualLiveArtwork(for song: Song) async -> (LiveArtworkAsset?, URL?) {
+        guard LiveArtworkSettings.shouldShowAnimatedArtwork else {
+            AppLogger.shared.log("Live artwork skipped by current settings; songID=\(song.id)", category: .playback)
+            return (nil, nil)
+        }
+
+        let songURL = client?.coverArtURL(id: song.coverArt)
+        if let live = await ArtworkLoader.shared.liveArtwork(for: songURL, includeVideo: false) {
+            return (live, songURL)
+        }
+        guard let albumID = song.albumId else { return (nil, nil) }
+
+        let albumCoverArt: String?
+        if queueSourceAlbum?.id == albumID {
+            albumCoverArt = queueSourceAlbum?.coverArt
+        } else if let client {
+            albumCoverArt = (try? await client.album(id: albumID))?.coverArt
+        } else {
+            albumCoverArt = nil
+        }
+        guard albumCoverArt != song.coverArt else { return (nil, nil) }
+        let albumURL = client?.coverArtURL(id: albumCoverArt)
+        let live = await ArtworkLoader.shared.liveArtwork(for: albumURL, includeVideo: false)
+        return (live, live == nil ? nil : albumURL)
+    }
+
+    // Animated-artwork keys can appear a beat after song start; retry attachment.
     private func scheduleAnimatedArtworkReattach(for song: Song) {
         guard #available(iOS 26.0, *) else { return }
         Task { @MainActor [weak self] in
@@ -1664,15 +1773,25 @@ final class AudioPlayer {
     }
 
     private func loadDuration(from item: AVPlayerItem) async {
-        for _ in 0..<30 {
+        let started = ProcessInfo.processInfo.systemUptime
+        for attempt in 0..<30 {
             let d = item.duration
             if d.isNumeric, d.seconds > 0 {
                 duration = d.seconds
+                AppLogger.shared.log(
+                    "Playback duration ready; duration=\(String(format: "%.4f", d.seconds))s; attempts=\(attempt + 1); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                    category: .playback
+                )
                 updateNowPlayingTime()
                 return
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
+        AppLogger.shared.log(
+            "Playback duration was not ready after 6 seconds; songID=\(currentSong?.id ?? "none")",
+            category: .playback,
+            level: .warning
+        )
     }
 
     private func addTimeObservers() {
@@ -1706,7 +1825,7 @@ final class AudioPlayer {
             loggedSongIDs.insert(song.id)
             let event = PlayEvent(song: song)
             StatsStore.shared.record(event)
-            AppLogger.shared.log("✓ Logged play: '\(song.title)' at \(Int(currentTime))s / \(Int(duration))s", category: .playback)
+            AppLogger.shared.log("Play event recorded: '\(song.title)' at \(Int(currentTime))s / \(Int(duration))s", category: .playback)
         }
     }
 
@@ -1923,17 +2042,17 @@ final class AudioPlayer {
             AppLogger.shared.log("Lock-screen animated artwork: OS reports no usable key — animated now-playing won't show (supportedKeys=\(supportedKeys))", category: .playback, level: .warning)
             return
         }
-        AppLogger.shared.log("Lock-screen animated artwork: attached ✓ key=\(key) (\(videoURL.lastPathComponent))", category: .playback)
+        AppLogger.shared.log("Lock-screen animated artwork attached; key=\(key); file=\(videoURL.lastPathComponent)", category: .playback)
         let preview = live.previewImage
         // If the system never requests the video, it is gating animation, not format.
         let animated = MPMediaItemAnimatedArtwork(
             artworkID: live.artworkID,
             previewImageRequestHandler: { _, completion in
-                AppLogger.shared.log("Lock-screen animated artwork: system REQUESTED preview image ✓", category: .playback)
+                AppLogger.shared.log("Lock-screen animated artwork preview requested by system", category: .playback)
                 completion(preview)
             },
             videoAssetFileURLRequestHandler: { _, completion in
-                AppLogger.shared.log("Lock-screen animated artwork: system REQUESTED video asset ✓ (\(videoURL.lastPathComponent))", category: .playback)
+                AppLogger.shared.log("Lock-screen animated artwork video requested by system; file=\(videoURL.lastPathComponent)", category: .playback)
                 completion(videoURL)
             }
         )
@@ -2019,9 +2138,7 @@ private actor AutoMixAudioAnalyzer {
                 )
             }
         }
-        // One FFT pass over the head of the file feeds both the key estimate and
-        // the vocal-presence heuristic; a second, short pass scans the tail for the
-        // last sung moment (local full files only — a prefix has no tail).
+        // Head FFT covers key/vocals; local files get a short tail pass too.
         if Self.harmonicEnabled || Self.sweetSpotEnabled {
             let head = await decodeSpectral(
                 url: fileURL,

@@ -9,7 +9,7 @@ struct ArtistDetailView: View {
     @State private var addToPlaylistSong: Song? = nil
     @State private var toastMessage: String? = nil
     @State private var showBioSheet = false
-    // Local mirror so the profile photo appears as soon as it loads.
+    // Local profile-photo mirror.
     @State private var profileImage: UIImage? = nil
     @State private var scrollState = ArtistProfileScrollState()
 

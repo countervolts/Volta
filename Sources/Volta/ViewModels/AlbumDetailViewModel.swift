@@ -39,9 +39,13 @@ final class AlbumDetailViewModel {
     }
 
     func load(client: any MusicService) async {
-        guard !isLoading else { return }
+        guard !isLoading else {
+            AppLogger.shared.log("Album metadata load coalesced; albumID=\(album.id)", category: .other)
+            return
+        }
         isLoading = true
         defer { isLoading = false }
+        let started = ProcessInfo.processInfo.systemUptime
 
         let albumID = album.id
         let artistID = album.artistId
@@ -74,10 +78,27 @@ final class AlbumDetailViewModel {
         if let loaded = loadedAlbum, !(loaded.song ?? []).isEmpty {
             album = loaded
             songs = sortTracks(loaded.song ?? [])
+            AppLogger.shared.log(
+                "Album metadata loaded from server; albumID=\(albumID); songs=\(songs.count); related=\(relatedAlbums.count); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                category: .other
+            )
         } else if songs.isEmpty {
             // Offline fallback: show this album's downloaded tracks.
             let local = DownloadService.shared.downloadedSongs().filter { $0.albumId == album.id }
-            if !local.isEmpty { songs = sortTracks(local) }
+            if !local.isEmpty {
+                songs = sortTracks(local)
+                AppLogger.shared.log(
+                    "Album metadata used offline fallback; albumID=\(albumID); songs=\(songs.count)",
+                    category: .other,
+                    level: .warning
+                )
+            } else {
+                AppLogger.shared.log(
+                    "Album metadata unavailable; albumID=\(albumID); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                    category: .other,
+                    level: .warning
+                )
+            }
         }
         moreBySameArtist = relatedAlbums.filter { $0.id != album.id }
     }

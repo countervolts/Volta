@@ -119,7 +119,7 @@ final class DownloadService {
 
         if useSegmentedTransfer {
             let segments = max(2, min(DeveloperExperiments.constrainedConcurrency(default: 6), total / (512 * 1024)))
-            AppLogger.shared.log("⬇ \(title) — starting (\(segments) segments, \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))\(speedLimit > 0 ? ", limited" : ""))", category: .other)
+            AppLogger.shared.log("Download starting: \(title) (\(segments) segments, \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))\(speedLimit > 0 ? ", limited" : ""))", category: .other)
             let task = Task { [self] in
                 do {
                     try await DownloadService.downloadSegmented(url: streamURL, title: title, total: total, dest: destURL, speedLimit: speedLimit) { progress in
@@ -127,29 +127,29 @@ final class DownloadService {
                     }
                     complete(songID, song: song, path: destURL.path, manifestURL: manifestURL, method: "multithreaded")
                 } catch is CancellationError {
-                    AppLogger.shared.log("✗ \(title) — cancelled", category: .other)
+                    AppLogger.shared.log("Download cancelled: \(title)", category: .other)
                     fail(songID, removing: destURL)
                 } catch {
                     if DownloadService.isTransientNetworkError(error) {
                         pauseForResume(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, method: "single thread", resumeData: nil)
                     } else {
-                        AppLogger.shared.log("⚠ \(title) — segmented failed (\(error.localizedDescription)), falling back to single", category: .other, level: .warning)
+                        AppLogger.shared.log("Segmented download failed: \(title) (\(error.localizedDescription)); falling back to single", category: .other, level: .warning)
                         startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL)
                     }
                 }
             }
             segmentTasks[songID] = task
         } else if progressiveDownload {
-            AppLogger.shared.log("⬇ \(title) — starting (\(Self.progressiveDownloadMethod), \(suffix))", category: .other)
+            AppLogger.shared.log("Download starting: \(title) (\(Self.progressiveDownloadMethod), \(suffix))", category: .other)
             startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, method: Self.progressiveDownloadMethod)
         } else {
-            AppLogger.shared.log("⬇ \(title) — starting (single thread\(total > 0 ? ", \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))" : ""))", category: .other)
+            AppLogger.shared.log("Download starting: \(title) (single thread\(total > 0 ? ", \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))" : ""))", category: .other)
             startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL)
         }
     }
 
     func cancelDownload(for song: Song) {
-        AppLogger.shared.log("✗ \(song.title) — download cancelled", category: .other)
+        AppLogger.shared.log("Download cancelled: \(song.title)", category: .other)
         if case .downloading = state(for: song) {
             VoltaNotificationCenter.shared.post(L(.notif_download_cancelled), tone: .warning)
         }
@@ -166,7 +166,7 @@ final class DownloadService {
     }
 
     func removeDownload(for song: Song) {
-        AppLogger.shared.log("🗑 \(song.title) — download removed", category: .other)
+        AppLogger.shared.log("Download removed: \(song.title)", category: .other)
         VoltaNotificationCenter.shared.post(L(.notif_download_removed), tone: .info)
         cancelDownload(for: song)
         if let rec = manifest[song.id] {
@@ -246,7 +246,7 @@ final class DownloadService {
                 if let failure = DownloadService.downloadValidationFailure(tempURL: tempURL, response: response, method: method) {
                     try? FileManager.default.removeItem(at: tempURL)
                     Task { @MainActor in
-                        AppLogger.shared.log("✗ \(title) — download rejected: \(failure)", category: .other, level: .error)
+                        AppLogger.shared.log("Download rejected: \(title): \(failure)", category: .other, level: .error)
                         self.fail(songID, removing: dest)
                     }
                     return
@@ -258,7 +258,7 @@ final class DownloadService {
                     if moved {
                         self.complete(songID, song: song, path: dest.path, manifestURL: manifestURL, method: method)
                     } else {
-                        AppLogger.shared.log("✗ \(title) — failed to save file", category: .other, level: .error)
+                        AppLogger.shared.log("Download failed to save file: \(title)", category: .other, level: .error)
                         self.fail(songID, removing: dest)
                     }
                 }
@@ -266,7 +266,7 @@ final class DownloadService {
                 let msg = error?.localizedDescription ?? "unknown error"
                 Task { @MainActor in
                     if self.userCancelledDownloads.remove(songID) != nil {
-                        AppLogger.shared.log("✗ \(title) — cancelled", category: .other)
+                        AppLogger.shared.log("Download cancelled: \(title)", category: .other)
                         self.fail(songID, removing: dest)
                         return
                     }
@@ -274,7 +274,7 @@ final class DownloadService {
                     if resumeData != nil || DownloadService.isTransientNetworkError(error) {
                         self.pauseForResume(song: song, url: url, dest: dest, manifestURL: manifestURL, method: method, resumeData: resumeData)
                     } else {
-                        AppLogger.shared.log("✗ \(title) — download failed: \(msg)", category: .other, level: .error)
+                        AppLogger.shared.log("Download failed: \(title): \(msg)", category: .other, level: .error)
                         self.fail(songID, removing: dest)
                     }
                 }
@@ -354,7 +354,7 @@ final class DownloadService {
         )
         let progress = lastProgress[songID] ?? 0
         states[songID] = .downloading(progress: progress)
-        AppLogger.shared.log("⏸ \(song.title) — connection lost, will resume when network returns", category: .other, level: .warning)
+        AppLogger.shared.log("Download paused: \(song.title); connection lost, will resume when network returns", category: .other, level: .warning)
         if NetworkMonitor.shared.connection != .none {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -374,7 +374,7 @@ final class DownloadService {
               segmentTasks[id] == nil,
               let pending = pendingResumes.removeValue(forKey: id) else { return }
         if startTimes[id] == nil { startTimes[id] = Date() }
-        AppLogger.shared.log("↻ \(pending.song.title) — resuming download", category: .other)
+        AppLogger.shared.log("Download resuming: \(pending.song.title)", category: .other)
         startSingle(
             song: pending.song,
             url: pending.url,
@@ -419,7 +419,7 @@ final class DownloadService {
             try data.write(to: parts[i], options: .atomic)
             let p = await counter.add(data.count)
             await progress(p)
-            AppLogger.shared.log("↳ \(title) — segment \(i + 1)/\(segments) done (\(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)))", category: .other)
+            AppLogger.shared.log("Download segment complete: \(title); segment=\(i + 1)/\(segments); bytes=\(data.count)", category: .other)
             return data.count
         }
 
@@ -444,7 +444,7 @@ final class DownloadService {
                 }
             }
 
-            AppLogger.shared.log("🧵 \(title) — stitching \(segments) segments", category: .other)
+            AppLogger.shared.log("Download stitching segments: \(title); segments=\(segments)", category: .other)
             try? FileManager.default.removeItem(at: dest)
             FileManager.default.createFile(atPath: dest.path, contents: nil)
             let handle = try FileHandle(forWritingTo: dest)
@@ -488,9 +488,9 @@ final class DownloadService {
         let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
         if elapsed > 0.05, bytes > 0 {
             let speedStr = ByteCountFormatter.string(fromByteCount: Int64(Double(bytes) / elapsed), countStyle: .file)
-            AppLogger.shared.log("✓ \(song.title) — complete (\(method), \(sizeStr) in \(String(format: "%.1f", elapsed))s · avg \(speedStr)/s)", category: .other)
+            AppLogger.shared.log("Download complete: \(song.title) (\(method), \(sizeStr) in \(String(format: "%.1f", elapsed))s, average \(speedStr)/s)", category: .other)
         } else {
-            AppLogger.shared.log("✓ \(song.title) — complete (\(method), \(sizeStr))", category: .other)
+            AppLogger.shared.log("Download complete: \(song.title) (\(method), \(sizeStr))", category: .other)
         }
         VoltaNotificationCenter.shared.post(L(.notif_downloaded, song.title), tone: .success)
     }
@@ -575,7 +575,7 @@ final class DownloadService {
             manifest.removeValue(forKey: id)
             states[id] = .notDownloaded
             total -= size
-            AppLogger.shared.log("🗑 Evicted '\(rec.song?.title ?? id)' to stay under \(capMB)MB cap", category: .other)
+            AppLogger.shared.log("Download evicted: '\(rec.song?.title ?? id)' to stay under \(capMB)MB cap", category: .other)
             VoltaNotificationCenter.shared.post(L(.notif_evicted_old_download), tone: .info)
         }
         saveManifest(to: manifestURL)
