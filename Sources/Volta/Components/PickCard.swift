@@ -34,7 +34,7 @@ struct PickCard: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.white.opacity(0.75))
                     .lineLimit(1)
-                // Truncate titles rather than stretching the card.
+                // Truncate titles; do not stretch the card.
                 Text(album.name)
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)

@@ -331,7 +331,7 @@ final class AutoMixPreviewEngine {
         guard songA?.id == a.id else { return }
         keyA = aAnalysis?.key; gridA = aAnalysis?.grid; analysisA = aAnalysis
 
-        // Pick a decent pair instead of two fully random tracks.
+        // Pick a pair that can actually show off the mix.
         let candidates = Array(pool.dropFirst().prefix(6))
         var best: (song: Song, analysis: AutoMixTrackAnalysis?, score: Double)?
         for cand in candidates {

@@ -25,16 +25,19 @@ final class AppState {
     let homeViewModel = HomeViewModel()
 
     func restoreSession() {
+        AppLogger.shared.logAlways("Session restore started", category: .other)
         // Wi-Fi/cellular can change the effective server URL.
         NetworkMonitor.shared.onConnectionChange { [weak self] conn in
             self?.handleNetworkChange(cellular: conn == .cellular)
         }
         let cellular = NetworkMonitor.shared.isCellular
         if let record = store.currentServer(), let config = store.config(for: record, cellular: cellular) {
+            AppLogger.shared.log("Stored session found; server=\(record.displayName); cellular=\(cellular)", category: .networking)
             activeIsCellular = cellular
             activate(config: config, record: record)
             phase = .authenticated
         } else {
+            AppLogger.shared.log("No stored session; showing login", category: .other)
             phase = .login
         }
     }
@@ -72,11 +75,12 @@ final class AppState {
               let config = store.config(for: record, cellular: activeIsCellular) else { return }
         // Rebuild only when the effective base URL changes.
         guard config != client?.config else { return }
-        AppLogger.shared.log("🔀 Switching to \(activeIsCellular ? "cellular" : "Wi-Fi") URL: \(config.baseURL.absoluteString)", category: .networking)
+        AppLogger.shared.log("Network URL switching to \(activeIsCellular ? "cellular" : "Wi-Fi"): \(config.baseURL.absoluteString)", category: .networking)
         activate(config: config, record: record)
     }
 
     func logout() {
+        AppLogger.shared.logAlways("Logout started; server=\(currentServer?.displayName ?? "none")", category: .other)
         audioPlayer.stopAndClear()
         store.clearCurrent()
         client = nil
@@ -117,15 +121,23 @@ final class AppState {
         let token = UUID()
         activationID = token
         Task {
+            let started = ProcessInfo.processInfo.systemUptime
             let service = try? await MusicServiceFactory.make(config: config, kind: record.backend)
-            guard activationID == token else { return }
+            guard activationID == token else {
+                AppLogger.shared.log("Server activation superseded; server=\(record.displayName)", category: .networking)
+                return
+            }
             guard let service else {
-                AppLogger.shared.log("✗ Failed to activate \(record.displayName)", category: .networking, level: .error)
+                AppLogger.shared.log("Server activation failed: \(record.displayName)", category: .networking, level: .error)
                 return
             }
             client = service
             audioPlayer.updateClient(service)
             IntentBridge.shared.setup(client: service, audioPlayer: audioPlayer)
+            AppLogger.shared.log(
+                "Server activated; server=\(record.displayName); backend=\(record.backend.rawValue); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                category: .networking
+            )
             // Probe sharing and warm Home in the background.
             Task { sharingAvailable = await service.sharingAvailable() }
             Task { await homeViewModel.load(appState: self) }

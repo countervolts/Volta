@@ -109,6 +109,7 @@ struct JellyfinClient: MusicService {
 
     private func request(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Any? = nil) async throws -> Data {
         try await DeveloperSimulation.prepareRequest(endpoint: path)
+        let started = ProcessInfo.processInfo.systemUptime
         guard let url = url(path, query: query) else { throw SubsonicError.invalidResponse }
         var req = URLRequest(url: url)
         req.httpMethod = method
@@ -119,15 +120,21 @@ struct JellyfinClient: MusicService {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         }
-        AppLogger.shared.log("> [JF] \(method) \(path)", category: .networking)
+        AppLogger.shared.log("Request started: [Jellyfin] \(method) \(path)", category: .networking)
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: req)
         } catch {
+            AppLogger.shared.log("Request failed: [Jellyfin] \(method) \(path); error=\(error.localizedDescription)", category: .networking, level: .error)
             throw SubsonicError.serverUnreachable
         }
         if let http = response as? HTTPURLResponse {
+            AppLogger.shared.log(
+                "Response received: [Jellyfin] \(method) \(path); status=\(http.statusCode); bytes=\(data.count); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                category: .networking,
+                level: (200...299).contains(http.statusCode) ? .info : .warning
+            )
             if http.statusCode == 401 { throw SubsonicError.invalidCredentials }
             if !(200...299).contains(http.statusCode) {
                 throw SubsonicError.server(code: http.statusCode, message: "HTTP \(http.statusCode)")

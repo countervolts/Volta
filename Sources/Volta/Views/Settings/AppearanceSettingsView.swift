@@ -37,9 +37,25 @@ extension SettingsView {
         var b: CGFloat = 0
         var a: CGFloat = 0
         ui.getRed(&r, green: &g, blue: &b, alpha: &a)
-        customAccentRed = Double(r)
-        customAccentGreen = Double(g)
-        customAccentBlue = Double(b)
+        let nr = Double(r), ng = Double(g), nb = Double(b)
+        // ColorPicker hands its selection back through a slightly different
+        // color space, so the value it emits never exactly equals what we
+        // stored. Persisting every emission re-invalidates the view, which
+        // makes ColorPicker emit again, which persists again — an unbounded
+        // set -> @AppStorage -> re-render loop that pegs the main thread and
+        // gets the app watchdog-killed on iOS < 26 (iOS 26 coalesces it away).
+        // Only persist a change the user can actually see; a sub-epsilon delta
+        // is round-trip noise, and bailing also avoids hijacking a preset
+        // accent to "custom" just because the picker was rendered.
+        let eps = 0.01
+        if abs(nr - customAccentRed) < eps,
+           abs(ng - customAccentGreen) < eps,
+           abs(nb - customAccentBlue) < eps {
+            return
+        }
+        customAccentRed = nr
+        customAccentGreen = ng
+        customAccentBlue = nb
         accentColorName = "custom"
     }
 

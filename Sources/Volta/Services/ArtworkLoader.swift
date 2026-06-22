@@ -24,6 +24,7 @@ actor ArtworkLoader {
     // Downloaded live-artwork cache; survives normal artwork-cache clears.
     private let pinnedLiveDirectory: URL
     private var inFlight: [String: Task<UIImage?, Never>] = [:]
+    private var liveInFlight: [String: Task<LiveArtworkAsset?, Never>] = [:]
     private let prepareImages: Bool
     private let normalMemoryCountLimit: Int
     private let normalMemoryCostLimit: Int
@@ -97,7 +98,7 @@ actor ArtworkLoader {
         liveMemory.removeAllObjects()
     }
 
-    // Strip auth/size noise so a downloaded original can satisfy any size request.
+    // Strip auth/size noise from artwork cache keys.
     private static func cacheKey(for url: URL, sizeAgnostic: Bool = false) -> String {
         guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return Crypto.md5Hex(url.absoluteString)
@@ -197,6 +198,36 @@ actor ArtworkLoader {
 
     func liveArtwork(for url: URL?, includeVideo: Bool = true) async -> LiveArtworkAsset? {
         guard let url else { return nil }
+        let requestKey = "\(Self.cacheKey(for: url))-video\(includeVideo)"
+        if let existing = liveInFlight[requestKey] {
+            AppLogger.shared.log(
+                "Live artwork joined in-flight request; key=\(String(requestKey.prefix(12))); video=\(includeVideo)",
+                category: .other
+            )
+            return await existing.value
+        }
+
+        let started = ProcessInfo.processInfo.systemUptime
+        AppLogger.shared.log(
+            "Live artwork load started; key=\(String(requestKey.prefix(12))); video=\(includeVideo); maxPixels=\(LiveArtworkSettings.maxPixelSize); maxFrames=\(LiveArtworkSettings.maxFrameCount)",
+            category: .other
+        )
+        let task = Task<LiveArtworkAsset?, Never> { [weak self] in
+            guard let self else { return nil }
+            return await self.loadLiveArtwork(for: url, includeVideo: includeVideo)
+        }
+        liveInFlight[requestKey] = task
+        let asset = await task.value
+        liveInFlight[requestKey] = nil
+        AppLogger.shared.log(
+            "Live artwork load finished; key=\(String(requestKey.prefix(12))); success=\(asset != nil); frames=\(asset?.animatedImage.images?.count ?? 0); videoReady=\(asset?.videoURL != nil); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+            category: .other,
+            level: asset == nil ? .warning : .info
+        )
+        return asset
+    }
+
+    private func loadLiveArtwork(for url: URL, includeVideo: Bool) async -> LiveArtworkAsset? {
         let rawMode = LiveArtworkSettings.rawAnimatedArtworkEnabled
         applyMemoryPolicy(rawMode: rawMode)
         let key = Self.cacheKey(for: url)
@@ -215,6 +246,10 @@ actor ArtworkLoader {
         let liveDir = isPinned ? pinnedLiveDirectory : liveArtworkDirectory
 
         if keepInRAM, let box = liveMemory.object(forKey: variantKey as NSString) {
+            AppLogger.shared.log(
+                "Live artwork decoded-memory cache hit; key=\(String(variantKey.prefix(12)))",
+                category: .other
+            )
             return await Self.makeAsset(from: box.sequence, variantKey: variantKey,
                                         wantVideo: wantVideo, videoDirectory: liveDir)
         }
@@ -231,16 +266,21 @@ actor ArtworkLoader {
             let fileURL = directory.appendingPathComponent(key)
             let data: Data?
             if let d = try? Data(contentsOf: pinnedURL) {
+                AppLogger.shared.log("Live artwork bytes loaded from offline cache; bytes=\(d.count)", category: .other)
                 data = d
             } else if let d = try? Data(contentsOf: identityURL) {
                 // Prefer the downloaded original so offline live artwork stays animated.
+                AppLogger.shared.log("Live artwork bytes loaded from offline identity cache; bytes=\(d.count)", category: .other)
                 data = d
             } else if let d = try? Data(contentsOf: fileURL) {
+                AppLogger.shared.log("Live artwork bytes loaded from disk cache; bytes=\(d.count)", category: .other)
                 data = d
             } else if let (d, _) = try? await session.data(from: url) {
                 try? d.write(to: fileURL, options: .atomic)
+                AppLogger.shared.log("Live artwork downloaded; bytes=\(d.count)", category: .other)
                 data = d
             } else {
+                AppLogger.shared.log("Live artwork download failed", category: .other, level: .warning)
                 data = nil
             }
             guard let data else { return nil }
@@ -509,7 +549,7 @@ actor ArtworkLoader {
 
         let frames = sequence.frames
         guard let first = frames.first else { return nil }
-        // Upscale canvas so the system gets a lock-screen-sized asset.
+        // Upscale to lock-screen canvas size.
         let decoded = max(2, Int(max(first.size.width * first.scale, first.size.height * first.scale)))
         let base = max(decoded, 1080)
         // 3:4 portrait; HEVC wants even dimensions
@@ -575,7 +615,7 @@ actor ArtworkLoader {
                 tick += 1
             }
         }
-        // Pad trailing ticks so the stream is exactly CFR.
+        // Pad trailing ticks for exact CFR.
         if tick < tickCount, let last = frames.last, let buffer = pixelBuffer(from: last, size: size) {
             while tick < tickCount {
                 while !input.isReadyForMoreMediaData {

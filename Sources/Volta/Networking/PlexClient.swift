@@ -165,18 +165,27 @@ final class PlexClient: MusicService, @unchecked Sendable {
     @discardableResult
     private func send(_ method: String, _ path: String, query: [URLQueryItem] = []) async throws -> PXContainer? {
         try await DeveloperSimulation.prepareRequest(endpoint: path)
+        let started = ProcessInfo.processInfo.systemUptime
         guard let url = url(path, query: query) else { throw SubsonicError.invalidResponse }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = 20
         req.cachePolicy = .reloadIgnoringLocalCacheData
         for (k, v) in Self.plexHeaders(clientId: clientId) { req.setValue(v, forHTTPHeaderField: k) }
-        AppLogger.shared.log("> [Plex] \(method) \(path)", category: .networking)
+        AppLogger.shared.log("Request started: [Plex] \(method) \(path)", category: .networking)
         let data: Data
         let resp: URLResponse
         do { (data, resp) = try await session.data(for: req) }
-        catch { throw SubsonicError.serverUnreachable }
+        catch {
+            AppLogger.shared.log("Request failed: [Plex] \(method) \(path); error=\(error.localizedDescription)", category: .networking, level: .error)
+            throw SubsonicError.serverUnreachable
+        }
         if let http = resp as? HTTPURLResponse {
+            AppLogger.shared.log(
+                "Response received: [Plex] \(method) \(path); status=\(http.statusCode); bytes=\(data.count); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                category: .networking,
+                level: (200...299).contains(http.statusCode) ? .info : .warning
+            )
             if http.statusCode == 401 { throw SubsonicError.invalidCredentials }
             if !(200...299).contains(http.statusCode) { throw SubsonicError.server(code: http.statusCode, message: "HTTP \(http.statusCode)") }
         }
@@ -490,7 +499,7 @@ final class PlexClient: MusicService, @unchecked Sendable {
         ])
     }
 
-    // MARK: - Folder browsing (mapped onto the artist → album → track hierarchy)
+    // MARK: - Folder browsing (artist -> album -> track)
 
     func musicFolders() async throws -> [MusicFolder] {
         let dirs = try await get("/library/sections").Directory ?? []
@@ -596,8 +605,7 @@ final class PlexClient: MusicService, @unchecked Sendable {
             || cachedPart(id) != nil
     }
 
-    // Fetch+cache the file part key so streamURL can point at the original file
-    // instead of silently falling back to a transcode.
+    // Cache the file part key for original-file streaming.
     func prepareForPlayback(id: String) async {
         guard cachedPart(id) == nil else { return }
         _ = try? await song(id: id)

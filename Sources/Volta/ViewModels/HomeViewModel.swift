@@ -73,7 +73,7 @@ final class HomeViewModel {
             newReleases = await loadNewReleases(client: client)
             topArtists = await loadTopArtists(client: client)
         } else {
-            // Let a section fail empty instead of taking down Home.
+            // A failed section just renders empty.
             async let picksResult       = cachedRandomSectionsAreFresh && !force ? picks : loadPicks(client: client)
             async let mixesResult       = cachedRandomSectionsAreFresh && !force ? mixes : loadMixes(client: client)
             async let recentResult      = loadRecentlyPlayed(client: client)
@@ -147,7 +147,7 @@ final class HomeViewModel {
         return Array(HiddenAlbumStore.shared.visibleAlbums(albums).prefix(Self.sectionCount))
     }
 
-    // MARK: - Daily mixes ("Rock Mix", "Artist Mix" …)
+    // MARK: - Daily mixes ("Rock Mix", "Artist Mix", ...)
 
     private func loadMixes(client: any MusicService) async -> [MusicMix] {
         var rng = SeededRNG(seed: SeededRNG.daySeed())

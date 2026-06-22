@@ -30,9 +30,7 @@ struct SubsonicConfig: Sendable, Hashable, Codable {
         return ["https://" + cleaned, "http://" + cleaned].compactMap { URL(string: $0) }
     }
 
-    // Clean up common copy/paste mistakes so the stored base URL is the server
-    // root: drop a pasted #fragment, a trailing Subsonic "/rest" API path, and
-    // any trailing slashes.
+    // Normalize pasted server roots.
     private static func sanitizedInput(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if let hash = text.firstIndex(of: "#") { text = String(text[..<hash]) }
@@ -96,9 +94,10 @@ struct SubsonicClient: Sendable {
     // Decode a response and normalize failures to SubsonicError.
     func request(_ endpoint: String, query: [URLQueryItem] = []) async throws -> SubsonicEnvelope.Body {
         try await DeveloperSimulation.prepareRequest(endpoint: endpoint)
-        AppLogger.shared.log("> \(endpoint)", category: .networking)
+        let started = ProcessInfo.processInfo.systemUptime
+        AppLogger.shared.log("Request started: [Subsonic] \(endpoint)", category: .networking)
         guard let url = makeURL(endpoint: endpoint, query: query) else {
-            AppLogger.shared.log("✗ \(endpoint): invalid URL", category: .networking, level: .error)
+            AppLogger.shared.log("Request failed: \(endpoint): invalid URL", category: .networking, level: .error)
             throw SubsonicError.invalidResponse
         }
         var req = URLRequest(url: url)
@@ -110,18 +109,22 @@ struct SubsonicClient: Sendable {
         do {
             (data, response) = try await session.data(for: req)
         } catch {
-            AppLogger.shared.log("✗ \(endpoint): server unreachable – \(error.localizedDescription)", category: .networking, level: .error)
+            AppLogger.shared.log("Request failed: \(endpoint): server unreachable - \(error.localizedDescription)", category: .networking, level: .error)
             throw SubsonicError.serverUnreachable
         }
 
         if let http = response as? HTTPURLResponse {
             let ok = (200...299).contains(http.statusCode)
-            AppLogger.shared.log("← \(endpoint) HTTP \(http.statusCode)", category: .networking, level: ok ? .info : .warning)
+            AppLogger.shared.log(
+                "Response received: [Subsonic] \(endpoint); status=\(http.statusCode); bytes=\(data.count); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                category: .networking,
+                level: ok ? .info : .warning
+            )
             if !ok { throw SubsonicError.serverUnreachable }
         }
 
         guard let envelope = try? JSONDecoder().decode(SubsonicEnvelope.self, from: data) else {
-            AppLogger.shared.log("✗ \(endpoint): invalid JSON response (\(data.count)B)", category: .networking, level: .error)
+            AppLogger.shared.log("Request failed: \(endpoint): invalid JSON response (\(data.count)B)", category: .networking, level: .error)
             throw SubsonicError.invalidResponse
         }
 
@@ -129,7 +132,7 @@ struct SubsonicClient: Sendable {
         if !body.isOK {
             let code = body.error?.code ?? 0
             let msg  = body.error?.message ?? "unknown"
-            AppLogger.shared.log("✗ \(endpoint): API error \(code) – \(msg)", category: .networking, level: .warning)
+            AppLogger.shared.log("Request failed: \(endpoint): API error \(code) - \(msg)", category: .networking, level: .warning)
             if code == 40 || code == 41 || code == 44 || code == 45 {
                 throw SubsonicError.invalidCredentials
             }
@@ -176,8 +179,7 @@ struct SubsonicClient: Sendable {
         ])
     }
 
-    // Append the target format, or force "raw" so the server doesn't transcode to
-    // its own configured default when the user asked for the original.
+    // Explicit "raw" prevents server-default transcoding.
     private func appendStreamFormat(to query: inout [URLQueryItem], bitrate: Int) {
         if let format = StreamingPreferences.transcodingFormat {
             query.append(URLQueryItem(name: "format", value: format))

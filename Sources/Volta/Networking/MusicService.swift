@@ -126,9 +126,7 @@ protocol MusicService: Sendable {
     // Progressive transcodes have no size/range support.
     func downloadIsProgressive(id: String) -> Bool
 
-    // Some backends (Plex) need to fetch per-track metadata before a synchronous
-    // streamURL can point at the original file instead of falling back to a
-    // transcode. Warm that state here ahead of building the URL.
+    // Warm backend metadata needed by synchronous stream URL builders.
     func prepareForPlayback(id: String) async
 
     // True when streamURL(id:) can already build the correct (original or

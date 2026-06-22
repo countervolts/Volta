@@ -291,7 +291,7 @@ struct PlaylistDetailView: View {
                     .font(.title2.bold())
                     .foregroundStyle(.white)
                 // small edit affordance right beside the title (replaces the old
-                // top-right pencil) — opens the name/description/cover editor
+                // top-right pencil: name/description/cover editor
                 Button { openEdit() } label: {
                     Image(systemName: Symbols.edit)
                         .font(.system(size: 12, weight: .semibold))

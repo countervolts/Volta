@@ -76,6 +76,11 @@ struct AlbumDetailView: View {
             })
         }
         .task {
+            let started = ProcessInfo.processInfo.systemUptime
+            AppLogger.shared.log(
+                "Album detail load started; albumID=\(vm.album.id); initialSongs=\(vm.songs.count); fromArtist=\(fromArtist)",
+                category: .other
+            )
             if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
                 if let c = appState.client { await vm.load(client: c) }
                 await loadAnimatedCover()
@@ -85,17 +90,43 @@ struct AlbumDetailView: View {
                 if let c = appState.client { await vm.load(client: c) }
                 await cover
             }
+            AppLogger.shared.log(
+                "Album detail load finished; albumID=\(vm.album.id); songs=\(vm.songs.count); animatedCover=\(animatedCover != nil); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                category: .other
+            )
         }
     }
 
     // Album detail gets live artwork; grids stay static.
     private func loadAnimatedCover() async {
-        guard LiveArtworkSettings.shouldShowAnimatedArtwork,
-              LiveArtworkSettings.animateAlbumHeaders,
-              let client = appState.client,
-              let url = client.coverArtURL(id: vm.album.coverArt) else { return }
-        guard let image = await ArtworkLoader.shared.animatedImage(for: url) else { return }
+        guard LiveArtworkSettings.shouldShowAnimatedArtwork else {
+            AppLogger.shared.log("Album live artwork skipped: disabled; albumID=\(vm.album.id)", category: .other)
+            return
+        }
+        guard LiveArtworkSettings.animateAlbumHeaders else {
+            AppLogger.shared.log("Album live artwork skipped: device profile; albumID=\(vm.album.id)", category: .other)
+            return
+        }
+        guard let client = appState.client,
+              let url = client.coverArtURL(id: vm.album.coverArt) else {
+            AppLogger.shared.log("Album live artwork skipped: no cover URL; albumID=\(vm.album.id)", category: .other, level: .warning)
+            return
+        }
+        let started = ProcessInfo.processInfo.systemUptime
+        AppLogger.shared.log("Album live artwork requested; albumID=\(vm.album.id)", category: .other)
+        guard let image = await ArtworkLoader.shared.animatedImage(for: url) else {
+            AppLogger.shared.log(
+                "Album live artwork unavailable; albumID=\(vm.album.id); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                category: .other,
+                level: .warning
+            )
+            return
+        }
         animatedCover = image
+        AppLogger.shared.log(
+            "Album live artwork displayed; albumID=\(vm.album.id); frames=\(image.images?.count ?? 0); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+            category: .other
+        )
         if let first = image.images?.first {
             vm.setDominantColor(ColorExtractor.dominantColor(from: first))
         }
