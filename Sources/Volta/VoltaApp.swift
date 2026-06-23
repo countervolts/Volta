@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct VoltaApp: App {
-    @State private var appState = AppState()
+    @State private var appState = AppState.shared
 
     var body: some Scene {
         WindowGroup {

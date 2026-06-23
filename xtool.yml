@@ -1,3 +1,4 @@
 version: 1
 bundleID: com.ayo.music
 infoPath: Info.plist
+entitlementsPath: Volta.entitlements

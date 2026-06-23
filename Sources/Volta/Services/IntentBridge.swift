@@ -5,6 +5,10 @@ final class IntentBridge: @unchecked Sendable {
     static let shared = IntentBridge()
     private init() {}
 
+    // Posted whenever the live client is connected or torn down, so scenes that
+    // live outside the SwiftUI hierarchy (CarPlay) can refresh their content.
+    static let clientDidChange = Notification.Name("VoltaIntentBridgeClientDidChange")
+
     private let lock = NSLock()
     private var _client: (any MusicService)?
     private var _audioPlayer: AudioPlayer?
@@ -13,11 +17,17 @@ final class IntentBridge: @unchecked Sendable {
         lock.withLock { _client }
     }
 
+    // The live player is @MainActor-isolated; only touch it from the main actor.
+    var audioPlayer: AudioPlayer? {
+        lock.withLock { _audioPlayer }
+    }
+
     func setup(client: any MusicService, audioPlayer: AudioPlayer) {
         lock.withLock {
             _client = client
             _audioPlayer = audioPlayer
         }
+        NotificationCenter.default.post(name: Self.clientDidChange, object: nil)
     }
 
     func teardown() {
@@ -25,6 +35,7 @@ final class IntentBridge: @unchecked Sendable {
             _client = nil
             _audioPlayer = nil
         }
+        NotificationCenter.default.post(name: Self.clientDidChange, object: nil)
     }
 
     // MainActor caller; dispatches and waits.

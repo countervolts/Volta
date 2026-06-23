@@ -148,7 +148,7 @@ extension SettingsView {
     @ViewBuilder
     var cacheSection: some View {
         let s = "Storage"
-        if sectionVisible(s, [["downloaded tracks", "artwork cache", "local artwork library", "cover", "artist pictures", "lyrics cache", "local lyrics", "save lyrics", "app data", "total", "clear downloads", "clear artwork", "delete local artwork", "clear lyrics", "cache", "storage"], ["download local artwork library", "cover", "covers", "album artwork", "artist pictures", "local images"]]) {
+        if sectionVisible(s, [["downloaded tracks", "download missing songs", "download all missing", "download all music", "artwork cache", "local artwork library", "cover", "artist pictures", "lyrics cache", "local lyrics", "save lyrics", "app data", "total", "clear downloads", "clear artwork", "delete local artwork", "clear lyrics", "cache", "storage"], ["download local artwork library", "cover", "covers", "album artwork", "artist pictures", "local images"]]) {
         Section {
             LabeledContent("Downloaded Tracks", value: downloadsSize)
                 .foregroundStyle(Theme.primaryText)
@@ -213,13 +213,39 @@ extension SettingsView {
     }
 
     private var downloadAllMusicRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let progress = downloadService.bulkProgress
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                Label("Download All Music", systemImage: "square.and.arrow.down.on.square")
+                Label("Download Missing Songs", systemImage: "square.and.arrow.down.on.square")
                     .foregroundStyle(Theme.primaryText)
                 Spacer()
                 if isCalculatingDownloadAll {
                     ProgressView().controlSize(.small).tint(Theme.accent)
+                } else if progress.isRunning {
+                    HStack(spacing: 14) {
+                        Button {
+                            if progress.isPaused {
+                                downloadService.resumeBulkDownloads()
+                            } else {
+                                downloadService.pauseBulkDownloads()
+                            }
+                        } label: {
+                            Image(systemName: progress.isPaused ? "play.fill" : "pause.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Theme.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(progress.isPaused ? "Resume downloads" : "Pause downloads")
+
+                        Button(role: .destructive) {
+                            downloadService.cancelBulkDownloads()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Cancel downloads")
+                    }
                 } else {
                     Button {
                         calculateDownloadAll()
@@ -233,11 +259,22 @@ extension SettingsView {
                     .opacity(appState.client == nil ? 0.45 : 1)
                 }
             }
-            Text(isCalculatingDownloadAll
-                 ? "Scanning your library…"
-                 : "Downloads every track for offline playback. Checks free space first and warns if there isn't enough.")
+
+            if progress.isRunning {
+                ProgressView(value: progress.fraction)
+                    .tint(Theme.accent)
+                HStack {
+                    Text(downloadAllProgressText(progress))
+                    Spacer(minLength: 12)
+                    Text(downloadAllETAText(progress))
+                }
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
+            } else {
+                Text(downloadAllStatusText(progress))
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
         }
         .padding(.vertical, 4)
     }
@@ -330,7 +367,7 @@ extension SettingsView {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Download all music
+    // MARK: - Download missing songs
 
     func calculateDownloadAll() {
         guard !isCalculatingDownloadAll, let client = appState.client else { return }
@@ -354,6 +391,8 @@ extension SettingsView {
                 VoltaNotificationCenter.shared.post(L(.notif_everything_downloaded), tone: .success)
             } else if bytes + 250_000_000 > free {   // keep ~250 MB headroom for the OS
                 showDownloadAllNoSpace = true
+            } else if hasConfirmedDownloadAllMissingSongs {
+                startDownloadAll()
             } else {
                 showDownloadAllConfirm = true
             }
@@ -363,9 +402,37 @@ extension SettingsView {
     func startDownloadAll() {
         let songs = downloadAllSongs
         guard !songs.isEmpty else { return }
-        for song in songs { DownloadService.shared.download(song: song) }
-        VoltaNotificationCenter.shared.post(L(.notif_downloading_n, songs.count), tone: .success)
+        hasConfirmedDownloadAllMissingSongs = true
+        downloadService.startBulkDownloadMissing(songs)
         downloadAllSongs = []
+    }
+
+    private func downloadAllStatusText(_ progress: DownloadBulkProgress) -> String {
+        if isCalculatingDownloadAll {
+            return "Scanning your library…"
+        }
+        switch progress.phase {
+        case .finished where progress.total > 0:
+            return "Done · \(progress.completed) downloaded · \(progress.failed) failed · \(progress.skipped) skipped"
+        case .cancelled where progress.total > 0:
+            return "Stopped · \(progress.completed) downloaded · \(progress.remaining) left"
+        default:
+            return "Downloads only songs missing from this device. New library additions will be picked up next time."
+        }
+    }
+
+    private func downloadAllProgressText(_ progress: DownloadBulkProgress) -> String {
+        let done = progress.completed + progress.failed + progress.skipped
+        var pieces = ["\(done)/\(progress.total) done", "\(progress.remaining) left"]
+        if progress.active > 0 { pieces.append("\(progress.active) active") }
+        if progress.failed > 0 { pieces.append("\(progress.failed) failed") }
+        return pieces.joined(separator: " · ")
+    }
+
+    private func downloadAllETAText(_ progress: DownloadBulkProgress) -> String {
+        guard !progress.isPaused else { return "Paused" }
+        guard let eta = progress.etaSeconds else { return "ETA calculating" }
+        return "ETA \(SettingsView.formatDuration(seconds: Int(eta.rounded())))"
     }
 
     func loadAllSongs(client: any MusicService, albums: [Album]) async -> [Song] {
@@ -580,6 +647,16 @@ extension SettingsView {
 
     nonisolated static func formatBytes(_ n: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file)
+    }
+
+    nonisolated static func formatDuration(seconds: Int) -> String {
+        let clamped = max(0, seconds)
+        let hours = clamped / 3600
+        let minutes = (clamped % 3600) / 60
+        let secs = clamped % 60
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        if minutes > 0 { return "\(minutes)m \(secs)s" }
+        return "\(secs)s"
     }
 
     func clearDownloads() {
