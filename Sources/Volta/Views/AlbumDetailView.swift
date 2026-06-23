@@ -546,16 +546,16 @@ struct AlbumDetailView: View {
 
 struct DownloadAlbumButton: View {
     let songs: [Song]
-    @State private var overallState: DownloadState = .notDownloaded
 
     var body: some View {
+        let state = overallState
         Button {
             for song in songs where DownloadService.shared.state(for: song) == .notDownloaded {
                 DownloadService.shared.download(song: song)
             }
         } label: {
             ZStack {
-                switch overallState {
+                switch state {
                 case .notDownloaded:
                     Image(systemName: Symbols.download)
                 case .downloading(let p):
@@ -578,22 +578,20 @@ struct DownloadAlbumButton: View {
             .glassCircle()
         }
         .buttonStyle(.plain)
-        .onAppear { updateState() }
-        .onChange(of: songs) { _, _ in updateState() }
     }
 
-    private func updateState() {
+    private var overallState: DownloadState {
         let states = songs.map { DownloadService.shared.state(for: $0) }
         if states.allSatisfy({ $0 == .downloaded }) {
-            overallState = .downloaded
+            return .downloaded
         } else if states.contains(where: { if case .downloading = $0 { return true }; return false }) {
             let total = states.compactMap { s -> Double? in
                 if case .downloading(let p) = s { return p }
                 return nil
             }.reduce(0, +) / Double(max(1, states.count))
-            overallState = .downloading(progress: total)
+            return .downloading(progress: total)
         } else {
-            overallState = .notDownloaded
+            return .notDownloaded
         }
     }
 }

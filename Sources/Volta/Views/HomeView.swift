@@ -5,8 +5,7 @@ enum HomeRoute: Hashable {
     case playlist(Playlist)
     case artist(Artist)
     case mix(MusicMix)
-    case recentlyPlayedAll
-    case newReleasesAll
+    case mediaGrid(title: String, items: [MediaItem])
 }
 
 struct HomeView: View {
@@ -21,6 +20,15 @@ struct HomeView: View {
     @Namespace private var heroNamespace
 
     private let pad = Theme.Layout.screenPadding
+
+    private struct HomeSectionSnapshot {
+        var picksFeed: [PickFeedItem] = []
+        var recentlyPlayed: [MediaItem] = []
+        var topArtists: [Artist] = []
+        var moreLike: [HomeViewModel.MoreLikeSection] = []
+        var discover: [Album] = []
+        var newReleases: [Album] = []
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -58,12 +66,8 @@ struct HomeView: View {
         case .mix(let mix):
             MixDetailView(mix: mix)
                 .zoomNavigationTransition(sourceID: mix.id, in: heroNamespace)
-        case .recentlyPlayedAll:
-            FullMediaGrid(title: L(.home_recently_played), items: vm.recentlyPlayed) { item in
-                navigate(to: item)
-            }
-        case .newReleasesAll:
-            FullMediaGrid(title: L(.home_recently_added), items: vm.newReleases.map(MediaItem.init(album:))) { item in
+        case .mediaGrid(let title, let items):
+            FullMediaGrid(title: title, items: items) { item in
                 navigate(to: item)
             }
         }
@@ -114,110 +118,222 @@ struct HomeView: View {
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
+    private func albumKey(for song: Song) -> String {
+        song.albumId ?? "offline-album-\(song.album ?? song.id)"
+    }
+
+    private func artistKey(for song: Song) -> String {
+        song.artistId ?? "offline-artist-\(song.artist ?? "Unknown Artist")"
+    }
+
+    private func stableSeed(_ text: String) -> UInt64 {
+        text.unicodeScalars.reduce(UInt64(0xCBF29CE484222325)) { seed, scalar in
+            (seed ^ UInt64(scalar.value)) &* 0x100000001B3
+        }
+    }
+
     private func downloadedAlbums(from songs: [Song]) -> [Album] {
-        var byID: [String: Album] = [:]
+        var grouped: [String: [Song]] = [:]
         for song in songs {
-            guard let aid = song.albumId, byID[aid] == nil else { continue }
-            byID[aid] = Album(
-                id: aid, name: song.album ?? "Unknown Album", artist: song.artist,
-                artistId: song.artistId, coverArt: song.coverArt, songCount: nil,
-                duration: nil, playCount: nil, created: nil, year: song.year,
-                genre: song.genre, starred: nil, comment: nil, recordLabel: nil, song: nil
+            let fallbackID = "offline-album-\(song.album ?? song.id)"
+            grouped[song.albumId ?? fallbackID, default: []].append(song)
+        }
+
+        return grouped.map { id, albumSongs in
+            let sortedSongs = albumSongs.sorted {
+                let disc0 = $0.discNumber ?? 1
+                let disc1 = $1.discNumber ?? 1
+                if disc0 != disc1 { return disc0 < disc1 }
+                return ($0.track ?? 0) < ($1.track ?? 0)
+            }
+            let first = sortedSongs[0]
+            return Album(
+                id: id,
+                name: first.album ?? "Unknown Album",
+                artist: first.artist,
+                artistId: first.artistId,
+                coverArt: first.coverArt,
+                songCount: sortedSongs.count,
+                duration: sortedSongs.reduce(0) { $0 + ($1.duration ?? 0) },
+                playCount: nil,
+                created: nil,
+                year: first.year,
+                genre: first.genre,
+                starred: nil,
+                comment: nil,
+                recordLabel: nil,
+                song: sortedSongs
             )
         }
-        return byID.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func downloadedArtists(from songs: [Song]) -> [Artist] {
+        var grouped: [String: [Song]] = [:]
+        for song in songs {
+            let name = song.artist ?? "Unknown Artist"
+            grouped[song.artistId ?? "offline-artist-\(name)", default: []].append(song)
+        }
+        return grouped.map { id, artistSongs in
+            let first = artistSongs[0]
+            let albumIDs = Set(artistSongs.compactMap(\.albumId))
+            return Artist(
+                id: id,
+                name: first.artist ?? "Unknown Artist",
+                coverArt: first.coverArt,
+                albumCount: max(1, albumIDs.count),
+                artistImageUrl: nil,
+                starred: nil,
+                album: nil
+            )
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     private func offlineHome(_ songs: [Song]) -> some View {
-        let albums = downloadedAlbums(from: songs)
-        return VStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L(.home_offline))
-                        .font(.largeTitle.bold())
-                        .foregroundStyle(Theme.primaryText)
-                        .lineLimit(1)
-                    Text(L(.home_downloaded_music))
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                Spacer()
-                ServerMenuButton(onOpenSettings: { showSettings = true })
-            }
-            .padding(.horizontal, pad)
-            .padding(.top, 2)
-
-            HStack(spacing: 12) {
-                Button {
-                    appState.audioPlayer.playQueue(songs, startIndex: 0, source: "Downloads")
-                } label: {
-                    Label(L(.action_play), systemImage: Symbols.play)
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Theme.accent, in: Capsule())
-                        .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    appState.audioPlayer.playQueue(songs.shuffled(), startIndex: 0, source: "Downloads")
-                } label: {
-                    Label(L(.action_shuffle), systemImage: Symbols.shuffle)
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Theme.secondaryBackground, in: Capsule())
-                        .foregroundStyle(Theme.primaryText)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, pad)
-
-            if !albums.isEmpty {
-                section(title: L(.home_downloaded_albums)) {
-                    HorizontalMediaRow(items: albums.map(MediaItem.init(album:))) { item in
-                        if let album = item.albumRef { path.append(.album(album)) }
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 14) {
-                SectionHeaderView(L(.home_downloaded_songs))
-                    .padding(.horizontal, pad)
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
-                        TrackRow(
-                            song: song,
-                            index: index + 1,
-                            isCurrentlyPlaying: appState.audioPlayer.currentSong?.id == song.id,
-                            onTap: { appState.audioPlayer.playQueue(songs, startIndex: index, source: "Downloads") },
-                            showArtist: true,
-                            leadingArtwork: true,
-                            onSwipePlayNext: { appState.audioPlayer.playNext(song) }
-                        ) {
-                            SongMenu(
-                                song: song,
-                                onDelete: { DownloadService.shared.removeDownload(for: song) },
-                                deleteLabel: L(.action_remove_download)
-                            )
-                        }
-                        .padding(.horizontal, pad)
-                    }
-                }
-            }
-        }
-        .padding(.top, -10)
-        .padding(.bottom, 120)
+        homeSections(offlineSections(from: songs))
     }
 
     private var sections: some View {
+        homeSections(onlineSections)
+    }
+
+    private var onlineSections: HomeSectionSnapshot {
+        HomeSectionSnapshot(
+            picksFeed: vm.picksFeed,
+            recentlyPlayed: vm.recentlyPlayed,
+            topArtists: vm.topArtists,
+            moreLike: vm.moreLike,
+            discover: vm.discover,
+            newReleases: vm.newReleases
+        )
+    }
+
+    private func offlineSections(from songs: [Song]) -> HomeSectionSnapshot {
+        let albums = downloadedAlbums(from: songs)
+        let artists = downloadedArtists(from: songs)
+        let recentSongs = DownloadService.shared.downloadedSongsByRecentPlay()
+        let recentAlbums = albumsInSongOrder(recentSongs, fallback: albums)
+        let recentlyPlayed = Array(recentAlbums.prefix(40)).map(MediaItem.init(album:))
+
+        var discoverRNG = SeededRNG(seed: SeededRNG.daySeed() &+ 0xD154)
+        let discover = Array(albums.shuffled(using: &discoverRNG).prefix(9))
+
+        let newReleases = Array(albums.sorted {
+            let lhsYear = $0.year ?? Int.min
+            let rhsYear = $1.year ?? Int.min
+            if lhsYear != rhsYear { return lhsYear > rhsYear }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }.prefix(40))
+
+        return HomeSectionSnapshot(
+            picksFeed: offlinePicks(songs: songs, albums: albums),
+            recentlyPlayed: recentlyPlayed,
+            topArtists: Array(artists.prefix(20)),
+            moreLike: offlineMoreLikeSections(songs: songs, albums: albums),
+            discover: discover,
+            newReleases: newReleases
+        )
+    }
+
+    private func albumsInSongOrder(_ songs: [Song], fallback albums: [Album]) -> [Album] {
+        let albumsByID = Dictionary(uniqueKeysWithValues: albums.map { ($0.id, $0) })
+        var seen = Set<String>()
+        var result: [Album] = []
+        for song in songs {
+            let key = albumKey(for: song)
+            guard seen.insert(key).inserted, let album = albumsByID[key] else { continue }
+            result.append(album)
+        }
+        return result.isEmpty ? albums : result
+    }
+
+    private func offlinePicks(songs: [Song], albums: [Album]) -> [PickFeedItem] {
+        var rng = SeededRNG(seed: SeededRNG.daySeed() &+ 0xA11)
+        var pickAlbums = albums
+        pickAlbums.shuffle(using: &rng)
+        var items = downloadedMixes(from: songs).map(PickFeedItem.mix)
+            + pickAlbums.prefix(9).map(PickFeedItem.album)
+        items.shuffle(using: &rng)
+        return items
+    }
+
+    private func downloadedMixes(from songs: [Song]) -> [MusicMix] {
+        var seen = Set<String>()
+        let uniqueSongs = songs.filter { seen.insert($0.id).inserted }
+        guard uniqueSongs.count >= 3 else { return [] }
+
+        var rng = SeededRNG(seed: SeededRNG.daySeed() &+ 0x5150)
+        func mixSongs(_ source: [Song], salt: UInt64) -> [Song] {
+            var localRNG = SeededRNG(seed: SeededRNG.daySeed() &+ salt)
+            return Array(source.shuffled(using: &localRNG).prefix(min(50, source.count)))
+        }
+
+        var mixes: [MusicMix] = [
+            MusicMix(
+                id: "offline-downloaded-\(SeededRNG.daySeed())",
+                title: "Downloaded Mix",
+                subtitle: "Available offline",
+                coverArt: uniqueSongs.first(where: { $0.coverArt != nil })?.coverArt,
+                songs: mixSongs(uniqueSongs, salt: 0xD0A)
+            )
+        ]
+
+        let genreGroups = Dictionary(grouping: uniqueSongs) { $0.genre ?? "" }
+            .filter { !$0.key.isEmpty && $0.value.count >= 3 }
+            .sorted { $0.value.count > $1.value.count }
+        for (genre, group) in genreGroups.prefix(2) {
+            let picked = mixSongs(group, salt: stableSeed(genre))
+            mixes.append(MusicMix(
+                id: "genre-\(genre)",
+                title: "\(genre) Mix",
+                subtitle: "Daily \(genre.lowercased()) mix",
+                coverArt: picked.first(where: { $0.coverArt != nil })?.coverArt,
+                songs: picked
+            ))
+        }
+
+        let artistGroups = Dictionary(grouping: uniqueSongs) { artistKey(for: $0) }
+            .filter { $0.value.count >= 3 }
+            .sorted { $0.value.count > $1.value.count }
+        if let (_, group) = artistGroups.first, let artist = group.first?.artist {
+            let picked = mixSongs(group, salt: 0xA27157)
+            mixes.append(MusicMix(
+                id: "artist-\(artist)",
+                title: "\(artist) Mix",
+                subtitle: "Based on \(artist)",
+                coverArt: picked.first(where: { $0.coverArt != nil })?.coverArt,
+                songs: picked
+            ))
+        }
+
+        mixes.shuffle(using: &rng)
+        return Array(mixes.prefix(4))
+    }
+
+    private func offlineMoreLikeSections(songs: [Song], albums: [Album]) -> [HomeViewModel.MoreLikeSection] {
+        let artistSongGroups = Dictionary(grouping: songs) { artistKey(for: $0) }
+            .sorted { $0.value.count > $1.value.count }
+        return artistSongGroups.prefix(2).compactMap { id, artistSongs in
+            guard let artistName = artistSongs.first?.artist else { return nil }
+            let artistAlbums = albums.filter { album in
+                if let artistID = album.artistId {
+                    return artistID == id
+                }
+                return album.artist == artistName
+            }
+            guard !artistAlbums.isEmpty else { return nil }
+            return HomeViewModel.MoreLikeSection(id: id, artistName: artistName, albums: artistAlbums)
+        }
+    }
+
+    private func homeSections(_ data: HomeSectionSnapshot) -> some View {
         VStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
             homeHeader
 
-            if !vm.picksFeed.isEmpty {
+            if !data.picksFeed.isEmpty {
                 section(title: L(.home_picks_for_you)) {
-                    HorizontalPickRow(items: vm.picksFeed,
+                    HorizontalPickRow(items: data.picksFeed,
                         onSelectAlbum: { path.append(.album($0)) },
                         onSelectMix: { path.append(.mix($0)) },
                         onSaveMix: { saveMixAsPlaylist($0) },
@@ -225,27 +341,27 @@ struct HomeView: View {
                 }
             }
 
-            if !vm.recentlyPlayed.isEmpty {
+            if !data.recentlyPlayed.isEmpty {
                 VStack(alignment: .leading, spacing: 14) {
                     SectionHeaderView(L(.home_recently_played)) {
-                        path.append(.recentlyPlayedAll)
+                        path.append(.mediaGrid(title: L(.home_recently_played), items: data.recentlyPlayed))
                     }
                     .padding(.horizontal, pad)
-                    HorizontalMediaRow(items: vm.recentlyPlayed) { item in
+                    HorizontalMediaRow(items: data.recentlyPlayed) { item in
                         navigate(to: item)
                     }
                 }
             }
 
-            if !vm.topArtists.isEmpty {
+            if !data.topArtists.isEmpty {
                 section(title: L(.home_artists)) {
-                    ArtistScrollRow(artists: vm.topArtists) { artist in
+                    ArtistScrollRow(artists: data.topArtists) { artist in
                         path.append(.artist(artist))
                     }
                 }
             }
 
-            ForEach(vm.moreLike) { item in
+            ForEach(data.moreLike) { item in
                 section(title: L(.home_more_like, item.artistName)) {
                     HorizontalMediaRow(items: item.albums.map(MediaItem.init(album:))) { mediaItem in
                         if let album = mediaItem.albumRef { path.append(.album(album)) }
@@ -253,17 +369,18 @@ struct HomeView: View {
                 }
             }
 
-            if !vm.discover.isEmpty {
+            if !data.discover.isEmpty {
                 section(title: L(.home_discover)) {
-                    HorizontalMediaRow(items: vm.discover.map(MediaItem.init(album:))) { mediaItem in
+                    HorizontalMediaRow(items: data.discover.map(MediaItem.init(album:))) { mediaItem in
                         if let album = mediaItem.albumRef { path.append(.album(album)) }
                     }
                 }
             }
 
-            if !vm.newReleases.isEmpty {
-                section(title: L(.home_recently_added), seeAll: { path.append(.newReleasesAll) }) {
-                    HorizontalMediaRow(items: vm.newReleases.map(MediaItem.init(album:))) { mediaItem in
+            if !data.newReleases.isEmpty {
+                let items = data.newReleases.map(MediaItem.init(album:))
+                section(title: L(.home_recently_added), seeAll: { path.append(.mediaGrid(title: L(.home_recently_added), items: items)) }) {
+                    HorizontalMediaRow(items: items) { mediaItem in
                         if let album = mediaItem.albumRef { path.append(.album(album)) }
                     }
                 }

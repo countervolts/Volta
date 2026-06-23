@@ -4,11 +4,19 @@ import Observation
 @MainActor
 @Observable
 final class AppState {
+    // Shared instance so non-SwiftUI scenes (CarPlay) can drive session restore
+    // and reach the live client/player even when the iPhone window never opens.
+    static let shared = AppState()
+
     enum Phase: Equatable {
         case loading
         case login
         case authenticated
     }
+
+    // Guards restoreSession against running twice (e.g. CarPlay restores while
+    // launched in the background, then the phone scene appears and tries again).
+    private var didStartRestore = false
 
     private(set) var phase: Phase = .loading
     private(set) var client: (any MusicService)?
@@ -25,6 +33,8 @@ final class AppState {
     let homeViewModel = HomeViewModel()
 
     func restoreSession() {
+        guard !didStartRestore else { return }
+        didStartRestore = true
         AppLogger.shared.logAlways("Session restore started", category: .other)
         // Wi-Fi/cellular can change the effective server URL.
         NetworkMonitor.shared.onConnectionChange { [weak self] conn in

@@ -85,6 +85,7 @@ struct SettingsView: View {
     @AppStorage("showWarningNotifications") var showWarningNotifications = false
     @AppStorage("autoPlaylistBackupEnabled") var autoPlaylistBackupEnabled = true
     @AppStorage("saveLyricsLocally") var saveLyricsLocally = true
+    @AppStorage("hasConfirmedDownloadAllMissingSongs") var hasConfirmedDownloadAllMissingSongs = false
 
     @State var downloadsSize: String  = "…"
     @State var artworkSize: String     = "…"
@@ -107,7 +108,7 @@ struct SettingsView: View {
     @State var isPrefetchingArtwork = false
     @State var artworkPrefetchProgress = ArtworkPrefetchProgress()
 
-    // download-all-music flow
+    // missing-song bulk download flow
     @State var isCalculatingDownloadAll = false
     @State var downloadAllSongs: [Song] = []
     @State var downloadAllBytes = 0
@@ -133,6 +134,7 @@ struct SettingsView: View {
     @State var playlistBackupStore = PlaylistBackupStore.shared
     @StateObject var lyricsDownloader = LyricsBulkDownloader.shared
     @State var hiddenAlbums = HiddenAlbumStore.shared
+    @State var downloadService = DownloadService.shared
     @State var playlistBackupStatus: String?
     @State var isRefreshingPlaylistBackups = false
     @State var restoringPlaylistBackupID: String?
@@ -179,16 +181,16 @@ struct SettingsView: View {
 
     var body: some View {
         settingsBody
-            .alert("Download All Music", isPresented: $showDownloadAllConfirm) {
+            .alert("Download Missing Songs", isPresented: $showDownloadAllConfirm) {
                 Button(L(.action_download)) { startDownloadAll() }
                 Button(L(.action_cancel), role: .cancel) {}
             } message: {
-                Text("Download \(downloadAllCount) song\(downloadAllCount == 1 ? "" : "s") (\(SettingsView.formatBytes(downloadAllBytes)))? You have \(SettingsView.formatBytes(downloadAllFreeBytes)) free.")
+                Text("Download \(downloadAllCount) missing song\(downloadAllCount == 1 ? "" : "s") (\(SettingsView.formatBytes(downloadAllBytes)))? You have \(SettingsView.formatBytes(downloadAllFreeBytes)) free.")
             }
             .alert("Not Enough Storage", isPresented: $showDownloadAllNoSpace) {
                 Button(L(.action_ok), role: .cancel) {}
             } message: {
-                Text("Downloading all music needs about \(SettingsView.formatBytes(downloadAllBytes)) but only \(SettingsView.formatBytes(downloadAllFreeBytes)) is free. Free up space or download albums individually.")
+                Text("Downloading missing songs needs about \(SettingsView.formatBytes(downloadAllBytes)) but only \(SettingsView.formatBytes(downloadAllFreeBytes)) is free. Free up space or download albums individually.")
             }
             .fileImporter(
                 isPresented: $showSettingsImporter,
@@ -200,15 +202,31 @@ struct SettingsView: View {
     }
 
     private var settingsBody: some View {
+        settingsAlerts
+    }
+
+    private var settingsChrome: some View {
         settingsContent
             .navigationTitle(L(.settings_title))
             .navigationBarBackButtonHidden(true)
             .background(SwipeBackEnabler())
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
-            }
+            .toolbar { settingsToolbar }
             .preferredColorScheme(Theme.colorScheme)
             .onAppear { refreshCacheSize() }
+            .onChange(of: downloadService.bulkProgress.phase) { _, phase in
+                handleBulkDownloadPhaseChange(phase)
+            }
+    }
+
+    @ToolbarContentBuilder
+    private var settingsToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            GlassBackButton()
+        }
+    }
+
+    private var settingsAlerts: some View {
+        settingsChrome
             .alert("Clear Downloads", isPresented: $showClearCacheAlert) {
                 Button(L(.action_clear), role: .destructive) { clearDownloads() }
                 Button(L(.action_cancel), role: .cancel) {}
@@ -281,6 +299,15 @@ struct SettingsView: View {
             .searchable(text: $settingsSearch, placement: .navigationBarDrawer(displayMode: .automatic), prompt: L(.settings_search))
             .scrollContentBackground(.hidden)
             .background(Theme.background)
+        }
+    }
+
+    private func handleBulkDownloadPhaseChange(_ phase: DownloadBulkPhase) {
+        switch phase {
+        case .finished, .cancelled:
+            refreshCacheSize()
+        case .idle, .running, .paused:
+            break
         }
     }
 }

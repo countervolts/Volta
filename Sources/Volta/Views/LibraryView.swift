@@ -90,6 +90,8 @@ struct LibraryView: View {
             genreGrid(genre: genre)
         case .folder(let source):
             FolderBrowseScreen(source: source, title: folderTitle(source))
+        case .downloadedFolder(let path):
+            DownloadedFolderScreen(path: path, title: path.last ?? "Folders")
         }
     }
 
@@ -215,18 +217,9 @@ struct LibraryView: View {
     @ViewBuilder
     private var foldersContent: some View {
         if vm.source == .downloaded {
-            VStack(spacing: 12) {
-                Image(systemName: "folder.badge.questionmark")
-                    .font(.system(size: 40, weight: .ultraLight))
-                    .foregroundStyle(Theme.secondaryText)
-                Text("Folder browsing is server-only")
-                    .font(.headline).foregroundStyle(Theme.primaryText)
-                Text("Switch to the Server source to browse your library by folder.")
-                    .font(.subheadline).foregroundStyle(Theme.secondaryText)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.horizontal, 40)
-            .frame(maxWidth: .infinity, minHeight: 320)
+            // Mirror the server folder browser, but build the tree locally from
+            // the file paths of downloaded songs so it works fully offline.
+            DownloadedFolderView(prefix: [], filterText: vm.searchText)
         } else {
             VStack(spacing: 0) {
                 // music-folder picker only when the server exposes more than one
@@ -619,6 +612,9 @@ enum LibraryRoute: Hashable {
     case playlist(Playlist)
     case genreAlbums(String)
     case folder(FolderSource)
+    // Virtual folder tree built from downloaded songs' paths; `path` is the
+    // chain of directory names from the root down to this folder.
+    case downloadedFolder(path: [String])
 }
 
 // MARK: - Batch add-to-playlist sheet (multi-select)
