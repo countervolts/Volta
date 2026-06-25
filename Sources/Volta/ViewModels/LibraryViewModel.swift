@@ -319,4 +319,24 @@ final class LibraryViewModel {
     func albumsForGenre(_ genre: String) -> [Album] {
         sourceAlbums.filter { $0.genre?.localizedCaseInsensitiveContains(genre) == true }
     }
+
+    // Album count per genre, computed in a single pass and memoized. The genres
+    // list reads this once per row, so calling albumsForGenre (which rescans all
+    // albums) per row used to be O(genres × albums) on every render and scroll.
+    @ObservationIgnored private var genreCountCache: (key: String, counts: [String: Int])?
+
+    func genreAlbumCounts() -> [String: Int] {
+        let key = "\(source.rawValue)-\(HiddenAlbumStore.shared.revision)-\(DownloadService.shared.downloadedRevision)-\(albums.count)"
+        if let cache = genreCountCache, cache.key == key { return cache.counts }
+
+        let albumList = sourceAlbums
+        var counts: [String: Int] = [:]
+        for genre in sourceGenres {
+            counts[genre] = albumList.reduce(0) {
+                $0 + (($1.genre?.localizedCaseInsensitiveContains(genre) == true) ? 1 : 0)
+            }
+        }
+        genreCountCache = (key, counts)
+        return counts
+    }
 }

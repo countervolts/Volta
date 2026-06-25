@@ -400,10 +400,18 @@ struct HomeView: View {
 
     private var homeHeader: some View {
         HStack(alignment: .center, spacing: 12) {
-            Text(L(.tab_home))
-                .font(.largeTitle.bold())
-                .foregroundStyle(Theme.primaryText)
-                .lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(L(.tab_home))
+                    .font(.largeTitle.bold())
+                    .foregroundStyle(Theme.primaryText)
+                    .lineLimit(1)
+
+                if isServerUnavailable {
+                    Text("(\(L(.home_offline).lowercased()))")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText.opacity(0.6))
+                }
+            }
 
             Spacer()
 

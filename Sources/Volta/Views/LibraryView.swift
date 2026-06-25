@@ -579,9 +579,10 @@ struct LibraryView: View {
     }
 
     private var genresList: some View {
-        LazyVStack(spacing: 0) {
+        let counts = vm.genreAlbumCounts()
+        return LazyVStack(spacing: 0) {
             ForEach(vm.filteredGenres, id: \.self) { genre in
-                let albumCount = vm.albumsForGenre(genre).count
+                let albumCount = counts[genre] ?? 0
                 NavigationLink(value: LibraryRoute.genreAlbums(genre)) {
                     HStack {
                         Text(genre).font(.body).foregroundStyle(Theme.primaryText)

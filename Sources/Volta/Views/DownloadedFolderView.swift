@@ -63,30 +63,31 @@ struct DownloadedFolderView: View {
         return DownloadedFolderTree.contents(prefix: prefix, songs: visible)
     }
 
-    private var folders: [String] {
+    private func filtered(_ node: (folders: [String], songs: [Song])) -> (folders: [String], songs: [Song]) {
         let q = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return node.folders }
-        return node.folders.filter { $0.localizedCaseInsensitiveContains(q) }
-    }
-
-    private var songs: [Song] {
-        let q = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return node.songs }
-        return node.songs.filter { $0.title.localizedCaseInsensitiveContains(q) }
+        guard !q.isEmpty else { return node }
+        return (
+            node.folders.filter { $0.localizedCaseInsensitiveContains(q) },
+            node.songs.filter { $0.title.localizedCaseInsensitiveContains(q) }
+        )
     }
 
     var body: some View {
-        LazyVStack(spacing: 0) {
+        // Resolve the tree once per render: `node` walks every downloaded song's
+        // path, so referencing it from several computed properties used to redo
+        // that work multiple times per body evaluation.
+        let (folders, songs) = filtered(node)
+        return LazyVStack(spacing: 0) {
             if folders.isEmpty && songs.isEmpty {
                 emptyState
             } else {
-                if !songs.isEmpty { playHeader }
+                if !songs.isEmpty { playHeader(songs) }
                 ForEach(folders, id: \.self) { name in
                     directoryRow(name)
                     Divider().background(Theme.secondaryText.opacity(0.12)).padding(.leading, 64)
                 }
                 ForEach(Array(songs.enumerated()), id: \.element.id) { i, song in
-                    songRow(song, position: i + 1)
+                    songRow(song, position: i + 1, in: songs)
                     Divider().background(Theme.secondaryText.opacity(0.12)).padding(.leading, 64)
                 }
             }
@@ -124,7 +125,7 @@ struct DownloadedFolderView: View {
 
     private var sourceTitle: String { prefix.last ?? "Downloads" }
 
-    private var playHeader: some View {
+    private func playHeader(_ songs: [Song]) -> some View {
         HStack(spacing: 12) {
             Button {
                 appState.audioPlayer.playQueue(songs, startIndex: 0, source: sourceTitle)
@@ -181,7 +182,7 @@ struct DownloadedFolderView: View {
         .buttonStyle(.plain)
     }
 
-    private func songRow(_ song: Song, position: Int) -> some View {
+    private func songRow(_ song: Song, position: Int, in songs: [Song]) -> some View {
         TrackRow(
             song: song,
             index: song.track ?? position,
