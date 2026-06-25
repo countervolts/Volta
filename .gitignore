@@ -4,6 +4,6 @@ xtool/
 .devcontainer/
 .vscode/
 discordbot/
-
+changelog/
 # full res sources
 img/*.png

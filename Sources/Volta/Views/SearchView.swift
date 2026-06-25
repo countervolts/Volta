@@ -7,8 +7,11 @@ struct SearchView: View {
     @Environment(AppState.self) private var appState
     @State private var vm = SearchViewModel()
     @State private var hiddenAlbums = HiddenAlbumStore.shared
+    @State private var networkMonitor = NetworkMonitor.shared
     @Binding var path: [SearchRoute]
     @Namespace private var heroNamespace
+
+    private var isOffline: Bool { networkMonitor.connection == .none }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -47,10 +50,14 @@ struct SearchView: View {
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
         .onAppear {
+            vm.setOffline(isOffline)
             if let client = appState.client { vm.bind(client: client) }
         }
         .onChange(of: searchText) { _, new in
             vm.query = new
+        }
+        .onChange(of: networkMonitor.connection) { _, _ in
+            vm.setOffline(isOffline)
         }
         .onChange(of: hiddenAlbums.revision) { _, _ in
             vm.refreshForVisibilityChange()
@@ -642,6 +649,9 @@ private struct GenreHomeView: View {
     @State private var savingMixIDs = Set<String>()
     @State private var toastMessage: String?
     @State private var hiddenAlbums = HiddenAlbumStore.shared
+    @State private var networkMonitor = NetworkMonitor.shared
+
+    private var isOffline: Bool { networkMonitor.connection == .none }
 
     private var pickFeed: [PickFeedItem] {
         var items = genreData.pickAlbums.map(PickFeedItem.album)
@@ -756,11 +766,21 @@ private struct GenreHomeView: View {
     }
 
     private func loadGenreData() async {
-        guard let client = appState.client else { return }
         isLoadingGenre = true
         defer { isLoadingGenre = false }
 
-        let albums = await Self.fetchGenreAlbums(genreName: genreName, client: client)
+        var albums: [Album] = []
+        if !isOffline, let client = appState.client {
+            albums = await Self.fetchGenreAlbums(genreName: genreName, client: client)
+        }
+        // Fall back to downloaded songs when offline or the server is unreachable.
+        if albums.isEmpty {
+            let songs = OfflineLibrary.songs(
+                inGenre: genreName,
+                from: HiddenAlbumStore.shared.visibleSongs(DownloadService.shared.downloadedSongs())
+            )
+            albums = OfflineLibrary.albums(from: songs)
+        }
         hiddenAlbums.register(albums: albums)
         let data = await Self.makeGenreHomeData(albums: albums, seed: genreSeed)
         guard !Task.isCancelled else { return }
@@ -768,11 +788,20 @@ private struct GenreHomeView: View {
     }
 
     private func loadGenreMix() async {
-        guard let client = appState.client else { return }
         isLoadingMix = true
         defer { isLoadingMix = false }
 
-        let songs = HiddenAlbumStore.shared.visibleSongs((try? await client.songsByGenre(genreName, count: 100)) ?? [])
+        var songs: [Song] = []
+        if !isOffline, let client = appState.client {
+            songs = HiddenAlbumStore.shared.visibleSongs((try? await client.songsByGenre(genreName, count: 100)) ?? [])
+        }
+        // Fall back to downloaded songs when offline or the server is unreachable.
+        if songs.isEmpty {
+            songs = OfflineLibrary.songs(
+                inGenre: genreName,
+                from: HiddenAlbumStore.shared.visibleSongs(DownloadService.shared.downloadedSongs())
+            )
+        }
         var seen = Set<String>()
         let unique = songs.filter { seen.insert($0.id).inserted }
         guard !unique.isEmpty else {

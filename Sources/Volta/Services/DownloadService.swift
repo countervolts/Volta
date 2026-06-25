@@ -977,11 +977,21 @@ final class DownloadService {
     @ObservationIgnored private var manifest: [String: Record] = [:]
     @ObservationIgnored private var isReconcilingMetadata = false
 
+    // Derived song lists are rebuilt from the manifest (which means a fileExists
+    // syscall per record). Views read these from computed properties many times
+    // per render, so memoize per downloadedRevision to keep that work off the
+    // main thread's hot path — a stale entry can only exist for one revision.
+    @ObservationIgnored private var downloadedSongsCache: (revision: Int, songs: [Song])?
+    @ObservationIgnored private var downloadedRecentCache: (revision: Int, songs: [Song])?
+
     // MARK: - Storage cap / LRU eviction
 
     func markPlayed(_ songID: String) {
         guard manifest[songID] != nil else { return }
         manifest[songID]?.lastPlayed = .now
+        // Doesn't change which songs exist (downloadedRevision is untouched), only
+        // their recent-play ordering — so just drop that one cache.
+        downloadedRecentCache = nil
         saveManifest(to: manifestURL)
     }
 
@@ -1022,18 +1032,25 @@ final class DownloadService {
     }
 
     func downloadedSongs() -> [Song] {
-        _ = downloadedRevision
-        let records: [Record] = Array(manifest.values)
-        return records.compactMap { (rec: Record) -> Song? in
+        let revision = downloadedRevision
+        if let cache = downloadedSongsCache, cache.revision == revision {
+            return cache.songs
+        }
+        let songs = manifest.values.compactMap { (rec: Record) -> Song? in
             guard let song = rec.song,
                   FileManager.default.fileExists(atPath: rec.path) else { return nil }
             return song
         }
+        downloadedSongsCache = (revision, songs)
+        return songs
     }
 
     func downloadedSongsByRecentPlay() -> [Song] {
-        _ = downloadedRevision
-        return manifest.values
+        let revision = downloadedRevision
+        if let cache = downloadedRecentCache, cache.revision == revision {
+            return cache.songs
+        }
+        let songs = manifest.values
             .filter { FileManager.default.fileExists(atPath: $0.path) }
             .sorted {
                 let lhsDate = $0.lastPlayed ?? .distantPast
@@ -1042,6 +1059,8 @@ final class DownloadService {
                 return ($0.song?.title ?? "").localizedCaseInsensitiveCompare($1.song?.title ?? "") == .orderedAscending
             }
             .compactMap(\.song)
+        downloadedRecentCache = (revision, songs)
+        return songs
     }
 
     private func loadManifest() {

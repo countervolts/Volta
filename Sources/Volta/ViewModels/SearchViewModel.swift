@@ -70,6 +70,7 @@ final class SearchViewModel {
     private(set) var isLoadingBrowseGenres = false
     private(set) var isSearching = false
     private(set) var hasSearched = false
+    private(set) var isOffline = false
 
     var query: String = "" {
         didSet { scheduleSearch() }
@@ -86,7 +87,20 @@ final class SearchViewModel {
         let id = client.config.baseURL.absoluteString
         guard browseGenreClientID != id else { return }
         browseGenreClientID = id
-        Task { await loadBrowseGenres(client: client) }
+        reloadBrowseGenres()
+    }
+
+    // Driven by the view from NetworkMonitor. When offline, browse + search run
+    // entirely against downloaded songs so the experience matches being online.
+    func setOffline(_ offline: Bool) {
+        guard isOffline != offline else { return }
+        isOffline = offline
+        reloadBrowseGenres()
+        scheduleSearch()
+    }
+
+    private func reloadBrowseGenres() {
+        Task { await loadBrowseGenres() }
     }
 
     func saveSearch(_ term: String, item: SearchHistoryItem? = nil) {
@@ -203,6 +217,10 @@ final class SearchViewModel {
             hasSearched = false
             return
         }
+        if isOffline {
+            await performOfflineSearch(q)
+            return
+        }
         guard let client else { return }
         isSearching = true
         defer { isSearching = false }
@@ -232,6 +250,14 @@ final class SearchViewModel {
             albumSample = (try? await genreAlbums) ?? []
         }
         guard query == q else { return }
+
+        // A nil primary result means the search call threw — the server is
+        // unreachable even though we aren't flagged offline. Serve local matches
+        // instead of an empty "no results" screen.
+        if res1 == nil {
+            await applyOfflineResults(for: q)
+            return
+        }
 
         var mergedArtists = res1?.artists ?? []
         var mergedAlbums  = res1?.albums  ?? []
@@ -273,6 +299,65 @@ final class SearchViewModel {
         lyricHits = hits.filter { visibleResolvedSongs[$0.id] != nil || resolvedSongs[$0.id] == nil }
     }
 
+    // MARK: - Offline search (downloaded songs only)
+
+    private func performOfflineSearch(_ q: String) async {
+        isSearching = true
+        defer { isSearching = false }
+        hasSearched = true
+        await applyOfflineResults(for: q)
+    }
+
+    // Fills results from downloaded songs only. Caller owns isSearching/hasSearched
+    // so this can also serve as the fallback when an online search call fails.
+    private func applyOfflineResults(for q: String) async {
+        let downloaded = HiddenAlbumStore.shared.visibleSongs(DownloadService.shared.downloadedSongs())
+        let result = await Self.offlineResults(query: q, songs: downloaded)
+        guard query == q else { return }
+        artists = result.artists
+        albums = result.albums
+        songs = result.songs
+        genres = result.genres
+
+        let hits = await LyricsService.shared.searchLocal(q)
+        guard query == q else { return }
+        var byID: [String: Song] = [:]
+        for song in downloaded { byID[song.id] = song }
+        var resolved: [String: Song] = [:]
+        for hit in hits where byID[hit.id] != nil { resolved[hit.id] = byID[hit.id] }
+        lyricSongsByID = resolved
+        // Keep hits we resolved to a downloaded song, plus any we couldn't map at
+        // all (so they still appear) — drop only ones that map to a hidden song.
+        lyricHits = hits.filter { resolved[$0.id] != nil || byID[$0.id] == nil }
+    }
+
+    private nonisolated static func offlineResults(
+        query q: String,
+        songs: [Song]
+    ) async -> (artists: [Artist], albums: [Album], songs: [Song], genres: [GenreSearchResult]) {
+        await DeveloperExperiments.runSync(priority: .userInitiated) {
+            let normalized = q.normalizedForSearch()
+            func matches(_ text: String?) -> Bool {
+                guard let text, !text.isEmpty else { return false }
+                if text.localizedCaseInsensitiveContains(q) { return true }
+                return !normalized.isEmpty && text.normalizedForSearch().contains(normalized)
+            }
+
+            let matchedSongs = songs
+                .filter { matches($0.title) || matches($0.artist) || matches($0.album) }
+                .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+
+            let matchedAlbums = OfflineLibrary.albums(from: songs)
+                .filter { matches($0.name) || matches($0.artist) }
+
+            let matchedArtists = OfflineLibrary.artists(from: songs)
+                .filter { matches($0.name) }
+
+            let matchedGenres = Self.genreSummariesSync(query: q, songs: songs)
+            return (matchedArtists, matchedAlbums, matchedSongs, matchedGenres)
+        }
+    }
+
     func lyricSong(for hit: LyricSearchHit) -> Song? {
         lyricSongsByID[hit.id]
     }
@@ -303,13 +388,24 @@ final class SearchViewModel {
         return HiddenAlbumStore.shared.visibleArtists(resolved)
     }
 
-    private func loadBrowseGenres(client: any MusicService) async {
+    private func loadBrowseGenres() async {
         isLoadingBrowseGenres = true
         defer { isLoadingBrowseGenres = false }
 
-        let all = await Self.fetchAllAlbums(client: client)
-        HiddenAlbumStore.shared.register(albums: all)
-        installedGenres = await Self.genreSummaries(albums: HiddenAlbumStore.shared.visibleAlbums(all))
+        // Try the server first (unless we already know we're offline), but fall
+        // back to downloaded songs whenever it returns nothing — covers both
+        // airplane-mode and a reachable network with an unreachable server.
+        if !isOffline, let client {
+            let all = await Self.fetchAllAlbums(client: client)
+            if !all.isEmpty {
+                HiddenAlbumStore.shared.register(albums: all)
+                installedGenres = await Self.genreSummaries(albums: HiddenAlbumStore.shared.visibleAlbums(all))
+                return
+            }
+        }
+
+        let songs = HiddenAlbumStore.shared.visibleSongs(DownloadService.shared.downloadedSongs())
+        installedGenres = await Self.genreSummariesFromSongs(songs: songs)
     }
 
     private nonisolated static func fetchAllAlbums(client: any MusicService) async -> [Album] {
@@ -345,6 +441,33 @@ final class SearchViewModel {
                     return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
                 }
         }
+    }
+
+    private nonisolated static func genreSummariesFromSongs(query: String? = nil, songs: [Song]) async -> [GenreSearchResult] {
+        await DeveloperExperiments.runSync(priority: .userInitiated) {
+            genreSummariesSync(query: query, songs: songs)
+        }
+    }
+
+    // Counts distinct (synthesized) albums per genre across a set of songs, so the
+    // "N albums" label matches the offline genre screen.
+    private nonisolated static func genreSummariesSync(query: String?, songs: [Song]) -> [GenreSearchResult] {
+        let trimmed = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var albumsByGenre: [String: Set<String>] = [:]
+        for song in songs {
+            let genre = song.genre?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !genre.isEmpty else { continue }
+            guard trimmed.isEmpty || genre.localizedCaseInsensitiveContains(trimmed) else { continue }
+            albumsByGenre[genre, default: []].insert(OfflineLibrary.albumKey(for: song))
+        }
+        return albumsByGenre
+            .map { GenreSearchResult(name: $0.key, albumCount: $0.value.count) }
+            .sorted {
+                if trimmed.isEmpty, $0.albumCount != $1.albumCount {
+                    return $0.albumCount > $1.albumCount
+                }
+                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
     }
 }
 
