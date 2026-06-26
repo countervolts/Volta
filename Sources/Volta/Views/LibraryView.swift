@@ -5,7 +5,7 @@ struct LibraryView: View {
     @Environment(AppState.self) private var appState
     @State private var vm = LibraryViewModel()
     @State private var hiddenAlbums = HiddenAlbumStore.shared
-    @Binding var path: [LibraryRoute]
+    @Binding var path: NavigationPath
     @Namespace private var heroNamespace
     @AppStorage("albumSortOrder") private var albumSortOrder = "alphabetical"
 
@@ -38,7 +38,7 @@ struct LibraryView: View {
             }
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.large)
-            .accountToolbar()
+            .accountToolbar(path: $path)
             .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: searchPrompt)
             .navigationDestination(for: LibraryRoute.self) { route in
                 libraryDestination(route)
@@ -103,7 +103,7 @@ struct LibraryView: View {
     private func genreGrid(genre: String) -> some View {
         let items = vm.albumsForGenre(genre).map(MediaItem.init(album:))
         return FullMediaGrid(title: genre, items: items) { item in
-            if let album = item.albumRef { path.append(.album(album)) }
+            if let album = item.albumRef { path.append(LibraryRoute.album(album)) }
         }
     }
 
@@ -564,7 +564,7 @@ struct LibraryView: View {
         guard let id = song.albumId else { return }
         Task {
             if let album = try? await appState.client?.album(id: id) {
-                path.append(.album(album))
+                path.append(LibraryRoute.album(album))
             }
         }
     }
@@ -573,7 +573,7 @@ struct LibraryView: View {
         guard let id = song.artistId else { return }
         Task {
             if let artist = try? await appState.client?.artist(id: id) {
-                path.append(.artist(artist))
+                path.append(LibraryRoute.artist(artist))
             }
         }
     }

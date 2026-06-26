@@ -3,10 +3,11 @@ import Charts
 
 struct StatsView: View {
     @State private var vm = StatsViewModel()
+    @State private var path = NavigationPath()
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack {
                 Theme.background.ignoresSafeArea()
                 ScrollView {
@@ -30,7 +31,7 @@ struct StatsView: View {
             }
             .navigationTitle("Stats")
             .navigationBarTitleDisplayMode(.large)
-            .accountToolbar()
+            .accountToolbar(path: $path)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

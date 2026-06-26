@@ -26,30 +26,22 @@ extension SettingsView {
         if developerUnlocked,
            sectionVisible(s, [["developer tools", "simulation", "simulate", "slow server", "expired session", "no network", "profiling", "ram", "automix", "autoplay"], ["experiments", "raw animated artwork", "disable ram optimizations", "app worker limit", "workers", "threads", "concurrency"], ["performance overlay", "overlay", "fps", "ram", "frame pacing", "metrics"], ["notifications", "toast", "warning", "preview"], ["verbose logging", "logging"], ["log device specs", "device", "specs", "ios", "liquid glass", "diagnostics"], ["dump app files", "export app data", "zip", "all files"], ["export all logs"], ["clear all logs"], ["force refresh home"], ["logged play events"], ["queue length"], ["logs", "diagnostics"], ["developer"]]) {
         Section {
-            NavigationLink {
-                DeveloperToolsView()
-            } label: {
+            NavigationLink(value: SettingsRoute.developerTools) {
                 Label("Developer Tools", systemImage: "hammer")
             }
             .foregroundStyle(Theme.primaryText)
 
-            NavigationLink {
-                DeveloperExperimentsView()
-            } label: {
+            NavigationLink(value: SettingsRoute.developerExperiments) {
                 Label("Experiments", systemImage: "testtube.2")
             }
             .foregroundStyle(Theme.primaryText)
 
-            NavigationLink {
-                PerformanceOverlaySettingsView()
-            } label: {
+            NavigationLink(value: SettingsRoute.performanceOverlay) {
                 Label("Performance Overlay", systemImage: "chart.xyaxis.line")
             }
             .foregroundStyle(Theme.primaryText)
 
-            NavigationLink {
-                NotificationSettingsView()
-            } label: {
+            NavigationLink(value: SettingsRoute.notifications) {
                 Label("Notifications", systemImage: "bell.badge")
             }
             .foregroundStyle(Theme.primaryText)
@@ -122,9 +114,7 @@ extension SettingsView {
             .foregroundStyle(Theme.primaryText)
 
             if rowVisible(s, ["logs", "diagnostics"]) {
-                NavigationLink {
-                    LogsView()
-                } label: {
+                NavigationLink(value: SettingsRoute.logs) {
                     Label("Logs", systemImage: Symbols.logs)
                 }
                 .foregroundStyle(Theme.primaryText)
