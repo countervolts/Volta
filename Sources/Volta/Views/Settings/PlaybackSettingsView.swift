@@ -50,9 +50,7 @@ extension SettingsView {
                 }
 
                 if rowVisible(s, ["automix", "transition", "style", "blend", "silence", "bpm", "tempo"]) {
-                    NavigationLink {
-                        AutoMixSettingsView()
-                    } label: {
+                    NavigationLink(value: SettingsRoute.autoMix) {
                         Label("AutoMix", systemImage: "waveform.path")
                     }
                     .foregroundStyle(Theme.primaryText)
@@ -130,9 +128,7 @@ extension SettingsView {
         if sectionVisible(s, [["volume normalization", "replaygain", "replay gain", "normalize", "loudness"], ["equalizer", "eq", "bands", "graphic"], ["mono audio", "mono", "accessibility", "downmix"], ["spatial widener", "spatial", "3d", "stereo", "widener", "spatialize"]]) {
             Section(sectionTitle(s)) {
                 if rowVisible(s, ["equalizer", "eq", "bands", "graphic"]) {
-                    NavigationLink {
-                        EqualizerView()
-                    } label: {
+                    NavigationLink(value: SettingsRoute.equalizer) {
                         Label(L(.settings_equalizer), systemImage: "slider.vertical.3")
                     }
                     .foregroundStyle(Theme.primaryText)

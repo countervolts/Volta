@@ -9,9 +9,7 @@ extension SettingsView {
         if sectionVisible(s, [["performance mode", "battery", "power save", "saver", "low power"], ["image loading", "images", "speed", "power", "threads", "fast", "conservative"], ["data caching", "cache", "aggressive", "memory"], ["prefetch artist images", "prefetch", "artist", "profile", "pictures"]]) {
             Section {
                 if rowVisible(s, ["performance mode", "battery", "power save", "saver", "low power"]) {
-                    NavigationLink {
-                        PerformanceModeView()
-                    } label: {
+                    NavigationLink(value: SettingsRoute.performanceMode) {
                         Label("Performance Mode", systemImage: "bolt.badge.a")
                     }
                     .foregroundStyle(Theme.primaryText)

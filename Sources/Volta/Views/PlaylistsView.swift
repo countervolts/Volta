@@ -15,7 +15,7 @@ struct PlaylistsView: View {
     @State private var pendingDelete: Playlist?
     @State private var pendingSmartDelete: SmartPlaylist?
     @State private var pendingFolderDelete: PlaylistFolder?
-    @Binding var path: [Playlist]
+    @Binding var path: NavigationPath
     @Namespace private var heroNamespace
 
     @State private var createKind: PlaylistCreateKind = .custom
@@ -56,7 +56,7 @@ struct PlaylistsView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .accountToolbar()
+            .accountToolbar(path: $path)
             .navigationDestination(for: Playlist.self) { pl in
                 PlaylistDetailView(playlist: pl)
                     .zoomNavigationTransition(sourceID: pl.id, in: heroNamespace)

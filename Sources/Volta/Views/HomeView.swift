@@ -10,10 +10,9 @@ enum HomeRoute: Hashable {
 
 struct HomeView: View {
     @Environment(AppState.self) private var appState
-    @Binding var path: [HomeRoute]
+    @Binding var path: NavigationPath
 
     private var vm: HomeViewModel { appState.homeViewModel }
-    @State private var showSettings = false
     @State private var toastMessage: String?
     @State private var savingMixIDs = Set<String>()
     @State private var networkMonitor = NetworkMonitor.shared
@@ -37,12 +36,10 @@ struct HomeView: View {
             }
             .background(Theme.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(isPresented: $showSettings) {
-                SettingsView()
-            }
             .navigationDestination(for: HomeRoute.self) { route in
                 destination(for: route)
             }
+            .settingsDestinations()
             .environment(\.heroNamespace, heroNamespace)
         }
         .tint(Theme.accent)
@@ -76,9 +73,9 @@ struct HomeView: View {
     private func navigate(to item: MediaItem) {
         switch item.kind {
         case .album:
-            if let album = item.albumRef { path.append(.album(album)) }
+            if let album = item.albumRef { path.append(HomeRoute.album(album)) }
         case .playlist:
-            if let pl = item.playlistRef { path.append(.playlist(pl)) }
+            if let pl = item.playlistRef { path.append(HomeRoute.playlist(pl)) }
         }
     }
 
@@ -334,8 +331,8 @@ struct HomeView: View {
             if !data.picksFeed.isEmpty {
                 section(title: L(.home_picks_for_you)) {
                     HorizontalPickRow(items: data.picksFeed,
-                        onSelectAlbum: { path.append(.album($0)) },
-                        onSelectMix: { path.append(.mix($0)) },
+                        onSelectAlbum: { path.append(HomeRoute.album($0)) },
+                        onSelectMix: { path.append(HomeRoute.mix($0)) },
                         onSaveMix: { saveMixAsPlaylist($0) },
                         isSavingMix: { savingMixIDs.contains($0.id) })
                 }
@@ -344,7 +341,7 @@ struct HomeView: View {
             if !data.recentlyPlayed.isEmpty {
                 VStack(alignment: .leading, spacing: 14) {
                     SectionHeaderView(L(.home_recently_played)) {
-                        path.append(.mediaGrid(title: L(.home_recently_played), items: data.recentlyPlayed))
+                        path.append(HomeRoute.mediaGrid(title: L(.home_recently_played), items: data.recentlyPlayed))
                     }
                     .padding(.horizontal, pad)
                     HorizontalMediaRow(items: data.recentlyPlayed) { item in
@@ -356,7 +353,7 @@ struct HomeView: View {
             if !data.topArtists.isEmpty {
                 section(title: L(.home_artists)) {
                     ArtistScrollRow(artists: data.topArtists) { artist in
-                        path.append(.artist(artist))
+                        path.append(HomeRoute.artist(artist))
                     }
                 }
             }
@@ -364,7 +361,7 @@ struct HomeView: View {
             ForEach(data.moreLike) { item in
                 section(title: L(.home_more_like, item.artistName)) {
                     HorizontalMediaRow(items: item.albums.map(MediaItem.init(album:))) { mediaItem in
-                        if let album = mediaItem.albumRef { path.append(.album(album)) }
+                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
                     }
                 }
             }
@@ -372,16 +369,16 @@ struct HomeView: View {
             if !data.discover.isEmpty {
                 section(title: L(.home_discover)) {
                     HorizontalMediaRow(items: data.discover.map(MediaItem.init(album:))) { mediaItem in
-                        if let album = mediaItem.albumRef { path.append(.album(album)) }
+                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
                     }
                 }
             }
 
             if !data.newReleases.isEmpty {
                 let items = data.newReleases.map(MediaItem.init(album:))
-                section(title: L(.home_recently_added), seeAll: { path.append(.mediaGrid(title: L(.home_recently_added), items: items)) }) {
+                section(title: L(.home_recently_added), seeAll: { path.append(HomeRoute.mediaGrid(title: L(.home_recently_added), items: items)) }) {
                     HorizontalMediaRow(items: items) { mediaItem in
-                        if let album = mediaItem.albumRef { path.append(.album(album)) }
+                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
                     }
                 }
             }
@@ -415,7 +412,7 @@ struct HomeView: View {
 
             Spacer()
 
-            ServerMenuButton(onOpenSettings: { showSettings = true })
+            ServerMenuButton(onOpenSettings: { path.append(SettingsRoute.root) })
         }
         .padding(.horizontal, pad)
         .padding(.top, 2)

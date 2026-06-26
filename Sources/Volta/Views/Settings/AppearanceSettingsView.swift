@@ -67,17 +67,13 @@ extension SettingsView {
         if sectionVisible(s, [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["accent color", "accent", "color", "colour", "theme"]]) {
             Section {
                 if rowVisible(s, ["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"]) {
-                    NavigationLink {
-                        LanguageSettingsView()
-                    } label: {
+                    NavigationLink(value: SettingsRoute.language) {
                         Label(L(.settings_language), systemImage: "globe")
                     }
                 }
 
                 if rowVisible(s, ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"]) {
-                    NavigationLink {
-                        HiddenAlbumsSettingsView(client: appState.client)
-                    } label: {
+                    NavigationLink(value: SettingsRoute.hiddenAlbums) {
                         LabeledContent {
                             Text(hiddenAlbums.hiddenAlbumIDs.isEmpty ? L(.hidden_albums_none) : "\(hiddenAlbums.hiddenAlbumIDs.count)")
                                 .foregroundStyle(Theme.secondaryText)

@@ -24,9 +24,7 @@ extension SettingsView {
                 LabeledContent("Username", value: server.username)
                     .foregroundStyle(Theme.primaryText)
 
-                NavigationLink {
-                    EditConnectionView()
-                } label: {
+                NavigationLink(value: SettingsRoute.editConnection) {
                     Label("Edit Connection", systemImage: Symbols.edit)
                 }
                 .foregroundStyle(Theme.primaryText)
@@ -62,9 +60,7 @@ extension SettingsView {
             .foregroundStyle(Theme.primaryText)
 
             if rowVisible(s, ["library stats & speed test", "stats", "speed test", "library", "server health", "latency"]) {
-                NavigationLink {
-                    ServerInfoView()
-                } label: {
+                NavigationLink(value: SettingsRoute.serverInfo) {
                     Label("Library Stats & Speed Test", systemImage: "chart.bar")
                 }
                 .foregroundStyle(Theme.primaryText)

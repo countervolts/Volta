@@ -8,7 +8,7 @@ struct SearchView: View {
     @State private var vm = SearchViewModel()
     @State private var hiddenAlbums = HiddenAlbumStore.shared
     @State private var networkMonitor = NetworkMonitor.shared
-    @Binding var path: [SearchRoute]
+    @Binding var path: NavigationPath
     @Namespace private var heroNamespace
 
     private var isOffline: Bool { networkMonitor.connection == .none }
@@ -37,7 +37,7 @@ struct SearchView: View {
                 .background(SearchActiveReader(isActive: $isSearchActive))
             }
             .navigationTitle("Search")
-            .accountToolbar()
+            .accountToolbar(path: $path)
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Albums, Artists, Songs, Lyrics")
             .onSubmit(of: .search) {
                 vm.saveSearch(searchText)
@@ -79,9 +79,9 @@ struct SearchView: View {
         case .genre(let genreName):
             GenreHomeView(
                 genreName: genreName,
-                onAlbum: { path.append(.album($0)) },
-                onArtist: { path.append(.artist($0)) },
-                onMix: { path.append(.mix($0)) }
+                onAlbum: { path.append(SearchRoute.album($0)) },
+                onArtist: { path.append(SearchRoute.artist($0)) },
+                onMix: { path.append(SearchRoute.mix($0)) }
             )
         case .mix(let mix):
             MixDetailView(mix: mix)
@@ -102,7 +102,7 @@ struct SearchView: View {
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(vm.installedGenres) { genre in
                                 Button {
-                                    path.append(.genre(genre.name))
+                                    path.append(SearchRoute.genre(genre.name))
                                 } label: {
                                     genreBrowseCard(genre)
                                 }
@@ -258,7 +258,7 @@ struct SearchView: View {
                             ForEach(vm.albums) { album in
                                 Button {
                                     vm.saveSelectedAlbum(album, typedQuery: searchText)
-                                    path.append(.album(album))
+                                    path.append(SearchRoute.album(album))
                                 } label: {
                                     MediaCard(item: MediaItem(album: album))
                                         .heroSource(id: album.id)
@@ -307,7 +307,7 @@ struct SearchView: View {
                         .padding(.bottom, 12)
                         ForEach(vm.genres) { genre in
                             Button {
-                                path.append(.genre(genre.name))
+                                path.append(SearchRoute.genre(genre.name))
                             } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: Symbols.genres)
@@ -493,7 +493,7 @@ struct SearchView: View {
                 await MainActor.run {
                     guard !hiddenAlbums.isHidden(album) else { return }
                     vm.saveSelectedAlbum(album, typedQuery: searchText)
-                    path.append(.album(album))
+                    path.append(SearchRoute.album(album))
                 }
             } else {
                 VoltaNotificationCenter.shared.post(L(.notif_couldnt_load_album), tone: .error)
@@ -510,7 +510,7 @@ struct SearchView: View {
                     hiddenAlbums.register(artists: [artist])
                     guard !hiddenAlbums.isArtistHidden(artist) else { return }
                     vm.saveSelectedArtist(artist, typedQuery: searchText)
-                    path.append(.artist(artist))
+                    path.append(SearchRoute.artist(artist))
                 }
             } else {
                 VoltaNotificationCenter.shared.post(L(.notif_couldnt_load_artist), tone: .error)
@@ -562,7 +562,7 @@ struct SearchView: View {
                 await MainActor.run {
                     hiddenAlbums.register(artists: [artist])
                     guard !hiddenAlbums.isArtistHidden(artist) else { return }
-                    path.append(.artist(artist))
+                    path.append(SearchRoute.artist(artist))
                 }
             } else {
                 await MainActor.run {
@@ -584,7 +584,7 @@ struct SearchView: View {
             if let album = try? await client.album(id: id) {
                 await MainActor.run {
                     guard !hiddenAlbums.isHidden(album) else { return }
-                    path.append(.album(album))
+                    path.append(SearchRoute.album(album))
                 }
             } else {
                 await MainActor.run {

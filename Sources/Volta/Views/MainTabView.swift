@@ -10,10 +10,10 @@ struct MainTabView: View {
     @State private var selectedTab = 0
     @State private var showNowPlaying = false
 
-    @State private var homePath:      [HomeRoute]    = []
-    @State private var libraryPath:   [LibraryRoute] = []
-    @State private var playlistsPath: [Playlist]     = []
-    @State private var searchPath:    [SearchRoute]  = []
+    @State private var homePath = NavigationPath()
+    @State private var libraryPath = NavigationPath()
+    @State private var playlistsPath = NavigationPath()
+    @State private var searchPath = NavigationPath()
 
     private var audio: AudioPlayer { appState.audioPlayer }
     private var tabSelection: Binding<Int> {
