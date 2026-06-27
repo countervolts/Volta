@@ -6,7 +6,7 @@ extension SettingsView {
     @ViewBuilder
     var serverSection: some View {
         let s = "Server"
-        if sectionVisible(s, [["connected to", "server url", "cellular url", "data", "wifi", "username", "edit connection", "test connection", "log out", "logout", "sign out"], ["library stats & speed test", "stats", "speed test", "library", "server health", "latency"]]) {
+        if sectionVisible(s, [["connected to", "server url", "cellular url", "data", "wifi", "username", "edit connection", "test connection", "log out", "logout", "sign out"], ["server health & speed test", "speed test", "server health", "latency", "connection"]]) {
         Section(sectionTitle(s)) {
             if let server = appState.currentServer {
                 LabeledContent("Connected to", value: server.displayName)
@@ -59,9 +59,9 @@ extension SettingsView {
             }
             .foregroundStyle(Theme.primaryText)
 
-            if rowVisible(s, ["library stats & speed test", "stats", "speed test", "library", "server health", "latency"]) {
+            if rowVisible(s, ["server health & speed test", "speed test", "server health", "latency", "connection"]) {
                 NavigationLink(value: SettingsRoute.serverInfo) {
-                    Label("Library Stats & Speed Test", systemImage: "chart.bar")
+                    Label("Server Health & Speed Test", systemImage: "speedometer")
                 }
                 .foregroundStyle(Theme.primaryText)
             }
@@ -234,12 +234,6 @@ struct EditConnectionView: View {
 
 struct ServerInfoView: View {
     @Environment(AppState.self) private var appState
-    @State private var artistCount: Int? = nil
-    @State private var albumCount: Int? = nil
-    @State private var songCount: Int? = nil
-    @State private var totalDuration: Int? = nil   // seconds
-    @State private var totalLibrarySizeBytes: Int? = nil
-    @State private var isLoading = false
     @State private var speedTestResult: String? = nil
     @State private var isTesting = false
     @State private var speedGrade: String? = nil
@@ -297,32 +291,6 @@ struct ServerInfoView: View {
                 }
                 .listRowBackground(Theme.secondaryBackground)
 
-                Section("Library") {
-                    if isLoading {
-                        HStack {
-                            ProgressView().controlSize(.small).tint(Theme.accent)
-                            Text("Loading…").foregroundStyle(Theme.secondaryText)
-                        }
-                    } else {
-                        if let a = artistCount {
-                            LabeledContent("Artists", value: "\(a)").foregroundStyle(Theme.primaryText)
-                        }
-                        if let al = albumCount {
-                            LabeledContent("Albums", value: "\(al)").foregroundStyle(Theme.primaryText)
-                        }
-                        if let s = songCount {
-                            LabeledContent("Songs", value: "\(s)").foregroundStyle(Theme.primaryText)
-                        }
-                        if let dur = totalDuration {
-                            LabeledContent("Total Duration", value: formatDuration(dur)).foregroundStyle(Theme.primaryText)
-                        }
-                        if let totalLibrarySizeBytes {
-                            LabeledContent("Total Music Size", value: SettingsView.formatBytes(totalLibrarySizeBytes)).foregroundStyle(Theme.primaryText)
-                        }
-                    }
-                }
-                .listRowBackground(Theme.secondaryBackground)
-
                 Section {
                     Button {
                         runSpeedTest()
@@ -362,7 +330,6 @@ struct ServerInfoView: View {
         .preferredColorScheme(Theme.colorScheme)
         .task {
             await loadHealth()
-            await loadStats()
         }
     }
 
@@ -373,38 +340,6 @@ struct ServerInfoView: View {
         case "Fair": return .yellow
         default: return Theme.error
         }
-    }
-
-    private func formatDuration(_ seconds: Int) -> String {
-        let d = seconds / 86400; let h = (seconds % 86400) / 3600; let m = (seconds % 3600) / 60
-        if d > 0 { return "\(d)d \(h)h \(m)m" }
-        if h > 0 { return "\(h)h \(m)m" }
-        return "\(m)m"
-    }
-
-    private func loadStats() async {
-        guard let client = appState.client else { return }
-        isLoading = true
-        defer { isLoading = false }
-
-        // Load artists
-        let artists = (try? await client.artists()) ?? []
-        artistCount = artists.count
-
-        // Load all albums with pagination for full counts
-        var allAlbums: [Album] = []
-        var offset = 0
-        while true {
-            let batch = (try? await client.allAlbums(size: 500, offset: offset)) ?? []
-            allAlbums.append(contentsOf: batch)
-            if batch.count < 500 { break }
-            offset += 500
-            if offset > 50_000 { break }
-        }
-        albumCount = allAlbums.count
-        songCount = allAlbums.compactMap(\.songCount).reduce(0, +)
-        totalDuration = allAlbums.compactMap(\.duration).reduce(0, +)
-        totalLibrarySizeBytes = await loadTotalLibrarySize(albums: allAlbums, client: client)
     }
 
     private func loadHealth() async {
@@ -421,26 +356,6 @@ struct ServerInfoView: View {
             health = nil
             healthError = error.localizedDescription
         }
-    }
-
-    private func loadTotalLibrarySize(albums: [Album], client: any MusicService) async -> Int? {
-        var total = 0
-        var seen = Set<String>()
-        var index = 0
-        let batchSize = 12
-
-        while index < albums.count {
-            let batch = Array(albums[index..<min(index + batchSize, albums.count)])
-            let songBatches = await DeveloperExperiments.runConcurrently(batch, defaultMaxConcurrent: batchSize) { album in
-                (try? await client.album(id: album.id))?.song ?? album.song ?? []
-            }
-            let partials = songBatches.flatMap { $0 }
-            for song in partials where seen.insert(song.id).inserted {
-                total += song.size ?? 0
-            }
-            index += batchSize
-        }
-        return total > 0 ? total : nil
     }
 
     private func runSpeedTest() {

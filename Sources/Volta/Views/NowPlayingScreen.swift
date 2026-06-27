@@ -100,11 +100,13 @@ struct NowPlayingScreen: View {
                 AlbumDetailView(album: album)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { albumToShow = nil }
+                            Button(L(.action_done)) { albumToShow = nil }
                                 .foregroundStyle(Theme.accent)
                         }
                     }
             }
+            // Re-host toasts above the sheet; the root host sits below this layer.
+            .overlay { VoltaNotificationHost() }
             .preferredColorScheme(Theme.colorScheme)
         }
         .sheet(item: $artistToShow) { artist in
@@ -112,11 +114,12 @@ struct NowPlayingScreen: View {
                 ArtistDetailView(artist: artist)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { artistToShow = nil }
+                            Button(L(.action_done)) { artistToShow = nil }
                                 .foregroundStyle(Theme.accent)
                         }
                     }
             }
+            .overlay { VoltaNotificationHost() }
             .preferredColorScheme(Theme.colorScheme)
         }
         .onAppear {
@@ -274,15 +277,15 @@ struct NowPlayingScreen: View {
         Menu {
             if audio.sleepTimerActive {
                 Button(role: .destructive) { audio.cancelSleepTimer() } label: {
-                    Label(audio.sleepEndsAtTrackEnd ? "Cancel (end of track)" : "Cancel Timer",
+                    Label(audio.sleepEndsAtTrackEnd ? L(.sleep_cancel_end_of_track) : L(.sleep_cancel_timer),
                           systemImage: "xmark.circle")
                 }
                 Divider()
             }
             ForEach([5, 15, 30, 45, 60], id: \.self) { m in
-                Button("\(m) minutes") { audio.startSleepTimer(minutes: m) }
+                Button(L(.sleep_minutes, m)) { audio.startSleepTimer(minutes: m) }
             }
-            Button("End of Track") { audio.startSleepTimerEndOfTrack() }
+            Button(L(.sleep_end_of_track)) { audio.startSleepTimerEndOfTrack() }
         } label: {
             Image(systemName: audio.sleepTimerActive ? "moon.fill" : "moon.zzz")
                 .font(.system(size: 20, weight: .medium))
@@ -521,7 +524,7 @@ struct NowPlayingScreen: View {
                     HStack(spacing: 5) {
                         Image(systemName: "waveform.path")
                             .symbolEffect(.variableColor.iterative, options: .repeating)
-                        Text("Mixing")
+                        Text(L(.player_mixing))
                     }
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(Theme.accent)
@@ -632,60 +635,75 @@ struct NowPlayingScreen: View {
     // MARK: - Scrubber
 
     private var scrubber: some View {
-        // One timeline and one player snapshot drive the fill and both labels.
-        // Keeping the sample atomic prevents each view from landing on a different
-        // player tick, especially when precise timestamps are enabled.
-        TimelineView(
-            .animation(
-                minimumInterval: preciseTimestamps ? 1.0 / 60.0 : 0.2,
-                paused: scrubbing || !audio.isPlaying
-            )
-        ) { _ in
-            let snapshot = audio.playbackTimeSnapshot()
-            let total = snapshot.duration
-            let t = scrubbing ? min(scrubTime, total) : snapshot.elapsed
-            VStack(spacing: 6) {
+        VStack(spacing: 6) {
+            // Animated schedule so the fill interpolates smoothly between ticks.
+            TimelineView(
+                .animation(
+                    minimumInterval: preciseTimestamps ? 1.0 / 60.0 : 0.2,
+                    paused: scrubbing || !audio.isPlaying
+                )
+            ) { _ in
+                let snapshot = audio.playbackTimeSnapshot()
                 ScrubBar(
-                    duration: total,
-                    currentTime: t,
+                    duration: snapshot.duration,
+                    currentTime: scrubbing ? min(scrubTime, snapshot.duration) : snapshot.elapsed,
                     scrubbing: $scrubbing,
                     scrubTime: $scrubTime,
                     onSeek: { audio.seek(to: $0) }
                 )
-                let losslessStatus = LosslessBadgeResolver.status(for: audio.currentSong)
-                HStack {
-                    Text(formatTime(t))
-                        .monospacedDigit()
-                    Spacer()
-                    if let losslessStatus, showLosslessBadge {
-                        Button { showLosslessInfo = true } label: {
-                            Label(losslessStatus.title, systemImage: losslessStatus.systemImage)
-                                .font(.caption2.bold())
-                                .foregroundStyle(.white.opacity(0.7))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(.white.opacity(0.15), in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .popover(isPresented: $showLosslessInfo) {
-                            LosslessInfoPopover(song: audio.currentSong) {
-                                showLosslessInfo = false
-                                Task { @MainActor in
-                                    try? await Task.sleep(nanoseconds: 180_000_000)
-                                    showAudioSignalPath = true
-                                }
-                            }
-                                .presentationCompactAdaptation(.popover)
-                        }
-                    }
-                    Spacer()
-                    Text("-\(formatTime(max(0, total - t)))")
-                        .monospacedDigit()
-                }
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
             }
+            timeLabels
         }
+    }
+
+    // Text has .contentTransition(.identity) + .transaction { animation = nil } so the
+    // animation-schedule doesn't wobble it; the paused flag stops the drain while stopped.
+    private var timeLabels: some View {
+        TimelineView(.animation(minimumInterval: preciseTimestamps ? 1.0 / 30.0 : 0.5,
+                                paused: !audio.isPlaying && !scrubbing)) { _ in
+            let snapshot = audio.playbackTimeSnapshot()
+            let total = snapshot.duration
+            let t = scrubbing ? min(scrubTime, total) : snapshot.elapsed
+            let losslessStatus = LosslessBadgeResolver.status(for: audio.currentSong)
+            HStack {
+                timeText(formatTime(t))
+                Spacer()
+                if let losslessStatus, showLosslessBadge {
+                    Button { showLosslessInfo = true } label: {
+                        Label(losslessStatus.title, systemImage: losslessStatus.systemImage)
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white.opacity(0.7))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(.white.opacity(0.15), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showLosslessInfo) {
+                        LosslessInfoPopover(song: audio.currentSong) {
+                            showLosslessInfo = false
+                            Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 180_000_000)
+                                showAudioSignalPath = true
+                            }
+                        }
+                            .presentationCompactAdaptation(.popover)
+                    }
+                }
+                Spacer()
+                timeText("-\(formatTime(max(0, total - t)))")
+            }
+            .font(.caption)
+            .foregroundStyle(.white.opacity(0.5))
+            // Fixed line height so the badge can't shift the time labels.
+            .frame(height: 22)
+        }
+    }
+
+    private func timeText(_ value: String) -> some View {
+        Text(value)
+            .monospacedDigit()
+            .contentTransition(.identity)
+            .transaction { $0.animation = nil }
     }
 
     // MARK: - Playback controls
@@ -883,7 +901,7 @@ private struct AudioVisualizerScreen: View {
                 Spacer()
 
                 VStack(spacing: 8) {
-                    Text(audio.currentSong?.title ?? "Not Playing")
+                    Text(audio.currentSong?.title ?? L(.player_not_playing))
                         .font(.title2.bold())
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -1321,25 +1339,25 @@ private struct LosslessInfoPopover: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: status?.systemImage ?? "waveform")
-                Text(status?.status ?? "Lossless Audio").font(.headline)
+                Text(status?.status ?? L(.signal_lossless_audio)).font(.headline)
             }
             .padding(.bottom, 2)
 
             if let status {
-                detailRow("Output", status.output)
-                detailRow("Route", status.reason)
+                detailRow(L(.signal_output), status.output)
+                detailRow(L(.signal_why), status.reason)
             }
-            if let format { detailRow("Format", format) }
-            if let rate = song?.bitRate { detailRow("Bitrate", "\(rate) kbps") }
+            if let format { detailRow(L(.media_format), format) }
+            if let rate = song?.bitRate { detailRow(L(.detail_bitrate), "\(rate) kbps") }
             if let sr = song?.samplingRate {
-                detailRow("Sample Rate", String(format: "%.1f kHz", Double(sr) / 1000))
+                detailRow(L(.detail_sample_rate), String(format: "%.1f kHz", Double(sr) / 1000))
             }
-            if let bd = song?.bitDepth { detailRow("Bit Depth", "\(bd)-bit") }
+            if let bd = song?.bitDepth { detailRow(L(.detail_bit_depth), L(.detail_bit_value, bd)) }
 
             Divider().padding(.vertical, 2)
 
             Button(action: onOpenSignalPath) {
-                Label("Audio Signal Path", systemImage: "point.3.connected.trianglepath.dotted")
+                Label(L(.signal_path_title), systemImage: "point.3.connected.trianglepath.dotted")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
@@ -1382,43 +1400,43 @@ private struct AudioSignalPathSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Source File") {
-                    row("Title", song?.title)
-                    row("Format", fileFormat)
-                    row("Bitrate", song?.bitRate.map { "\($0) kbps" })
-                    row("Sample Rate", song?.samplingRate.map(formatSampleRate))
-                    row("Bit Depth", song?.bitDepth.map { "\($0)-bit" })
-                    row("Lossless", song?.isLossless == true ? "Yes" : "No")
+                Section(L(.signal_source_file)) {
+                    row(L(.smart_sort_title), song?.title)
+                    row(L(.media_format), fileFormat)
+                    row(L(.detail_bitrate), song?.bitRate.map { "\($0) kbps" })
+                    row(L(.detail_sample_rate), song?.samplingRate.map(formatSampleRate))
+                    row(L(.detail_bit_depth), song?.bitDepth.map { L(.detail_bit_value, $0) })
+                    row(L(.quality_lossless), song?.isLossless == true ? L(.action_yes) : L(.action_no))
                 }
 
-                Section("Server Stream") {
-                    row("Transcoding", transcodingFormat == "raw" ? "Original" : transcodingFormat.uppercased())
-                    row("Wi-Fi Quality", bitrateLabel(streamingBitrate))
-                    row("Cellular Quality", streamingBitrateCell == 0 ? "Same as Wi-Fi" : bitrateLabel(streamingBitrateCell))
+                Section(L(.signal_server_stream)) {
+                    row(L(.signal_transcoding), transcodingFormat == "raw" ? L(.signal_original) : transcodingFormat.uppercased())
+                    row(L(.signal_wifi_quality), bitrateLabel(streamingBitrate))
+                    row(L(.signal_cellular_quality), streamingBitrateCell == 0 ? L(.signal_same_as_wifi) : bitrateLabel(streamingBitrateCell))
                 }
 
-                Section("App Processing") {
-                    row("Volume Normalization", replayGainMode.capitalized)
-                    row("Equalizer", EqualizerEngine.shared.isEnabled ? "On" : "Off")
+                Section(L(.signal_app_processing)) {
+                    row(L(.signal_volume_norm), replayGainLabel)
+                    row(L(.media_equalizer), EqualizerEngine.shared.isEnabled ? L(.action_on) : L(.action_off))
                 }
 
-                Section("Output Route") {
-                    row("Route", outputName)
-                    row("Port Type", outputPortTypes)
-                    row("Output Sample Rate", session.sampleRate > 0 ? formatSampleRate(Int(session.sampleRate.rounded())) : nil)
-                    row("Output Channels", session.outputNumberOfChannels > 0 ? "\(session.outputNumberOfChannels)" : nil)
+                Section(L(.signal_output)) {
+                    row(L(.signal_output), outputName)
+                    row(L(.signal_port_type), outputPortTypes)
+                    row(L(.signal_output_sample_rate), session.sampleRate > 0 ? formatSampleRate(Int(session.sampleRate.rounded())) : nil)
+                    row(L(.signal_output_channels), session.outputNumberOfChannels > 0 ? "\(session.outputNumberOfChannels)" : nil)
                 }
 
-                Section("Result") {
-                    row("Badge", status?.status ?? "Not lossless")
-                    row("Why", status?.reason)
+                Section(L(.signal_result)) {
+                    row(L(.signal_badge), status?.status ?? L(.signal_not_lossless))
+                    row(L(.signal_why), status?.reason)
                 }
             }
-            .navigationTitle("Audio Signal Path")
+            .navigationTitle(L(.signal_path_title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button(L(.action_done)) { dismiss() }
                 }
             }
         }
@@ -1429,18 +1447,29 @@ private struct AudioSignalPathSheet: View {
         song?.suffix?.uppercased() ?? song?.contentType
     }
 
+    @MainActor
+    private var replayGainLabel: String {
+        switch replayGainMode {
+        case "off": L(.action_off)
+        case "album": L(.media_album)
+        default: replayGainMode.capitalized
+        }
+    }
+
+    @MainActor
     private var outputName: String {
         let names = session.currentRoute.outputs.map(\.portName).filter { !$0.isEmpty }
-        return names.isEmpty ? "System Output" : names.joined(separator: ", ")
+        return names.isEmpty ? L(.signal_system_output) : names.joined(separator: ", ")
     }
 
-    private var outputPortTypes: String {
+    private var outputPortTypes: String? {
         let types = session.currentRoute.outputs.map { $0.portType.rawValue }.filter { !$0.isEmpty }
-        return types.isEmpty ? "Unknown" : types.joined(separator: ", ")
+        return types.isEmpty ? nil : types.joined(separator: ", ")
     }
 
+    @MainActor
     private func bitrateLabel(_ value: Int) -> String {
-        value == 0 ? "Original" : "\(value) kbps"
+        value == 0 ? L(.signal_original) : "\(value) kbps"
     }
 
     private func formatSampleRate(_ value: Int) -> String {

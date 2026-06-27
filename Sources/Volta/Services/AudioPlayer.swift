@@ -255,7 +255,6 @@ final class AudioPlayer {
     private var client: (any MusicService)?
     private var primaryTimeObserverToken: Any?
     private var secondaryTimeObserverToken: Any?
-    private var shuffledOrder: [Int] = []
     private var loggedSongIDs: Set<String> = []
     private var targetVolume: Float = 1.0
     private var transitionTask: Task<Void, Never>?
@@ -279,6 +278,10 @@ final class AudioPlayer {
     // Lets deferred play requests detect newer track changes.
     private var playRequestID: UInt64 = 0
     private var autoplayAppendTask: Task<Void, Never>?
+    // Per-song loads, cancelled on track change so rapid skips don't pile up.
+    private var artworkLoadTask: Task<Void, Never>?
+    private var durationLoadTask: Task<Void, Never>?
+    private var warmStreamsTask: Task<Void, Never>?
     private let autoplayPreloadThreshold = 1
 
     private(set) var autoplayArtistName: String?
@@ -439,9 +442,8 @@ final class AudioPlayer {
         queueSourceTitle = source
         queueSourceAlbum = album
         queueSourcePlaylist = playlist
-        shuffledOrder = Array(songs.indices)
-        if isShuffle { shuffledOrder.shuffle() }
         currentIndex = startIndex
+        if isShuffle { shuffleUpcoming() }
         playCurrent()
     }
 
@@ -541,6 +543,9 @@ final class AudioPlayer {
         )
         pauseAllPlayers()
         cancelTransitionPlayback(keepPaused: true)
+        artworkLoadTask?.cancel(); artworkLoadTask = nil
+        durationLoadTask?.cancel(); durationLoadTask = nil
+        warmStreamsTask?.cancel(); warmStreamsTask = nil
         primaryPlayer.replaceCurrentItem(with: nil)
         secondaryPlayer.replaceCurrentItem(with: nil)
         isPlaying = false
@@ -705,10 +710,22 @@ final class AudioPlayer {
 
     func toggleShuffle() {
         isShuffle.toggle()
-        if isShuffle {
-            shuffledOrder = Array(queue.indices)
-            shuffledOrder.shuffle()
-        }
+        guard isShuffle else { return }
+        shuffleUpcoming()
+        // Rebuild the preloaded next item and transition for the new order.
+        invalidatePreloadedNext()
+        resetPreparedTransitionPlan()
+        scheduleGaplessPreload()
+        if Date() >= transitionSuppressedUntil { prepareTransitionPlanIfNeeded() }
+    }
+
+    // Shuffle only the songs after the current one; played + current stay put.
+    private func shuffleUpcoming() {
+        let start = currentIndex + 1
+        guard start < queue.count else { return }
+        var rest = Array(queue[start...])
+        rest.shuffle()
+        queue.replaceSubrange(start..., with: rest)
     }
 
     func cycleRepeat() {
@@ -1055,8 +1072,13 @@ final class AudioPlayer {
             .filter { DownloadService.shared.localURL(for: $0) == nil && !client.streamMetadataReady(id: $0.id) }
             .map(\.id)
         guard !ids.isEmpty else { return }
-        Task { @MainActor in
-            for id in ids { await client.prepareForPlayback(id: id) }
+        // Cancel the prior warmup so a skip burst doesn't flood the server.
+        warmStreamsTask?.cancel()
+        warmStreamsTask = Task { @MainActor in
+            for id in ids {
+                if Task.isCancelled { return }
+                await client.prepareForPlayback(id: id)
+            }
         }
     }
 
@@ -1123,8 +1145,10 @@ final class AudioPlayer {
         }
 
         updateNowPlaying()
-        Task { await loadArtwork(for: song) }
-        Task { await loadDuration(from: item) }
+        artworkLoadTask?.cancel()
+        artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: song) }
+        durationLoadTask?.cancel()
+        durationLoadTask = Task { [weak self] in await self?.loadDuration(from: item) }
         scheduleGaplessPreload()
         ensureAutoplayPreloadedIfNeeded()
         if Date() >= transitionSuppressedUntil {
@@ -1577,8 +1601,10 @@ final class AudioPlayer {
         // Incoming stays at true tempo.
         newPlayer.play()
         updateNowPlaying()
-        Task { await loadArtwork(for: nextSong) }
-        Task { await loadDuration(from: nextItem) }
+        artworkLoadTask?.cancel()
+        artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: nextSong) }
+        durationLoadTask?.cancel()
+        durationLoadTask = Task { [weak self] in await self?.loadDuration(from: nextItem) }
         ensureAutoplayPreloadedIfNeeded()
         prepareTransitionPlanIfNeeded()
 
@@ -1684,10 +1710,10 @@ final class AudioPlayer {
         let started = ProcessInfo.processInfo.systemUptime
         let url = client?.coverArtURL(id: song.coverArt, size: 600)
         async let staticImage = ArtworkLoader.shared.image(for: url, maxPixelSize: 600)
-        async let visualLiveArtwork = resolveVisualLiveArtwork(for: song)
+        async let liveResult = resolveVisualLiveArtwork(for: song)
 
         let image = await staticImage
-        guard currentSong?.id == song.id else { return }
+        guard !Task.isCancelled, currentSong?.id == song.id else { return }
         currentArtwork = image
         AppLogger.shared.log(
             "Static artwork \(image == nil ? "unavailable" : "ready"); songID=\(song.id); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
@@ -1701,8 +1727,10 @@ final class AudioPlayer {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         }
 
-        let (live, liveURL) = await visualLiveArtwork
-        guard currentSong?.id == song.id else { return }
+        // Skip the costly live-artwork decode if the track already changed.
+        guard !Task.isCancelled else { return }
+        let (live, liveURL) = await liveResult
+        guard !Task.isCancelled, currentSong?.id == song.id else { return }
         currentLiveArtwork = live
         currentAnimatedArtwork = live?.animatedImage
         applyNowPlayingAnimatedArtwork(live)
@@ -1713,9 +1741,10 @@ final class AudioPlayer {
         )
 
         // Do not make the visible animation wait for lock-screen video encoding.
-        guard live != nil, let liveURL, LiveArtworkSettings.prepareVideoAsset else { return }
+        guard !Task.isCancelled,
+              live != nil, let liveURL, LiveArtworkSettings.prepareVideoAsset else { return }
         let videoReady = await ArtworkLoader.shared.liveArtwork(for: liveURL, includeVideo: true)
-        guard currentSong?.id == song.id else { return }
+        guard !Task.isCancelled, currentSong?.id == song.id else { return }
         if let videoReady {
             currentLiveArtwork = videoReady
             currentAnimatedArtwork = videoReady.animatedImage
@@ -1775,6 +1804,7 @@ final class AudioPlayer {
     private func loadDuration(from item: AVPlayerItem) async {
         let started = ProcessInfo.processInfo.systemUptime
         for attempt in 0..<30 {
+            if Task.isCancelled { return }
             let d = item.duration
             if d.isNumeric, d.seconds > 0 {
                 duration = d.seconds

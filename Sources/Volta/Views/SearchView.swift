@@ -36,9 +36,9 @@ struct SearchView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(SearchActiveReader(isActive: $isSearchActive))
             }
-            .navigationTitle("Search")
+            .navigationTitle(L(.tab_search))
             .accountToolbar(path: $path)
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Albums, Artists, Songs, Lyrics")
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: L(.search_prompt))
             .onSubmit(of: .search) {
                 vm.saveSearch(searchText)
             }
@@ -94,7 +94,7 @@ struct SearchView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 28) {
                 if !vm.installedGenres.isEmpty {
-                    browseSection(title: "Browse Genres") {
+                    browseSection(title: L(.search_browse_genres)) {
                         let columns = [
                             GridItem(.flexible(), spacing: 12),
                             GridItem(.flexible(), spacing: 12)
@@ -121,7 +121,7 @@ struct SearchView: View {
                         Image(systemName: Symbols.search)
                             .font(.system(size: 44, weight: .ultraLight))
                             .foregroundStyle(Theme.secondaryText)
-                        Text("Search your library")
+                        Text(L(.search_placeholder))
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondaryText)
                     }
@@ -160,7 +160,7 @@ struct SearchView: View {
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                Text("\(genre.albumCount) album\(genre.albumCount == 1 ? "" : "s")")
+                Text(L(.media_album_count, genre.albumCount))
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.78))
             }
@@ -193,11 +193,11 @@ struct SearchView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("Recent")
+                    Text(L(.search_recent))
                         .font(.title3.bold())
                         .foregroundStyle(Theme.primaryText)
                     Spacer()
-                    Button("Clear") { vm.clearRecentSearches() }
+                    Button(L(.action_clear)) { vm.clearRecentSearches() }
                         .font(.subheadline)
                         .foregroundStyle(Theme.accent)
                 }
@@ -219,7 +219,7 @@ struct SearchView: View {
             Image(systemName: Symbols.warning)
                 .font(.system(size: 36, weight: .light))
                 .foregroundStyle(Theme.secondaryText)
-            Text("No results for \"\(vm.query)\"")
+            Text(L(.search_no_results, vm.query))
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
         }
@@ -232,7 +232,7 @@ struct SearchView: View {
             LazyVStack(alignment: .leading, spacing: 28) {
                 if !vm.artists.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Artists")
+                        Text(L(.home_artists))
                             .font(.title3.bold())
                             .foregroundStyle(Theme.primaryText)
                             .padding(.horizontal, 20)
@@ -249,7 +249,7 @@ struct SearchView: View {
 
                 if !vm.albums.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Albums")
+                        Text(L(.media_albums))
                             .font(.title3.bold())
                             .foregroundStyle(Theme.primaryText)
                             .padding(.horizontal, 20)
@@ -272,7 +272,7 @@ struct SearchView: View {
 
                 if !vm.songs.isEmpty {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("Songs")
+                        Text(L(.media_songs))
                             .font(.title3.bold())
                             .foregroundStyle(Theme.primaryText)
                             .padding(.horizontal, 20)
@@ -286,7 +286,7 @@ struct SearchView: View {
 
                 if !vm.lyricHits.isEmpty {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("From Lyrics")
+                        Text(L(.search_from_lyrics))
                             .font(.title3.bold())
                             .foregroundStyle(Theme.primaryText)
                             .padding(.horizontal, 20)
@@ -300,7 +300,7 @@ struct SearchView: View {
 
                 if !vm.genres.isEmpty {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("Genres")
+                        Text(L(.media_genres))
                             .font(.title3.bold())
                             .foregroundStyle(Theme.primaryText)
                             .padding(.horizontal, 20)
@@ -693,7 +693,7 @@ private struct GenreHomeView: View {
                     }
 
                     if !genreData.albumItems.isEmpty {
-                        section(title: "Albums") {
+                        section(title: L(.media_albums)) {
                             HorizontalMediaRow(items: genreData.albumItems) { item in
                                 if let album = item.albumRef { onAlbum(album) }
                             }
@@ -816,7 +816,7 @@ private struct GenreHomeView: View {
         genreMix = MusicMix(
             id: "genre-\(Crypto.md5Hex(genreName))-\(SeededRNG.daySeed())",
             title: "\(genreName) Mix",
-            subtitle: "Made from \(genreName.lowercased()) songs",
+            subtitle: L(.search_genre_mix_subtitle, genreName.lowercased()),
             coverArt: selected.first(where: { $0.coverArt != nil })?.coverArt,
             songs: selected
         )

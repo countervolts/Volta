@@ -173,7 +173,8 @@ struct MainTabView: View {
             "Player expanded from mini player; songID=\(audio.currentSong?.id ?? "none")",
             category: .playback
         )
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
+        // No overshoot so the player settles on open without bouncing.
+        withAnimation(.smooth(duration: 0.4)) {
             showNowPlaying = true
         }
     }

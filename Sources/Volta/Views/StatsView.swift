@@ -1,8 +1,17 @@
 import SwiftUI
 import Charts
 
+enum StatsTab: String, CaseIterable, Identifiable {
+    case listening = "Listening"
+    case library = "Library"
+    var id: String { rawValue }
+    var icon: String { self == .listening ? "headphones" : "music.note.house" }
+}
+
 struct StatsView: View {
     @State private var vm = StatsViewModel()
+    @State private var libraryVM = LibraryStatsViewModel()
+    @State private var tab: StatsTab = .listening
     @State private var path = NavigationPath()
     @Environment(AppState.self) private var appState
 
@@ -11,35 +20,31 @@ struct StatsView: View {
             ZStack {
                 Theme.background.ignoresSafeArea()
                 ScrollView {
-                    VStack(spacing: 24) {
-                        periodSelector
-                        periodNavigation
-                        Divider().background(Theme.secondaryText.opacity(0.2))
+                    VStack(spacing: 20) {
+                        StatsTabSelector(selection: $tab)
 
-                        switch vm.period {
-                        case .allTime: AllTimeStatsSection(vm: vm)
-                        case .daily: DailyStatsSection(vm: vm)
-                        case .weekly: WeeklyStatsSection(vm: vm)
-                        case .monthly: MonthlyStatsSection(vm: vm)
-                        case .yearly: YearlyStatsSection(vm: vm)
+                        if tab == .listening {
+                            listeningContent
+                        } else {
+                            LibraryStatsContentView(vm: libraryVM)
                         }
-
-                        Color.clear.frame(height: 80)
                     }
-                    .padding(.vertical, 8)
+                    .padding(.top, 8)
                 }
             }
             .navigationTitle("Stats")
             .navigationBarTitleDisplayMode(.large)
             .accountToolbar(path: $path)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        exportStats()
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
+                if tab == .listening {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            exportStats()
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .tint(Theme.accent)
                     }
-                    .tint(Theme.accent)
                 }
             }
         }
@@ -51,6 +56,25 @@ struct StatsView: View {
         .onAppear { vm.recompute() }
         .onReceive(NotificationCenter.default.publisher(for: .playEventRecorded)) { _ in
             vm.recompute()
+        }
+    }
+
+    @ViewBuilder
+    private var listeningContent: some View {
+        VStack(spacing: 24) {
+            periodSelector
+            periodNavigation
+            Divider().background(Theme.secondaryText.opacity(0.2))
+
+            switch vm.period {
+            case .allTime: AllTimeStatsSection(vm: vm)
+            case .daily: DailyStatsSection(vm: vm)
+            case .weekly: WeeklyStatsSection(vm: vm)
+            case .monthly: MonthlyStatsSection(vm: vm)
+            case .yearly: YearlyStatsSection(vm: vm)
+            }
+
+            Color.clear.frame(height: 80)
         }
     }
 
@@ -120,6 +144,42 @@ struct StatsView: View {
             }
             .padding(.horizontal, 20)
         }
+    }
+}
+
+// MARK: - Tab selector
+
+struct StatsTabSelector: View {
+    @Binding var selection: StatsTab
+    @Namespace private var ns
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(StatsTab.allCases) { t in
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) { selection = t }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: t.icon).font(.system(size: 13, weight: .semibold))
+                        Text(t.rawValue).font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(selection == t ? Theme.background : Theme.primaryText)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background {
+                        if selection == t {
+                            Capsule().fill(Theme.accent)
+                                .matchedGeometryEffect(id: "statsTab", in: ns)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(Theme.secondaryBackground, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.06), lineWidth: 0.5))
+        .padding(.horizontal, 20)
     }
 }
 

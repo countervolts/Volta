@@ -220,7 +220,7 @@ final class StatsViewModel {
     }
 
     // Lead artist from "A, B" / "A feat. B" / "A & B".
-    static func primaryArtist(_ s: String) -> String {
+    nonisolated static func primaryArtist(_ s: String) -> String {
         var name = s
         let separators = [",", " feat.", " feat ", " ft.", " ft ", " featuring ", " & ", " x ", ";", " with "]
         for sep in separators {

@@ -5,6 +5,13 @@ private enum PlaylistCreateKind: String, CaseIterable, Identifiable {
     case smart = "Smart"
     case folder = "Folder"
     var id: String { rawValue }
+    @MainActor var label: String {
+        switch self {
+        case .custom: return L(.create_kind_custom)
+        case .smart:  return L(.create_kind_smart)
+        case .folder: return L(.media_folder)
+        }
+    }
 }
 
 struct PlaylistsView: View {
@@ -43,9 +50,9 @@ struct PlaylistsView: View {
                     grid
                 }
             }
-            .navigationTitle("Playlists")
+            .navigationTitle(L(.tab_playlists))
             .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search playlists")
+            .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: L(.playlists_search_prompt))
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { vm.showCreateSheet = true } label: {
@@ -69,48 +76,48 @@ struct PlaylistsView: View {
             createSheet
         }
             .confirmationDialog(
-                "Delete Playlist?",
+                L(.playlist_delete_q),
             isPresented: Binding(get: { pendingDelete != nil },
                                  set: { if !$0 { pendingDelete = nil } }),
             presenting: pendingDelete
         ) { pl in
-            Button("Delete “\(pl.name)”", role: .destructive) {
+            Button(L(.playlist_delete_named, pl.name), role: .destructive) {
                 if let client = appState.client {
                     Task { await vm.deletePlaylist(pl, client: client) }
                 }
                 pendingDelete = nil
             }
-            Button("Cancel", role: .cancel) { pendingDelete = nil }
+            Button(L(.action_cancel), role: .cancel) { pendingDelete = nil }
         } message: { pl in
-            Text("“\(pl.name)” will be permanently deleted. This can’t be undone.")
+            Text(L(.playlist_delete_msg, pl.name))
         }
         .confirmationDialog(
-            "Delete Smart Playlist?",
+            L(.smart_delete_q),
             isPresented: Binding(get: { pendingSmartDelete != nil },
                                  set: { if !$0 { pendingSmartDelete = nil } }),
             presenting: pendingSmartDelete
         ) { smart in
-            Button("Delete “\(smart.name)”", role: .destructive) {
+            Button(L(.playlist_delete_named, smart.name), role: .destructive) {
                 smartStore.delete(smart)
                 pendingSmartDelete = nil
             }
-            Button("Cancel", role: .cancel) { pendingSmartDelete = nil }
+            Button(L(.action_cancel), role: .cancel) { pendingSmartDelete = nil }
         } message: { smart in
-            Text("“\(smart.name)” will be removed from this device.")
+            Text(L(.smart_delete_msg, smart.name))
         }
         .confirmationDialog(
-            "Delete Folder?",
+            L(.folder_delete_q),
             isPresented: Binding(get: { pendingFolderDelete != nil },
                                  set: { if !$0 { pendingFolderDelete = nil } }),
             presenting: pendingFolderDelete
         ) { folder in
-            Button("Delete “\(folder.name)”", role: .destructive) {
+            Button(L(.playlist_delete_named, folder.name), role: .destructive) {
                 folderStore.delete(folder)
                 pendingFolderDelete = nil
             }
-            Button("Cancel", role: .cancel) { pendingFolderDelete = nil }
+            Button(L(.action_cancel), role: .cancel) { pendingFolderDelete = nil }
         } message: { folder in
-            Text("“\(folder.name)” will be removed. Playlists inside it will stay intact.")
+            Text(L(.folder_delete_msg, folder.name))
         }
         .task(id: appState.currentServer?.id) {
             if let client = appState.client { await vm.load(client: client) }
@@ -164,7 +171,7 @@ struct PlaylistsView: View {
                         Button(role: .destructive) {
                             pendingFolderDelete = folder
                         } label: {
-                            Label("Delete Folder", systemImage: Symbols.trash)
+                            Label(L(.action_delete), systemImage: Symbols.trash)
                         }
                     }
                 }
@@ -177,13 +184,13 @@ struct PlaylistsView: View {
                         Button {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { vm.togglePin(pl) }
                         } label: {
-                            Label(vm.isPinned(pl) ? "Unpin" : "Pin to Top",
+                            Label(vm.isPinned(pl) ? L(.playlist_unpin) : L(.playlist_pin),
                                   systemImage: vm.isPinned(pl) ? "pin.slash" : "pin")
                         }
                         Button(role: .destructive) {
                             pendingDelete = pl
                         } label: {
-                            Label("Delete Playlist", systemImage: Symbols.trash)
+                            Label(L(.action_delete), systemImage: Symbols.trash)
                         }
                     }
                 }
@@ -199,13 +206,13 @@ struct PlaylistsView: View {
                         Button {
                             smartStore.togglePin(smart)
                         } label: {
-                            Label(smart.pinned ? "Unpin" : "Pin to Top",
+                            Label(smart.pinned ? L(.playlist_unpin) : L(.playlist_pin),
                                   systemImage: smart.pinned ? "pin.slash" : "pin")
                         }
                         Button(role: .destructive) {
                             pendingSmartDelete = smart
                         } label: {
-                            Label("Delete Smart Playlist", systemImage: Symbols.trash)
+                            Label(L(.action_delete), systemImage: Symbols.trash)
                         }
                     }
                 }
@@ -250,7 +257,7 @@ struct PlaylistsView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Theme.primaryText)
                 .lineLimit(1)
-            Text("\(count) playlist\(count == 1 ? "" : "s")")
+            Text(L(.playlists_count, count))
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
@@ -260,7 +267,7 @@ struct PlaylistsView: View {
     @ViewBuilder
     private func folderActions(for playlist: Playlist) -> some View {
         if !folderStore.folders.isEmpty {
-            Menu("Add to Folder", systemImage: "folder.badge.plus") {
+            Menu(L(.folder_add_to), systemImage: "folder.badge.plus") {
                 ForEach(folderStore.folders) { folder in
                     Button(folder.name) {
                         folderStore.addPlaylist(id: playlist.id, to: folder)
@@ -272,7 +279,7 @@ struct PlaylistsView: View {
             Button {
                 folderStore.removePlaylist(id: playlist.id)
             } label: {
-                Label("Remove from Folder", systemImage: "folder.badge.minus")
+                Label(L(.folder_remove_from), systemImage: "folder.badge.minus")
             }
         }
     }
@@ -280,7 +287,7 @@ struct PlaylistsView: View {
     @ViewBuilder
     private func folderActions(for smart: SmartPlaylist) -> some View {
         if !folderStore.folders.isEmpty {
-            Menu("Add to Folder", systemImage: "folder.badge.plus") {
+            Menu(L(.folder_add_to), systemImage: "folder.badge.plus") {
                 ForEach(folderStore.folders) { folder in
                     Button(folder.name) {
                         folderStore.addSmartPlaylist(id: smart.id, to: folder)
@@ -292,7 +299,7 @@ struct PlaylistsView: View {
             Button {
                 folderStore.removeSmartPlaylist(id: smart.id)
             } label: {
-                Label("Remove from Folder", systemImage: "folder.badge.minus")
+                Label(L(.folder_remove_from), systemImage: "folder.badge.minus")
             }
         }
     }
@@ -318,7 +325,7 @@ struct PlaylistsView: View {
                 .foregroundStyle(Theme.primaryText)
                 .lineLimit(1)
             if let count = pl.songCount {
-                Text("\(count) songs")
+                Text(L(.home_song_count, count))
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -346,7 +353,7 @@ struct PlaylistsView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Theme.primaryText)
                 .lineLimit(1)
-            Text("\(songs.count) songs · \(smart.ruleSummary)")
+            Text(L(.smart_songs_rule, songs.count, smart.ruleSummary))
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .lineLimit(1)
@@ -357,7 +364,7 @@ struct PlaylistsView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: Symbols.playlists).font(.system(size: 40, weight: .ultraLight)).foregroundStyle(Theme.secondaryText)
-            Text("No playlists yet").font(.headline).foregroundStyle(Theme.primaryText)
+            Text(L(.playlists_none_yet)).font(.headline).foregroundStyle(Theme.primaryText)
         }
     }
 
@@ -365,9 +372,9 @@ struct PlaylistsView: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Type", selection: $createKind) {
+                    Picker(L(.create_type), selection: $createKind) {
                         ForEach(PlaylistCreateKind.allCases) { kind in
-                            Text(kind.rawValue).tag(kind)
+                            Text(kind.label).tag(kind)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -375,24 +382,24 @@ struct PlaylistsView: View {
 
                 if createKind == .custom {
                     Section {
-                        TextField("Playlist name", text: $vm.newPlaylistName)
+                        TextField(L(.create_playlist_name_ph), text: $vm.newPlaylistName)
                     }
                 } else if createKind == .folder {
                     Section {
-                        TextField("Folder name", text: $vm.newPlaylistName)
+                        TextField(L(.create_folder_name_ph), text: $vm.newPlaylistName)
                     }
                 } else {
                     smartPlaylistForm
                 }
             }
-            .navigationTitle("New Playlist")
+            .navigationTitle(L(.create_new_playlist_title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { closeCreateSheet() }
+                    Button(L(.action_cancel)) { closeCreateSheet() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
+                    Button(L(.action_create)) {
                         createCurrentDraft()
                     }
                     .disabled(createDisabled)
@@ -405,16 +412,16 @@ struct PlaylistsView: View {
             resetCreateDrafts()
         }
         .sheet(isPresented: $showSmartArtistPicker) {
-            SmartMultiSelectSheet(title: "Artists", options: vm.smartArtists, selection: $smartDraft.selectedArtists)
+            SmartMultiSelectSheet(title: L(.home_artists), options: vm.smartArtists, selection: $smartDraft.selectedArtists)
         }
         .sheet(isPresented: $showSmartAlbumPicker) {
-            SmartMultiSelectSheet(title: "Albums", options: vm.smartAlbums, selection: $smartDraft.selectedAlbums)
+            SmartMultiSelectSheet(title: L(.media_albums), options: vm.smartAlbums, selection: $smartDraft.selectedAlbums)
         }
-        .alert("Name Already Exists", isPresented: Binding(
+        .alert(L(.name_exists_title), isPresented: Binding(
             get: { duplicateCreateMessage != nil },
             set: { if !$0 { duplicateCreateMessage = nil } }
         )) {
-            Button("OK", role: .cancel) { duplicateCreateMessage = nil }
+            Button(L(.action_ok), role: .cancel) { duplicateCreateMessage = nil }
         } message: {
             Text(duplicateCreateMessage ?? "")
         }
@@ -433,64 +440,64 @@ struct PlaylistsView: View {
 
     private var smartPlaylistForm: some View {
         Group {
-            Section("Name") {
-                TextField("Smart playlist name", text: $smartDraft.name)
-                TextField("Description", text: Binding(
+            Section(L(.sort_name)) {
+                TextField(L(.smart_name_ph), text: $smartDraft.name)
+                TextField(L(.smart_desc), text: Binding(
                     get: { smartDraft.subtitle ?? "" },
                     set: { smartDraft.subtitle = $0.isEmpty ? nil : $0 }
                 ))
             }
 
-            Section("Rules") {
-                Picker("Match", selection: $smartDraft.matchMode) {
-                    ForEach(SmartMatchMode.allCases) { Text($0.rawValue).tag($0) }
+            Section(L(.smart_section_rules)) {
+                Picker(L(.smart_match), selection: $smartDraft.matchMode) {
+                    ForEach(SmartMatchMode.allCases) { Text($0.label).tag($0) }
                 }
-                TextField("Title, artist, album, genre contains", text: $smartDraft.searchText)
-                TextField("Artist contains", text: $smartDraft.artist)
-                TextField("Album contains", text: $smartDraft.album)
+                TextField(L(.smart_search_ph), text: $smartDraft.searchText)
+                TextField(L(.smart_artist_ph), text: $smartDraft.artist)
+                TextField(L(.smart_album_ph), text: $smartDraft.album)
                 Button { showSmartArtistPicker = true } label: {
-                    smartSelectionRow("Artists", values: smartDraft.selectedArtists)
+                    smartSelectionRow(L(.home_artists), values: smartDraft.selectedArtists)
                 }
                 Button { showSmartAlbumPicker = true } label: {
-                    smartSelectionRow("Albums", values: smartDraft.selectedAlbums)
+                    smartSelectionRow(L(.media_albums), values: smartDraft.selectedAlbums)
                 }
-                Picker("Genre", selection: $smartDraft.genre) {
-                    Text("Any Genre").tag("")
+                Picker(L(.media_genre), selection: $smartDraft.genre) {
+                    Text(L(.smart_any_genre)).tag("")
                     ForEach(vm.smartGenres, id: \.self) { Text($0).tag($0) }
                 }
             }
 
-            Section("Filters") {
-                TextField("Minimum year", text: $minYearText)
+            Section(L(.smart_section_filters)) {
+                TextField(L(.smart_min_year_ph), text: $minYearText)
                     .keyboardType(.numberPad)
-                TextField("Maximum year", text: $maxYearText)
+                TextField(L(.smart_max_year_ph), text: $maxYearText)
                     .keyboardType(.numberPad)
-                TextField("Minimum plays", text: $minPlayText)
+                TextField(L(.smart_min_plays_ph), text: $minPlayText)
                     .keyboardType(.numberPad)
-                TextField("Maximum plays", text: $maxPlayText)
+                TextField(L(.smart_max_plays_ph), text: $maxPlayText)
                     .keyboardType(.numberPad)
-                Toggle("Never Played Only", isOn: $smartDraft.neverPlayedOnly)
-                Toggle("Lossless Only", isOn: $smartDraft.onlyLossless)
+                Toggle(L(.smart_never_played_only), isOn: $smartDraft.neverPlayedOnly)
+                Toggle(L(.smart_lossless_only), isOn: $smartDraft.onlyLossless)
                     .onChange(of: smartDraft.onlyLossless) { _, enabled in
                         if !enabled { smartDraft.onlyHiResLossless = false }
                     }
-                Toggle("Hi-Res Lossless Only", isOn: $smartDraft.onlyHiResLossless)
+                Toggle(L(.smart_hires_only), isOn: $smartDraft.onlyHiResLossless)
                     .onChange(of: smartDraft.onlyHiResLossless) { _, enabled in
                         if enabled { smartDraft.onlyLossless = true }
                     }
                 .disabled(!smartDraft.onlyLossless)
-                Toggle("Downloaded Only", isOn: $smartDraft.onlyDownloaded)
-                Picker("Taste", selection: $smartDraft.taste) {
-                    ForEach(SmartTasteFilter.allCases) { Text($0.rawValue).tag($0) }
+                Toggle(L(.smart_downloaded_only), isOn: $smartDraft.onlyDownloaded)
+                Picker(L(.smart_taste), selection: $smartDraft.taste) {
+                    ForEach(SmartTasteFilter.allCases) { Text($0.label).tag($0) }
                 }
             }
 
-            Section("Mix Options") {
-                Picker("Sort", selection: $smartDraft.sort) {
-                    ForEach(SmartSortMode.allCases) { Text($0.rawValue).tag($0) }
+            Section(L(.smart_section_mix)) {
+                Picker(L(.smart_sort), selection: $smartDraft.sort) {
+                    ForEach(SmartSortMode.allCases) { Text($0.label).tag($0) }
                 }
-                Stepper("Limit: \(smartDraft.limit) songs", value: $smartDraft.limit, in: 5...200, step: 5)
-                Text("\(smartPreviewCount) matching songs right now")
+                Stepper(L(.smart_limit, smartDraft.limit), value: $smartDraft.limit, in: 5...200, step: 5)
+                Text(L(.smart_matching_now, smartPreviewCount))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -505,7 +512,7 @@ struct PlaylistsView: View {
         HStack {
             Text(title)
             Spacer()
-            Text(values.isEmpty ? "Any" : "\(values.count) selected")
+            Text(values.isEmpty ? L(.smart_any) : L(.smart_n_selected, values.count))
                 .foregroundStyle(.secondary)
             Image(systemName: Symbols.chevron)
                 .font(.caption)
@@ -551,15 +558,15 @@ struct PlaylistsView: View {
         case .custom:
             let name = normalizedCreateName(vm.newPlaylistName)
             guard vm.playlists.contains(where: { normalizedCreateName($0.name) == name }) else { return nil }
-            return "A playlist named “\(vm.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines))” already exists."
+            return L(.dup_playlist, vm.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines))
         case .smart:
             let name = normalizedCreateName(smartDraft.name)
             guard smartStore.playlists.contains(where: { normalizedCreateName($0.name) == name }) else { return nil }
-            return "A smart playlist named “\(smartDraft.name.trimmingCharacters(in: .whitespacesAndNewlines))” already exists."
+            return L(.dup_smart, smartDraft.name.trimmingCharacters(in: .whitespacesAndNewlines))
         case .folder:
             let name = normalizedCreateName(vm.newPlaylistName)
             guard folderStore.folders.contains(where: { normalizedCreateName($0.name) == name }) else { return nil }
-            return "A folder named “\(vm.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines))” already exists."
+            return L(.dup_folder, vm.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines))
         }
     }
 
@@ -620,7 +627,7 @@ private struct PlaylistFolderDetailView: View {
                     Image(systemName: "folder")
                         .font(.system(size: 40, weight: .ultraLight))
                         .foregroundStyle(Theme.secondaryText)
-                    Text("Empty Folder")
+                    Text(L(.folder_empty))
                         .font(.headline)
                         .foregroundStyle(Theme.primaryText)
                 }
@@ -638,7 +645,7 @@ private struct PlaylistFolderDetailView: View {
                                 Button {
                                     folderStore.removePlaylist(id: playlist.id)
                                 } label: {
-                                    Label("Remove from Folder", systemImage: "folder.badge.minus")
+                                    Label(L(.folder_remove_from), systemImage: "folder.badge.minus")
                                 }
                             }
                         }
@@ -654,7 +661,7 @@ private struct PlaylistFolderDetailView: View {
                                 Button {
                                     folderStore.removeSmartPlaylist(id: smart.id)
                                 } label: {
-                                    Label("Remove from Folder", systemImage: "folder.badge.minus")
+                                    Label(L(.folder_remove_from), systemImage: "folder.badge.minus")
                                 }
                             }
                         }
@@ -665,7 +672,7 @@ private struct PlaylistFolderDetailView: View {
                 }
             }
         }
-        .navigationTitle(folder?.name ?? "Folder")
+        .navigationTitle(folder?.name ?? L(.media_folder))
         .navigationBarTitleDisplayMode(.large)
         .preferredColorScheme(Theme.colorScheme)
     }
@@ -680,7 +687,7 @@ private struct PlaylistFolderDetailView: View {
                 .foregroundStyle(Theme.primaryText)
                 .lineLimit(1)
             if let count = playlist.songCount {
-                Text("\(count) songs")
+                Text(L(.home_song_count, count))
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -698,7 +705,7 @@ private struct PlaylistFolderDetailView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Theme.primaryText)
                 .lineLimit(1)
-            Text("\(songs.count) songs")
+            Text(L(.home_song_count, songs.count))
                 .font(.caption)
                 .foregroundStyle(Theme.secondaryText)
         }
@@ -776,7 +783,7 @@ private struct SmartMultiSelectSheet: View {
                         Button(role: .destructive) {
                             selection.removeAll()
                         } label: {
-                            Label("Clear Selection", systemImage: "xmark.circle")
+                            Label(L(.action_clear_selection), systemImage: "xmark.circle")
                         }
                     }
                 }
@@ -799,10 +806,10 @@ private struct SmartMultiSelectSheet: View {
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Search \(title.lowercased())")
+            .searchable(text: $searchText, prompt: L(.search_x, title.lowercased()))
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button(L(.action_done)) { dismiss() }
                 }
             }
         }
@@ -859,13 +866,13 @@ private struct SmartPlaylistDetailView: View {
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .addToPlaylist(let song):
-                AddToPlaylistSheet(song: song, onAdded: { name in showToast("Added to \(name)") })
+                AddToPlaylistSheet(song: song, onAdded: { name in showToast(L(.toast_added_to, name)) })
             case .album(let album):
                 NavigationStack {
                     AlbumDetailView(album: album)
                         .toolbar {
                             ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") { activeSheet = nil }.foregroundStyle(Theme.accent)
+                                Button(L(.action_done)) { activeSheet = nil }.foregroundStyle(Theme.accent)
                             }
                         }
                 }
@@ -875,7 +882,7 @@ private struct SmartPlaylistDetailView: View {
                     ArtistDetailView(artist: artist)
                         .toolbar {
                             ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") { activeSheet = nil }.foregroundStyle(Theme.accent)
+                                Button(L(.action_done)) { activeSheet = nil }.foregroundStyle(Theme.accent)
                             }
                         }
                 }
@@ -937,7 +944,7 @@ private struct SmartPlaylistDetailView: View {
             } label: {
                 HStack(spacing: 7) {
                     Image(systemName: Symbols.play).font(.system(size: 14, weight: .bold))
-                    Text("Play").font(.subheadline.weight(.semibold))
+                    Text(L(.action_play)).font(.subheadline.weight(.semibold))
                 }
                 .foregroundStyle(.black)
                 .frame(maxWidth: .infinity)
@@ -988,8 +995,8 @@ private struct SmartPlaylistDetailView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("\(songs.count) songs")
-            Text("\(playlist.matchMode.rawValue) · \(playlist.sort.rawValue)")
+            Text(L(.home_song_count, songs.count))
+            Text("\(playlist.matchMode.label) · \(playlist.sort.label)")
         }
         .font(.caption)
         .foregroundStyle(.white.opacity(0.4))

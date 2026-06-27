@@ -80,7 +80,7 @@ struct ArtistDetailView: View {
         }
         .sheet(item: $addToPlaylistSong) { song in
             AddToPlaylistSheet(song: song, onAdded: { name in
-                withAnimation { toastMessage = "Added to \(name)" }
+                withAnimation { toastMessage = L(.toast_added_to, name) }
                 Task {
                     try? await Task.sleep(nanoseconds: 2_500_000_000)
                     withAnimation { toastMessage = nil }
@@ -133,6 +133,7 @@ struct ArtistDetailView: View {
                 Color.clear.frame(height: headerHeight)   // sits over the header
                 artistActionRow
                 topSongsSection
+                likedSongsSection
                 albumsSection
                 singlesSection
                 appearedOnSection
@@ -158,7 +159,7 @@ struct ArtistDetailView: View {
                 Button { playArtist(shuffled: false) } label: {
                     HStack(spacing: 8) {
                         Image(systemName: Symbols.play).font(.system(size: 16, weight: .bold))
-                        Text("Play").font(.headline)
+                        Text(L(.action_play)).font(.headline)
                     }
                     .foregroundStyle(.black)
                     .frame(maxWidth: .infinity)
@@ -170,7 +171,7 @@ struct ArtistDetailView: View {
                 Button { playArtist(shuffled: true) } label: {
                     HStack(spacing: 8) {
                         Image(systemName: Symbols.shuffle).font(.system(size: 16, weight: .semibold))
-                        Text("Shuffle").font(.headline)
+                        Text(L(.action_shuffle)).font(.headline)
                     }
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -207,7 +208,7 @@ struct ArtistDetailView: View {
             let multi = pages.count > 1
 
             VStack(alignment: .leading, spacing: 0) {
-                SectionHeaderView("Top Songs")
+                SectionHeaderView(L(.section_top_songs))
                     .padding(.horizontal, 20)
                     .padding(.top, 24)
                     .padding(.bottom, 4)
@@ -296,13 +297,39 @@ struct ArtistDetailView: View {
         .frame(height: Self.rowHeight)
     }
 
+    // MARK: - Liked Songs
+
+    @ViewBuilder
+    private var likedSongsSection: some View {
+        let liked = vm.likedSongs
+        if !liked.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionHeaderView(L(.section_liked_songs))
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
+                    .padding(.bottom, 4)
+
+                VStack(spacing: 0) {
+                    ForEach(Array(liked.enumerated()), id: \.element.id) { i, song in
+                        compactTopSongRow(song: song, index: i + 1)
+                        if i < liked.count - 1 {
+                            Divider().background(.white.opacity(0.06)).padding(.leading, 60)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+            .padding(.bottom, 8)
+        }
+    }
+
     // MARK: - Albums
 
     @ViewBuilder
     private var albumsSection: some View {
         if !vm.albumReleases.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
-                SectionHeaderView("Albums")
+                SectionHeaderView(L(.media_albums))
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
 
@@ -382,7 +409,7 @@ struct ArtistDetailView: View {
     private var appearedOnSection: some View {
         if !vm.appearsOn.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
-                SectionHeaderView("Appeared On")
+                SectionHeaderView(L(.section_appeared_on))
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
 
@@ -423,7 +450,7 @@ struct ArtistDetailView: View {
     private var similarArtistsSection: some View {
         if !vm.similarArtists.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
-                SectionHeaderView("Similar Artists")
+                SectionHeaderView(L(.section_similar_artists))
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
 
@@ -461,7 +488,7 @@ struct ArtistDetailView: View {
         // (prevents the genre appearing twice on the profile)
         if let bio = vm.biography {
             VStack(alignment: .leading, spacing: 16) {
-                Text("About \(vm.displayArtist.name)")
+                Text(L(.artist_about, vm.displayArtist.name))
                     .font(.title3.bold())
                     .foregroundStyle(.white)
 
@@ -472,7 +499,7 @@ struct ArtistDetailView: View {
                         .lineLimit(4)
 
                     Button { showBioSheet = true } label: {
-                        Text("More")
+                        Text(L(.action_more))
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(Theme.accent)
                     }
@@ -495,27 +522,27 @@ struct ArtistDetailView: View {
 
         if albumCount > 0 {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Stats")
+                Text(L(.tab_stats))
                     .font(.title3.bold())
                     .foregroundStyle(.white)
 
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    statsCell(value: "\(albumCount)", label: albumCount == 1 ? "Album" : "Albums")
+                    statsCell(value: "\(albumCount)", label: L(.media_albums))
                     if totalPlays > 0 {
-                        statsCell(value: formatPlays(totalPlays), label: "Total Plays")
+                        statsCell(value: formatPlays(totalPlays), label: L(.stat_total_plays))
                     }
                     if let year = vm.albums.compactMap(\.year).min() {
-                        statsCell(value: "\(year)", label: "Active Since")
+                        statsCell(value: "\(year)", label: L(.stat_active_since))
                     }
                     if let latest = vm.albums.compactMap(\.year).max(),
                        let oldest = vm.albums.compactMap(\.year).min(), latest != oldest {
-                        statsCell(value: "\(oldest)–\(latest)", label: "Years Active")
+                        statsCell(value: "\(oldest)–\(latest)", label: L(.stat_years_active))
                     }
                 }
 
                 if !genres.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("GENRES")
+                        Text(L(.media_genres).localizedUppercase)
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.4))
                         Text(genres.joined(separator: " · "))
@@ -688,11 +715,11 @@ private struct ArtistBioSheet: View {
                     .padding(20)
             }
             .background(Theme.background.ignoresSafeArea())
-            .navigationTitle("About \(artistName)")
+            .navigationTitle(L(.artist_about, artistName))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button(L(.action_done)) { dismiss() }
                         .foregroundStyle(Theme.accent)
                 }
             }

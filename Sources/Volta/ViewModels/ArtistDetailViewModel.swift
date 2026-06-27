@@ -28,6 +28,7 @@ final class ArtistDetailViewModel {
     var appearsOn: [Album] = []
     var albumReleases: [Album] { albums.filter { !Self.isSingle($0) } }
     var singles: [Album] { albums.filter { Self.isSingle($0) } }
+    var likedSongs: [Song] { allSongs.filter { $0.starred != nil } }
 
     var artistImage: UIImage?
     var artworkResolved = false

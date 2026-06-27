@@ -36,7 +36,7 @@ struct LibraryView: View {
                     }
                 }
             }
-            .navigationTitle("Library")
+            .navigationTitle(L(.tab_library))
             .navigationBarTitleDisplayMode(.large)
             .accountToolbar(path: $path)
             .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: searchPrompt)
@@ -47,12 +47,12 @@ struct LibraryView: View {
             .overlay(alignment: .bottom) { selectionOverlay }
             .sheet(isPresented: $showBatchPlaylistSheet) {
                 AddSongsToPlaylistSheet(songs: selectedSongs) { name, count in
-                    finishBatch("Added \(count) to \(name)")
+                    finishBatch(L(.toast_added_count_to, count, name))
                 }
             }
             .sheet(item: $addToPlaylistSong) { song in
                 AddToPlaylistSheet(song: song) { name in
-                    showToast("Added to \(name)")
+                    showToast(L(.toast_added_to, name))
                 }
             }
             .onChange(of: vm.filter) { _, _ in exitSelection() }
@@ -72,7 +72,7 @@ struct LibraryView: View {
     }
 
     private var searchPrompt: String {
-        "Search Library"
+        L(.library_search_prompt)
     }
 
     @ViewBuilder
@@ -91,13 +91,13 @@ struct LibraryView: View {
         case .folder(let source):
             FolderBrowseScreen(source: source, title: folderTitle(source))
         case .downloadedFolder(let path):
-            DownloadedFolderScreen(path: path, title: path.last ?? "Folders")
+            DownloadedFolderScreen(path: path, title: path.last ?? L(.library_folders))
         }
     }
 
     private func folderTitle(_ source: FolderSource) -> String {
         if case .directory(_, let name) = source { return name }
-        return "Folders"
+        return L(.library_folders)
     }
 
     private func genreGrid(genre: String) -> some View {
@@ -110,7 +110,7 @@ struct LibraryView: View {
     // MARK: - Source picker (Server vs Downloaded)
 
     private var sourcePicker: some View {
-        Picker("Source", selection: Binding(
+        Picker(L(.library_source), selection: Binding(
             get: { vm.source },
             set: { s in
                 var transaction = Transaction()
@@ -119,7 +119,7 @@ struct LibraryView: View {
             }
         )) {
             ForEach(LibrarySource.allCases) { s in
-                Text(s.rawValue).tag(s)
+                Text(s.label).tag(s)
             }
         }
         .pickerStyle(.segmented)
@@ -139,7 +139,7 @@ struct LibraryView: View {
                                 vm.setFilter(f)
                             }
                         } label: {
-                            Text(f.rawValue)
+                            Text(f.label)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(vm.filter == f ? Theme.background : Theme.primaryText)
                                 .padding(.horizontal, 14)
@@ -162,25 +162,25 @@ struct LibraryView: View {
 
     private var filterMenu: some View {
         Menu {
-            Picker("Sort By", selection: Binding(get: { vm.sortOrder }, set: { vm.setSort($0) })) {
-                ForEach(LibrarySortOrder.allCases) { Text($0.rawValue).tag($0) }
+            Picker(L(.library_sort_by), selection: Binding(get: { vm.sortOrder }, set: { vm.setSort($0) })) {
+                ForEach(LibrarySortOrder.allCases) { Text($0.label).tag($0) }
             }
             if !vm.availableGenres.isEmpty {
-                Picker("Genre", selection: Binding(
+                Picker(L(.media_genre), selection: Binding(
                     get: { vm.genreFilter ?? "" },
                     set: { vm.setGenreFilter($0.isEmpty ? nil : $0) }
                 )) {
-                    Text("All Genres").tag("")
+                    Text(L(.library_all_genres)).tag("")
                     ForEach(vm.availableGenres, id: \.self) { Text($0).tag($0) }
                 }
             }
             Toggle(isOn: Binding(get: { vm.neverPlayedOnly }, set: { vm.neverPlayedOnly = $0 })) {
-                Label("Never Played", systemImage: "moon.zzz")
+                Label(L(.library_never_played), systemImage: "moon.zzz")
             }
             if vm.hasActiveFilters {
                 Divider()
                 Button(role: .destructive) { vm.clearFilters() } label: {
-                    Label("Clear Filters", systemImage: "xmark.circle")
+                    Label(L(.library_clear_filters), systemImage: "xmark.circle")
                 }
             }
         } label: {
@@ -225,7 +225,7 @@ struct LibraryView: View {
                 // music-folder picker only when the server exposes more than one
                 if vm.musicFolders.count > 1 {
                     Menu {
-                        Button("All Folders") { vm.selectedFolderID = nil }
+                        Button(L(.library_all_folders)) { vm.selectedFolderID = nil }
                         ForEach(vm.musicFolders) { folder in
                             Button(folder.name) { vm.selectedFolderID = folder.id }
                         }
@@ -253,7 +253,7 @@ struct LibraryView: View {
 
     private var selectedFolderName: String {
         guard let id = vm.selectedFolderID,
-              let folder = vm.musicFolders.first(where: { $0.id == id }) else { return "All Folders" }
+              let folder = vm.musicFolders.first(where: { $0.id == id }) else { return L(.library_all_folders) }
         return folder.name
     }
 
@@ -460,20 +460,20 @@ struct LibraryView: View {
                     .foregroundStyle(Theme.primaryText)
                     .contentTransition(.numericText())
                 Spacer()
-                Button(allSelected ? "Deselect All" : "Select All") { toggleSelectAll() }
+                Button(allSelected ? L(.library_deselect_all) : L(.library_select_all)) { toggleSelectAll() }
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.accent)
             }
             HStack(spacing: 0) {
                 batchButton(L(.action_play_next), "text.line.first.and.arrowtriangle.forward") {
                     appState.audioPlayer.playNext(selectedSongs)
-                    finishBatch("Playing \(selectedSongs.count) next")
+                    finishBatch(L(.toast_playing_n_next, selectedSongs.count))
                 }
-                batchButton("Queue", "text.append") {
+                batchButton(L(.action_queue), "text.append") {
                     appState.audioPlayer.addToQueue(selectedSongs)
-                    finishBatch("Added \(selectedSongs.count) to queue")
+                    finishBatch(L(.toast_added_n_to_queue, selectedSongs.count))
                 }
-                batchButton("Playlist", Symbols.addToPlaylist) {
+                batchButton(L(.media_playlist), Symbols.addToPlaylist) {
                     showBatchPlaylistSheet = true
                 }
                 if vm.source == .downloaded {
@@ -488,7 +488,7 @@ struct LibraryView: View {
                         for s in songs where DownloadService.shared.state(for: s) == .notDownloaded {
                             DownloadService.shared.download(song: s)
                         }
-                        finishBatch("Downloading \(songs.count)")
+                        finishBatch(L(.toast_downloading_n, songs.count))
                     }
                 }
             }
@@ -635,7 +635,7 @@ struct AddSongsToPlaylistSheet: View {
                 if isLoading {
                     ProgressView().frame(maxWidth: .infinity)
                 } else if playlists.isEmpty {
-                    Text("No playlists yet")
+                    Text(L(.playlists_none_yet))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                 } else {
@@ -647,7 +647,7 @@ struct AddSongsToPlaylistSheet: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(pl.name).font(.body).foregroundStyle(.primary)
                                     if let n = pl.songCount {
-                                        Text("\(n) songs").font(.caption).foregroundStyle(.secondary)
+                                        Text(L(.home_song_count, n)).font(.caption).foregroundStyle(.secondary)
                                     }
                                 }
                                 Spacer()
@@ -659,11 +659,11 @@ struct AddSongsToPlaylistSheet: View {
                     }
                 }
             }
-            .navigationTitle("Add \(songs.count) Song\(songs.count == 1 ? "" : "s")")
+            .navigationTitle(L(.library_add_n_songs, songs.count))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.disabled(working)
+                    Button(L(.action_cancel)) { dismiss() }.disabled(working)
                 }
             }
         }

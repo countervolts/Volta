@@ -67,7 +67,7 @@ struct AlbumDetailView: View {
         .sheet(item: $showAddToPlaylist) { song in
             AddToPlaylistSheet(song: song, onAdded: { name in
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    toastMessage = "Added to \(name)"
+                    toastMessage = L(.toast_added_to, name)
                 }
                 Task {
                     try? await Task.sleep(nanoseconds: 2_500_000_000)
@@ -295,7 +295,7 @@ struct AlbumDetailView: View {
                 if !vm.songs.isEmpty {
                     Text("·").foregroundStyle(.white.opacity(0.3))
                     Button { showAlbumLosslessInfo = true } label: {
-                        Label(vm.isHiResLossless ? "Hi-Res Lossless" : (vm.isLossless ? "Lossless" : "Lossy"),
+                        Label(vm.isHiResLossless ? L(.quality_hires_lossless) : (vm.isLossless ? L(.quality_lossless) : L(.quality_lossy)),
                               systemImage: vm.isLossless ? "waveform" : "music.note")
                             .labelStyle(.titleAndIcon)
                             .foregroundStyle(.white.opacity(0.55))
@@ -342,7 +342,7 @@ struct AlbumDetailView: View {
                 HStack(spacing: 7) {
                     Image(systemName: Symbols.play)
                         .font(.system(size: 14, weight: .bold))
-                    Text("Play")
+                    Text(L(.action_play))
                         .font(.subheadline.weight(.semibold))
                 }
                 .foregroundStyle(playFg)
@@ -373,7 +373,7 @@ struct AlbumDetailView: View {
                 Button {
                     vm.toggleDescription()
                 } label: {
-                    Text(vm.isDescriptionExpanded ? "Less" : "More")
+                    Text(vm.isDescriptionExpanded ? L(.action_less) : L(.action_more))
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Theme.accent)
                 }
@@ -407,7 +407,7 @@ struct AlbumDetailView: View {
     }
 
     private func discHeader(_ disc: Int) -> some View {
-        Text("Disc \(disc)")
+        Text(L(.album_disc, disc))
             .font(.footnote.weight(.semibold))
             .foregroundStyle(.white.opacity(0.45))
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -471,7 +471,7 @@ struct AlbumDetailView: View {
     private var moreBySameArtist: some View {
         if !vm.moreBySameArtist.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
-                SectionHeaderView("More by \(vm.album.displayArtist)")
+                SectionHeaderView(L(.album_more_by, vm.album.displayArtist))
                     .padding(.horizontal, 20)
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 14) {
@@ -632,18 +632,18 @@ struct AddToPlaylistSheet: View {
                     }
                 }
             }
-            .navigationTitle("Add to Playlist")
+            .navigationTitle(L(.action_add_to_playlist))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(L(.action_cancel)) { dismiss() }
                 }
             }
-            .alert("Add to playlist?", isPresented: Binding(
+            .alert(L(.album_add_to_playlist_q), isPresented: Binding(
                 get: { confirming != nil },
                 set: { if !$0 { confirming = nil } }
             )) {
-                Button("Add") {
+                Button(L(.action_add)) {
                     if let pl = confirming, let client = appState.client {
                         Task {
                             do {
@@ -657,9 +657,9 @@ struct AddToPlaylistSheet: View {
                         }
                     }
                 }
-                Button("Cancel", role: .cancel) { confirming = nil }
+                Button(L(.action_cancel), role: .cancel) { confirming = nil }
             } message: {
-                Text("Add \"\(song.title)\" to \"\(confirming?.name ?? "")\"?")
+                Text(L(.album_add_song_confirm, song.title, confirming?.name ?? ""))
             }
         }
         .task {
@@ -690,23 +690,23 @@ private struct AlbumQualityInsightPopover: View {
     }
 
     private var headline: String {
-        if losslessCount == 0 { return "Lossy Album" }
+        if losslessCount == 0 { return L(.album_quality_lossy_title) }
         if losslessCount == songs.count {
-            return hiResCount > 0 ? "Hi-Res Lossless Album" : "Lossless Album"
+            return hiResCount > 0 ? L(.album_quality_hires_title) : L(.album_quality_lossless_title)
         }
-        return "Mixed Quality Album"
+        return L(.album_quality_mixed_title)
     }
 
     private var summary: String {
         if losslessCount == 0 {
-            return "All \(songs.count) tracks use a lossy format."
+            return L(.album_quality_lossy_desc, songs.count)
         }
         if losslessCount == songs.count {
             return hiResCount == songs.count
-                ? "All \(songs.count) tracks are hi-res lossless."
-                : "All \(songs.count) tracks are lossless."
+                ? L(.album_quality_hires_desc, songs.count)
+                : L(.album_quality_lossless_desc, songs.count)
         }
-        return "\(losslessCount) of \(songs.count) tracks are lossless; the rest use a lossy format."
+        return L(.album_quality_mixed_desc, losslessCount, songs.count)
     }
 
     var body: some View {
@@ -722,14 +722,14 @@ private struct AlbumQualityInsightPopover: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if !formats.isEmpty { detailRow("Formats", formats.joined(separator: ", ")) }
+            if !formats.isEmpty { detailRow(L(.detail_formats), formats.joined(separator: ", ")) }
             if !sampleRates.isEmpty {
-                detailRow("Sample Rates", sampleRates.map { String(format: "%.1f kHz", Double($0) / 1000) }.joined(separator: ", "))
+                detailRow(L(.detail_sample_rates), sampleRates.map { String(format: "%.1f kHz", Double($0) / 1000) }.joined(separator: ", "))
             }
             if !bitDepths.isEmpty {
-                detailRow("Bit Depths", bitDepths.map { "\($0)-bit" }.joined(separator: ", "))
+                detailRow(L(.detail_bit_depths), bitDepths.map { L(.detail_bit_value, $0) }.joined(separator: ", "))
             }
-            if hiResCount > 0 { detailRow("Hi-Res Tracks", "\(hiResCount) of \(songs.count)") }
+            if hiResCount > 0 { detailRow(L(.detail_hires_tracks), L(.detail_x_of_y, hiResCount, songs.count)) }
         }
         .padding(16)
         .frame(minWidth: 240)
