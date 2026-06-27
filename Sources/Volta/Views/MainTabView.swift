@@ -72,8 +72,10 @@ struct MainTabView: View {
     private var modernTabs: some View {
         if #available(iOS 26.1, *) {
             modernTabView
-                .tabViewBottomAccessory(isEnabled: audio.currentSong != nil) {
-                    modernMiniPlayerAccessory
+                .tabViewBottomAccessory {
+                    if audio.currentSong != nil {
+                        modernMiniPlayerAccessory
+                    }
                 }
         } else {
             modernTabView
