@@ -25,7 +25,7 @@ struct SectionHeaderView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("See all \(title)")
+                .accessibilityLabel(L(.a11y_see_all, title))
             }
 
             Spacer(minLength: 0)

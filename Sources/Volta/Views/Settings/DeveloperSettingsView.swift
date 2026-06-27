@@ -207,6 +207,7 @@ struct DeveloperExperimentsView: View {
     @AppStorage(DeveloperExperiments.disableRAMOptimizationsKey) private var disableRAMOptimizations = false
     @AppStorage(DeveloperExperiments.appWorkerLimitKey) private var appWorkerLimit = 0
     @AppStorage(DeveloperExperiments.preciseTimestampsKey) private var preciseTimestamps = false
+    @AppStorage(DeveloperExperiments.fakeListeningStatsKey) private var fakeListeningStats = false
 
     var body: some View {
         ZStack {
@@ -245,6 +246,16 @@ struct DeveloperExperimentsView: View {
                     Text("Shows elapsed and remaining time in the player down to the fractions of a second (X:XX.XXXX).")
                 }
                 .listRowBackground(Theme.secondaryBackground)
+
+                Section {
+                    Toggle(isOn: $fakeListeningStats) {
+                        Label("Fake Listening Stats", systemImage: "wand.and.stars")
+                    }
+                    .tint(Theme.accent)
+                } footer: {
+                    Text("Replaces the Listening tab in Stats with a generated dataset for screenshots. Your real play history is kept in a separate file and is fully restored when this is turned off.")
+                }
+                .listRowBackground(Theme.secondaryBackground)
             }
             .scrollContentBackground(.hidden)
             .background(Theme.background)
@@ -269,6 +280,13 @@ struct DeveloperExperimentsView: View {
         }
         .onChange(of: preciseTimestamps) { _, enabled in
             AppLogger.shared.logAlways("Developer experiment: precise timestamps \(enabled ? "enabled" : "disabled")", category: .other)
+        }
+        .onChange(of: fakeListeningStats) { _, enabled in
+            AppLogger.shared.logAlways("Developer experiment: fake listening stats \(enabled ? "enabled" : "disabled")", category: .other)
+            StatsStore.shared.setFakeStats(enabled, songPool: DownloadService.shared.downloadedSongs())
+            VoltaNotificationCenter.shared.post(
+                enabled ? "Listening stats are now faked for screenshots" : "Listening stats restored to your real history",
+                tone: enabled ? .warning : .success)
         }
     }
 }

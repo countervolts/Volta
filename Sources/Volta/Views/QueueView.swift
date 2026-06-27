@@ -19,9 +19,9 @@ struct QueueView: View {
 
     private var modeToggles: some View {
         HStack(spacing: 8) {
-            modeButton(icon: Symbols.shuffle, label: "Shuffle", active: audio.isShuffle) { audio.toggleShuffle() }
+            modeButton(icon: Symbols.shuffle, label: L(.action_shuffle), active: audio.isShuffle) { audio.toggleShuffle() }
             modeButton(icon: audio.repeatMode == .one ? Symbols.repeatOne : Symbols.repeatAll,
-                       label: audio.repeatMode == .one ? "Repeat 1" : "Repeat",
+                       label: audio.repeatMode == .one ? L(.queue_repeat_one) : L(.queue_repeat),
                        active: audio.repeatMode != .off) { audio.cycleRepeat() }
             autoplayButton
             transitionButton
@@ -68,7 +68,7 @@ struct QueueView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Continue Playing").font(.headline).foregroundStyle(.white)
+                    Text(L(.queue_continue_playing)).font(.headline).foregroundStyle(.white)
                     if !audio.queueSourceTitle.isEmpty {
                         Text(audio.queueSourceTitle).font(.caption).foregroundStyle(.white.opacity(0.5))
                     }

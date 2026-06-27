@@ -8,12 +8,27 @@ enum LibraryFilter: String, CaseIterable, Identifiable {
     case genres = "Genres"
     case folders = "Folders"
     var id: String { rawValue }
+    @MainActor var label: String {
+        switch self {
+        case .artists: return L(.home_artists)
+        case .albums:  return L(.media_albums)
+        case .songs:   return L(.media_songs)
+        case .genres:  return L(.media_genres)
+        case .folders: return L(.library_folders)
+        }
+    }
 }
 
 enum LibrarySource: String, CaseIterable, Identifiable {
     case server = "Server"
     case downloaded = "Downloaded"
     var id: String { rawValue }
+    @MainActor var label: String {
+        switch self {
+        case .server:     return L(.library_source_server)
+        case .downloaded: return L(.library_source_downloaded)
+        }
+    }
 }
 
 enum LibrarySortOrder: String, CaseIterable, Identifiable {
@@ -23,6 +38,15 @@ enum LibrarySortOrder: String, CaseIterable, Identifiable {
     case mostPlayed = "Most Played"
     case recentlyAdded = "Recently Added"
     var id: String { rawValue }
+    @MainActor var label: String {
+        switch self {
+        case .name:          return L(.sort_name)
+        case .album:         return L(.media_album)
+        case .year:          return L(.media_year)
+        case .mostPlayed:    return L(.sort_most_played)
+        case .recentlyAdded: return L(.home_recently_added)
+        }
+    }
 }
 
 @MainActor

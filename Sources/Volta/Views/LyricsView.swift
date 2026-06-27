@@ -92,7 +92,7 @@ struct LyricsViewWithState: View {
             Spacer()
             Image(systemName: Symbols.lyricsInactive)
                 .font(.system(size: 40, weight: .ultraLight)).foregroundStyle(.white.opacity(0.3))
-            Text("No lyrics available").font(.subheadline).foregroundStyle(.white.opacity(0.4))
+            Text(L(.lyrics_none)).font(.subheadline).foregroundStyle(.white.opacity(0.4))
             Spacer()
         }
     }

@@ -4,6 +4,12 @@ enum SmartMatchMode: String, CaseIterable, Codable, Identifiable, Sendable {
     case all = "All Rules"
     case any = "Any Rule"
     var id: String { rawValue }
+    @MainActor var label: String {
+        switch self {
+        case .all: return L(.smart_match_all)
+        case .any: return L(.smart_match_any)
+        }
+    }
 }
 
 enum SmartSortMode: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -16,6 +22,18 @@ enum SmartSortMode: String, CaseIterable, Codable, Identifiable, Sendable {
     case leastPlayed = "Least Played"
     case random = "Random"
     var id: String { rawValue }
+    @MainActor var label: String {
+        switch self {
+        case .title:       return L(.smart_sort_title)
+        case .artist:      return L(.media_artist)
+        case .album:       return L(.media_album)
+        case .yearNewest:  return L(.smart_sort_newest)
+        case .yearOldest:  return L(.smart_sort_oldest)
+        case .mostPlayed:  return L(.sort_most_played)
+        case .leastPlayed: return L(.smart_sort_least_played)
+        case .random:      return L(.smart_sort_random)
+        }
+    }
 }
 
 enum SmartTasteFilter: String, CaseIterable, Codable, Identifiable, Sendable {
@@ -24,6 +42,14 @@ enum SmartTasteFilter: String, CaseIterable, Codable, Identifiable, Sendable {
     case notDisliked = "Not Disliked"
     case disliked = "Disliked"
     var id: String { rawValue }
+    @MainActor var label: String {
+        switch self {
+        case .any:         return L(.smart_any)
+        case .loved:       return L(.smart_taste_loved)
+        case .notDisliked: return L(.smart_taste_not_disliked)
+        case .disliked:    return L(.smart_taste_disliked)
+        }
+    }
 }
 
 struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
@@ -56,6 +82,7 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
         self.name = name
     }
 
+    @MainActor
     var ruleSummary: String {
         var parts: [String] = []
         if !searchText.isEmpty { parts.append(searchText) }
@@ -64,14 +91,14 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
         if !selectedArtists.isEmpty { parts.append("\(selectedArtists.count) artist\(selectedArtists.count == 1 ? "" : "s")") }
         if !selectedAlbums.isEmpty { parts.append("\(selectedAlbums.count) album\(selectedAlbums.count == 1 ? "" : "s")") }
         if onlyHiResLossless {
-            parts.append("Hi-Res Lossless")
+            parts.append(L(.quality_hires_lossless))
         } else if onlyLossless {
-            parts.append("Lossless")
+            parts.append(L(.quality_lossless))
         }
-        if onlyDownloaded { parts.append("Downloaded") }
-        if neverPlayedOnly { parts.append("Never Played") }
-        if taste != .any { parts.append(taste.rawValue) }
-        return parts.isEmpty ? "Smart mix" : parts.prefix(3).joined(separator: " · ")
+        if onlyDownloaded { parts.append(L(.library_source_downloaded)) }
+        if neverPlayedOnly { parts.append(L(.library_never_played)) }
+        if taste != .any { parts.append(taste.label) }
+        return parts.isEmpty ? L(.smart_mix) : parts.prefix(3).joined(separator: " · ")
     }
 
     @MainActor

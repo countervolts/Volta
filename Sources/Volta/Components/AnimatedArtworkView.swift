@@ -47,13 +47,15 @@ final class FrameSteppingImageView: UIImageView {
     private var link: CADisplayLink?
     private var index = 0
     private var accumulated: CFTimeInterval = 0
+    private var lastTimestamp: CFTimeInterval = 0
     private var loggedFirstLoop = false
 
     func setAnimation(frames: [UIImage], duration: TimeInterval) {
         link?.invalidate()
         link = nil
         self.frames = frames
-        frameDelay = frames.count > 1 ? max(0.02, duration / Double(frames.count)) : 0.1
+        // Native per-frame delay; floor allows rates up to 120fps.
+        frameDelay = frames.count > 1 ? max(1.0 / 120.0, duration / Double(frames.count)) : 0.1
         index = 0
         accumulated = 0
         if let first = frames.first { image = first }
@@ -78,22 +80,22 @@ final class FrameSteppingImageView: UIImageView {
             }
             return
         }
+        lastTimestamp = 0
         let l = CADisplayLink(target: self, selector: #selector(tick(_:)))
-        // Artwork frames are low-fps; the accumulator keeps time when ticks are sparse.
-        let rawMode = LiveArtworkSettings.rawAnimatedArtworkEnabled
-        let lowPower = LiveArtworkSettings.lowPowerPlayback
-        let maxFPS: Float = rawMode
-            ? Float(max(30, UIScreen.main.maximumFramesPerSecond))
-            : (lowPower ? 15 : 30)
-        let minFPS: Float = rawMode ? min(30.0, maxFPS) : (lowPower ? 8 : 10)
-        l.preferredFrameRateRange = CAFrameRateRange(minimum: minFPS, maximum: maxFPS, preferred: maxFPS)
+        // Full-refresh link; the accumulator steps frames at the native rate so
+        // changes land on the nearest refresh (smoother than a fixed low-fps clock).
+        let maxFPS = Float(max(60, UIScreen.main.maximumFramesPerSecond))
+        l.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: maxFPS, preferred: maxFPS)
         l.add(to: .main, forMode: .common)
         link = l
-        AppLogger.shared.log("Live artwork: display link started (\(frames.count) frames @ \(String(format: "%.0f", 1.0 / frameDelay))fps\(rawMode ? ", raw" : (lowPower ? ", low power" : "")))", category: .other)
+        AppLogger.shared.log("Live artwork: display link started (\(frames.count) frames; native \(String(format: "%.0f", 1.0 / frameDelay))fps stepped @ up to \(String(format: "%.0f", maxFPS))Hz)", category: .other)
     }
 
     @objc private func tick(_ l: CADisplayLink) {
-        accumulated += max(0, l.targetTimestamp - l.timestamp)
+        // Advance by real elapsed time so a dropped tick doesn't slow playback.
+        let elapsed = lastTimestamp > 0 ? l.timestamp - lastTimestamp : (l.targetTimestamp - l.timestamp)
+        lastTimestamp = l.timestamp
+        accumulated += max(0, elapsed)
         guard accumulated >= frameDelay, !frames.isEmpty else { return }
         let steps = Int(accumulated / frameDelay)
         accumulated -= Double(steps) * frameDelay

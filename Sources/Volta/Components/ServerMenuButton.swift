@@ -5,6 +5,7 @@ struct ServerMenuButton: View {
     var onOpenSettings: () -> Void
 
     @Environment(AppState.self) private var appState
+    @Environment(\.openURL) private var openURL
     @State private var showSwitcher = false
 
     var body: some View {
@@ -19,6 +20,14 @@ struct ServerMenuButton: View {
 
             Button(action: onOpenSettings) {
                 Label("Settings", systemImage: Symbols.settings)
+            }
+
+            Button {
+                if let url = URL(string: "https://discord.gg/3GfZjsrHHf") {
+                    openURL(url)
+                }
+            } label: {
+                Label("Join Discord", systemImage: "bubble.left.and.bubble.right.fill")
             }
 
             Divider()

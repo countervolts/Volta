@@ -4,7 +4,12 @@ enum DeveloperExperiments {
     static let disableRAMOptimizationsKey = "disableRAMOptimizations"
     static let appWorkerLimitKey = "appWorkerLimit"
     static let preciseTimestampsKey = "preciseTimestamps"
+    static let fakeListeningStatsKey = "fakeListeningStats"
     private static let legacySingleThreadedModeKey = "singleThreadedMode"
+
+    static var fakeListeningStats: Bool {
+        UserDefaults.standard.bool(forKey: fakeListeningStatsKey)
+    }
 
     static var disableRAMOptimizations: Bool {
         UserDefaults.standard.object(forKey: disableRAMOptimizationsKey) as? Bool ?? false

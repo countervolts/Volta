@@ -146,7 +146,7 @@ struct PlaylistDetailView: View {
         switch sheet {
         case .addToPlaylist(let song):
             AddToPlaylistSheet(song: song, onAdded: { name in
-                withAnimation { toastMessage = "Added to \(name)" }
+                withAnimation { toastMessage = L(.toast_added_to, name) }
                 Task {
                     try? await Task.sleep(nanoseconds: 2_500_000_000)
                     withAnimation { toastMessage = nil }
@@ -201,22 +201,22 @@ struct PlaylistDetailView: View {
                     .buttonStyle(.plain)
                     .listRowBackground(Color.clear)
                 }
-                Section("Name") {
-                    TextField("Playlist name", text: $editName)
+                Section(L(.sort_name)) {
+                    TextField(L(.create_playlist_name_ph), text: $editName)
                 }
-                Section("Description") {
-                    TextField("Add a description", text: $editText, axis: .vertical)
+                Section(L(.smart_desc)) {
+                    TextField(L(.playlist_add_description), text: $editText, axis: .vertical)
                         .lineLimit(3...6)
                 }
             }
-            .navigationTitle("Edit Playlist")
+            .navigationTitle(L(.playlist_edit_title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { activeSheet = nil }
+                    Button(L(.action_cancel)) { activeSheet = nil }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { saveEdits() }
+                    Button(L(.action_save)) { saveEdits() }
                         .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
@@ -361,7 +361,7 @@ struct PlaylistDetailView: View {
                     .lineLimit(vm.isDescriptionExpanded ? nil : 3)
                     .animation(.easeInOut(duration: 0.3), value: vm.isDescriptionExpanded)
                 Button { vm.toggleDescription() } label: {
-                    Text(vm.isDescriptionExpanded ? "Less" : "More")
+                    Text(vm.isDescriptionExpanded ? L(.action_less) : L(.action_more))
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Theme.accent)
                 }
@@ -399,7 +399,7 @@ struct PlaylistDetailView: View {
                         onGoToArtist: song.artistId == nil ? nil : { goToArtist(song) },
                         onAddToPlaylist: { activeSheet = .addToPlaylist(song) },
                         onDelete: { removeSong(song) },
-                        deleteLabel: "Remove from Playlist"
+                        deleteLabel: L(.playlist_remove_from)
                     )
                 }
                 Divider().overlay(.white.opacity(0.14))
