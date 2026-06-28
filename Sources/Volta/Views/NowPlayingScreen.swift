@@ -20,6 +20,9 @@ struct NowPlayingScreen: View {
     // Shared scrub state for bar and time labels.
     @State private var scrubbing = false
     @State private var scrubTime: TimeInterval = 0
+    // Gates the scrubber's animation schedule until the open transition finishes,
+    // so the time labels don't get caught up in the present animation and bounce.
+    @State private var playerSettled = false
     @State private var isAdjustingVolume = false
     @State private var artistToShow: Artist?
     @State private var albumToShow: Album?
@@ -131,6 +134,12 @@ struct NowPlayingScreen: View {
                 dragOffset = pendingDragOffset
             }
             refreshPlayerBackground(animated: false)
+            // Hold the scrubber's high-frequency schedule until the open
+            // transition (0.4s) has settled, then let the time labels animate live.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                playerSettled = true
+            }
         }
         .onDisappear {
             AppLogger.shared.log("Full player disappeared", category: .playback)
@@ -635,68 +644,64 @@ struct NowPlayingScreen: View {
     // MARK: - Scrubber
 
     private var scrubber: some View {
-        VStack(spacing: 6) {
-            // Animated schedule so the fill interpolates smoothly between ticks.
-            TimelineView(
-                .animation(
-                    minimumInterval: preciseTimestamps ? 1.0 / 60.0 : 0.2,
-                    paused: scrubbing || !audio.isPlaying
-                )
-            ) { _ in
-                let snapshot = audio.playbackTimeSnapshot()
+        TimelineView(
+            .animation(
+                minimumInterval: preciseTimestamps ? 1.0 / 60.0 : 0.2,
+                paused: !playerSettled || scrubbing || !audio.isPlaying
+            )
+        ) { _ in
+            let snapshot = audio.playbackTimeSnapshot()
+            let total = snapshot.duration
+            let t = scrubbing ? min(scrubTime, total) : snapshot.elapsed
+            VStack(spacing: 6) {
                 ScrubBar(
-                    duration: snapshot.duration,
-                    currentTime: scrubbing ? min(scrubTime, snapshot.duration) : snapshot.elapsed,
+                    duration: total,
+                    currentTime: t,
                     scrubbing: $scrubbing,
                     scrubTime: $scrubTime,
                     onSeek: { audio.seek(to: $0) }
                 )
+                timeLabels(elapsed: t, total: total)
             }
-            timeLabels
         }
+        .transaction { $0.animation = nil }
     }
 
     // Text has .contentTransition(.identity) + .transaction { animation = nil } so the
-    // animation-schedule doesn't wobble it; the paused flag stops the drain while stopped.
-    private var timeLabels: some View {
-        TimelineView(.animation(minimumInterval: preciseTimestamps ? 1.0 / 30.0 : 0.5,
-                                paused: !audio.isPlaying && !scrubbing)) { _ in
-            let snapshot = audio.playbackTimeSnapshot()
-            let total = snapshot.duration
-            let t = scrubbing ? min(scrubTime, total) : snapshot.elapsed
-            let losslessStatus = LosslessBadgeResolver.status(for: audio.currentSong)
-            HStack {
-                timeText(formatTime(t))
-                Spacer()
-                if let losslessStatus, showLosslessBadge {
-                    Button { showLosslessInfo = true } label: {
-                        Label(losslessStatus.title, systemImage: losslessStatus.systemImage)
-                            .font(.caption2.bold())
-                            .foregroundStyle(.white.opacity(0.7))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(.white.opacity(0.15), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .popover(isPresented: $showLosslessInfo) {
-                        LosslessInfoPopover(song: audio.currentSong) {
-                            showLosslessInfo = false
-                            Task { @MainActor in
-                                try? await Task.sleep(nanoseconds: 180_000_000)
-                                showAudioSignalPath = true
-                            }
-                        }
-                            .presentationCompactAdaptation(.popover)
-                    }
+    // animation-schedule doesn't wobble it. Driven by the shared snapshot above.
+    private func timeLabels(elapsed t: TimeInterval, total: TimeInterval) -> some View {
+        let losslessStatus = LosslessBadgeResolver.status(for: audio.currentSong)
+        return HStack {
+            timeText(formatTime(t))
+            Spacer()
+            if let losslessStatus, showLosslessBadge {
+                Button { showLosslessInfo = true } label: {
+                    Label(losslessStatus.title, systemImage: losslessStatus.systemImage)
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white.opacity(0.7))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(.white.opacity(0.15), in: Capsule())
                 }
-                Spacer()
-                timeText("-\(formatTime(max(0, total - t)))")
+                .buttonStyle(.plain)
+                .popover(isPresented: $showLosslessInfo) {
+                    LosslessInfoPopover(song: audio.currentSong) {
+                        showLosslessInfo = false
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 180_000_000)
+                            showAudioSignalPath = true
+                        }
+                    }
+                        .presentationCompactAdaptation(.popover)
+                }
             }
-            .font(.caption)
-            .foregroundStyle(.white.opacity(0.5))
-            // Fixed line height so the badge can't shift the time labels.
-            .frame(height: 22)
+            Spacer()
+            timeText("-\(formatTime(max(0, total - t)))")
         }
+        .font(.caption)
+        .foregroundStyle(.white.opacity(0.5))
+        // Fixed line height so the badge can't shift the time labels.
+        .frame(height: 22)
     }
 
     private func timeText(_ value: String) -> some View {

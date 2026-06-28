@@ -570,8 +570,7 @@ actor ArtworkLoader {
                 AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
             ],
             AVVideoCompressionPropertiesKey: [
-                AVVideoExpectedSourceFrameRateKey: 30,
-                AVVideoAverageNonDroppableFrameRateKey: 30
+                AVVideoExpectedSourceFrameRateKey: 30
             ]
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
