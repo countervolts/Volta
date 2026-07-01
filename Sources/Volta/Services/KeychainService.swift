@@ -4,33 +4,35 @@ import Security
 // minimal keychain wrapper for server passwords. keyed by server id.
 enum KeychainService {
     private static let service = "com.ayo.music.credentials"
+    private static func baseQuery(for account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
+        ]
+    }
 
     @discardableResult
     static func save(password: String, for account: String) -> Bool {
         let data = Data(password.utf8)
-        let query: [String: Any] = [
+        SecItemDelete(baseQuery(for: account) as CFDictionary)
+
+        var attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecValueData as String: data,
         ]
-        SecItemDelete(query as CFDictionary)
-
-        var attributes = query
-        attributes[kSecValueData as String] = data
-        // ThisDeviceOnly keeps the cleartext password out of encrypted device
-        // backups and prevents it being restored onto a different device.
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        attributes[kSecAttrSynchronizable as String] = true
         return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
     }
 
     static func password(for account: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+        var query = baseQuery(for: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data else {
@@ -41,11 +43,6 @@ enum KeychainService {
 
     @discardableResult
     static func delete(for account: String) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        return SecItemDelete(query as CFDictionary) == errSecSuccess
+        SecItemDelete(baseQuery(for: account) as CFDictionary) == errSecSuccess
     }
 }

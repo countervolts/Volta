@@ -60,6 +60,8 @@
 	<dict/>
 	<key>NSMotionUsageDescription</key>
 	<string>Volta uses motion for device detection.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Volta scans nearby AirPods broadcasts to identify the active output model.</string>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationLandscapeRight</string>

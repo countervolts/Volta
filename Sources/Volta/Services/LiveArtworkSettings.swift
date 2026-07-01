@@ -32,28 +32,27 @@ enum LiveArtworkSettings {
             || (isEnabled && (DeveloperExperiments.disableRAMOptimizations || !PerformanceMode.disableLiveArtwork))
     }
 
-    // longest decoded side of one animation frame, in pixels
+    // Keep frames small so memory can go toward frame count instead of resolution.
     static var maxPixelSize: Int {
         guard !rawAnimatedArtworkEnabled,
               !DeveloperExperiments.disableRAMOptimizations else { return 0 }
         switch DeviceMemoryTier.current {
-        case .gb3OrLess: return 192
-        case .gb4: return 288
-        case .gb6: return 448
-        case .gb8Plus: return 768
+        case .gb3OrLess: return 176
+        case .gb4: return 224
+        case .gb6: return 288
+        case .gb8Plus: return 320
         }
     }
 
-    // Keep enough frames for a smooth loop without making first display wait on
-    // hundreds of frames the screen cannot present at the artwork playback rate.
+    // Keep enough frames for native-rate playback; maxPixelSize keeps the RAM cost in check.
     static var maxFrameCount: Int {
         guard !rawAnimatedArtworkEnabled,
               !DeveloperExperiments.disableRAMOptimizations else { return 0 }
         switch DeviceMemoryTier.current {
-        case .gb3OrLess: return 60
-        case .gb4: return 75
-        case .gb6: return 90
-        case .gb8Plus: return 120
+        case .gb3OrLess: return 180
+        case .gb4: return 220
+        case .gb6: return 260
+        case .gb8Plus: return 300
         }
     }
 

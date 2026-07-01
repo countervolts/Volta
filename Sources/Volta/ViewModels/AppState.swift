@@ -113,6 +113,11 @@ final class AppState {
     func switchTo(_ record: ServerRecord) {
         let cellular = NetworkMonitor.shared.isCellular
         guard let config = store.config(for: record, cellular: cellular) else {
+            audioPlayer.stopAndClear()
+            client = nil
+            currentServer = nil
+            audioPlayer.updateClient(nil)
+            IntentBridge.shared.teardown()
             store.setCurrent(record)
             phase = .login
             return
