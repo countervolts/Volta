@@ -396,7 +396,9 @@ actor ArtworkLoader {
             guard bucket > lastBucket else { continue }
             guard let cg = decodeFrame(source, index: i, maxPixelSize: maxPixelSize) else { continue }
             lastBucket = bucket
-            frames.append(UIImage(cgImage: cg))
+            // Pre-decode frames so the first animation loop does not hitch.
+            let frame = UIImage(cgImage: cg)
+            frames.append(frame.preparingForDisplay() ?? frame)
             delays.append(carried)
             total += carried
             carried = 0
@@ -410,6 +412,7 @@ actor ArtworkLoader {
         let image = UIImage.animatedImage(with: frames, duration: total)
             ?? UIImage.animatedImage(with: frames, duration: Double(frames.count) * 0.1)
         guard let image else { return nil }
+        image.frameDelays = delays
         let sizeLabel = maxPixelSize > 0 ? "≤\(maxPixelSize)px" : "raw size"
         AppLogger.shared.log("Live artwork: decoded \(frames.count)/\(count) frames at \(sizeLabel)", category: .other)
         return AnimationSequence(frames: frames, delays: delays, image: image)
@@ -454,6 +457,7 @@ actor ArtworkLoader {
         }
         let total = max(manifest.delays.reduce(0, +), Double(frames.count) * 0.02)
         guard let image = UIImage.animatedImage(with: frames, duration: total) else { return nil }
+        image.frameDelays = manifest.delays
         AppLogger.shared.log("Live artwork: loaded \(frames.count) frames from optimized frame cache", category: .other)
         return AnimationSequence(frames: frames, delays: manifest.delays, image: image)
     }
@@ -799,5 +803,15 @@ private extension UIImage {
     var cost: Int {
         let s = scale * scale
         return Int(size.width * size.height * s * 4)
+    }
+}
+
+private var frameDelaysKey: UInt8 = 0
+
+extension UIImage {
+    // Per-frame delays for animated images; count should match `images`.
+    var frameDelays: [TimeInterval]? {
+        get { objc_getAssociatedObject(self, &frameDelaysKey) as? [TimeInterval] }
+        set { objc_setAssociatedObject(self, &frameDelaysKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
     }
 }

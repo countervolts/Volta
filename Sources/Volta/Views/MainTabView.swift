@@ -68,22 +68,20 @@ struct MainTabView: View {
     }
 
     @available(iOS 26.0, *)
-    @ViewBuilder
     private var modernTabs: some View {
-        if audio.currentSong != nil {
-            modernTabView
-                .tabViewBottomAccessory {
-                    modernMiniPlayerAccessory
-                }
-        } else {
-            modernTabView
-        }
+        modernTabView
+            .tabViewBottomAccessory {
+                modernMiniPlayerAccessory
+            }
     }
 
+    @ViewBuilder
     private var modernMiniPlayerAccessory: some View {
-        MiniPlayerAccessory(onExpand: presentNowPlaying)
-            .padding(.horizontal, 12)
-            .padding(.bottom, 2)
+        if audio.currentSong != nil {
+            MiniPlayerAccessory(onExpand: presentNowPlaying)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 2)
+        }
     }
 
     @available(iOS 26.0, *)

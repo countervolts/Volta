@@ -11,6 +11,15 @@ struct SwipeBackEnabler: UIViewControllerRepresentable {
 
         override func viewWillAppear(_ animated: Bool) {
             super.viewWillAppear(animated)
+            applyGesture()
+        }
+
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            applyGesture()
+        }
+
+        private func applyGesture() {
             guard let gesture = navigationController?.interactivePopGestureRecognizer else { return }
             popDelegate.navigationController = navigationController
             gesture.isEnabled = true
@@ -38,7 +47,11 @@ struct GlassBackButton: View {
 
     var body: some View {
         Button {
-            dismiss()
+            // Clear focused search fields first so one tap still goes back.
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            DispatchQueue.main.async {
+                dismiss()
+            }
         } label: {
             Image(systemName: Symbols.back)
                 .font(.system(size: 16, weight: .semibold))

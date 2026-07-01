@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import QuartzCore
 
 struct AnimatedImageView: UIViewRepresentable {
     let image: UIImage
@@ -10,8 +11,8 @@ struct AnimatedImageView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeUIView(context: Context) -> FrameSteppingImageView {
-        let v = FrameSteppingImageView()
+    func makeUIView(context: Context) -> CompositorAnimatedImageView {
+        let v = CompositorAnimatedImageView()
         v.contentMode = .scaleAspectFill
         v.clipsToBounds = true
         v.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -22,89 +23,110 @@ struct AnimatedImageView: UIViewRepresentable {
         return v
     }
 
-    func updateUIView(_ uiView: FrameSteppingImageView, context: Context) {
+    func updateUIView(_ uiView: CompositorAnimatedImageView, context: Context) {
         // Reconfigure only when the artwork changes; playback ticks re-render often.
         guard context.coordinator.configuredImage !== image else { return }
         configure(uiView, context: context)
     }
 
-    private func configure(_ v: FrameSteppingImageView, context: Context) {
+    private func configure(_ v: CompositorAnimatedImageView, context: Context) {
         context.coordinator.configuredImage = image
         if let frames = image.images, frames.count > 1 {
-            v.setAnimation(frames: frames, duration: image.duration)
-            AppLogger.shared.log("Live artwork: stepping \(frames.count) frames over \(String(format: "%.1f", image.duration))s via display link", category: .other)
+            v.setAnimation(frames: frames, delays: image.frameDelays, duration: image.duration)
+            AppLogger.shared.log("Live artwork: presenting \(frames.count) frames via compositor keyframe animation", category: .other)
         } else {
-            v.setAnimation(frames: [], duration: 0)
+            v.setAnimation(frames: [], delays: nil, duration: 0)
             v.image = image
             AppLogger.shared.log("Live artwork: animated image arrived with NO frames array (images=\(image.images?.count ?? -1)) — rendering still", category: .other, level: .warning)
         }
     }
 }
 
-final class FrameSteppingImageView: UIImageView {
-    private var frames: [UIImage] = []
-    private var frameDelay: TimeInterval = 0.1
-    private var link: CADisplayLink?
-    private var index = 0
-    private var accumulated: CFTimeInterval = 0
-    private var lastTimestamp: CFTimeInterval = 0
-    private var loggedFirstLoop = false
+// Let Core Animation advance artwork frames instead of driving them from the main thread.
+final class CompositorAnimatedImageView: UIImageView {
+    private static let animationKey = "liveArtworkFrames"
 
-    func setAnimation(frames: [UIImage], duration: TimeInterval) {
-        link?.invalidate()
-        link = nil
-        self.frames = frames
-        // Native per-frame delay; floor allows rates up to 120fps.
-        frameDelay = frames.count > 1 ? max(1.0 / 120.0, duration / Double(frames.count)) : 0.1
-        index = 0
-        accumulated = 0
-        if let first = frames.first { image = first }
-        startIfNeeded()
+    private var frameContents: [CGImage] = []
+    private var keyTimes: [NSNumber] = []
+    private var duration: TimeInterval = 0
+    private var activationObserver: NSObjectProtocol?
+    private var loggedStart = false
+
+    func setAnimation(frames: [UIImage], delays: [TimeInterval]?, duration: TimeInterval) {
+        layer.removeAnimation(forKey: Self.animationKey)
+        frameContents = frames.compactMap { $0.cgImage }
+        guard frameContents.count > 1 else {
+            keyTimes = []
+            self.duration = 0
+            return
+        }
+        // Keep a still image around for offscreen and backgrounded states.
+        image = frames.first
+        (keyTimes, self.duration) = Self.makeKeyTimes(count: frameContents.count, delays: delays, duration: duration)
+        loggedStart = false
+        installIfPossible()
     }
 
-    // Window membership owns the display link lifetime.
+    // Use source frame delays when available; otherwise fall back to even spacing.
+    private static func makeKeyTimes(count: Int, delays: [TimeInterval]?, duration: TimeInterval) -> ([NSNumber], TimeInterval) {
+        if let delays, delays.count == count {
+            let total = delays.reduce(0, +)
+            if total > 0 {
+                var times: [NSNumber] = []
+                times.reserveCapacity(count)
+                var acc: TimeInterval = 0
+                for delay in delays {
+                    times.append(NSNumber(value: acc / total))
+                    acc += delay
+                }
+                return (times, total)
+            }
+        }
+        let total = duration > 0 ? duration : Double(count) * 0.1
+        let times = (0..<count).map { NSNumber(value: Double($0) / Double(count)) }
+        return (times, total)
+    }
+
+    private func installIfPossible() {
+        guard window != nil, frameContents.count > 1,
+              layer.animation(forKey: Self.animationKey) == nil else { return }
+        let anim = CAKeyframeAnimation(keyPath: "contents")
+        anim.values = frameContents
+        anim.keyTimes = keyTimes
+        anim.calculationMode = .discrete
+        anim.duration = duration
+        anim.repeatCount = .greatestFiniteMagnitude
+        anim.isRemovedOnCompletion = false
+        layer.add(anim, forKey: Self.animationKey)
+        if !loggedStart {
+            loggedStart = true
+            AppLogger.shared.log("Live artwork: compositor animation installed (\(frameContents.count) frames over \(String(format: "%.1f", duration))s at native rate)", category: .other)
+        }
+    }
+
+    // UIKit drops layer animations after backgrounding, so reinstall when the view comes back.
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil {
-            link?.invalidate()
-            link = nil
+            layer.removeAnimation(forKey: Self.animationKey)
         } else {
-            startIfNeeded()
+            observeActivationIfNeeded()
+            installIfPossible()
         }
     }
 
-    private func startIfNeeded() {
-        guard window != nil, frames.count > 1, link == nil else {
-            if frames.count > 1, link == nil {
-                AppLogger.shared.log("Live artwork: display link NOT started — view has no window yet (\(frames.count) frames staged)", category: .other)
-            }
-            return
+    private func observeActivationIfNeeded() {
+        guard activationObserver == nil else { return }
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.installIfPossible()
         }
-        lastTimestamp = 0
-        let l = CADisplayLink(target: self, selector: #selector(tick(_:)))
-        // Full-refresh link; the accumulator steps frames at the native rate so
-        // changes land on the nearest refresh (smoother than a fixed low-fps clock).
-        let maxFPS = Float(max(60, UIScreen.main.maximumFramesPerSecond))
-        l.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: maxFPS, preferred: maxFPS)
-        l.add(to: .main, forMode: .common)
-        link = l
-        AppLogger.shared.log("Live artwork: display link started (\(frames.count) frames; native \(String(format: "%.0f", 1.0 / frameDelay))fps stepped @ up to \(String(format: "%.0f", maxFPS))Hz)", category: .other)
     }
 
-    @objc private func tick(_ l: CADisplayLink) {
-        // Advance by real elapsed time so a dropped tick doesn't slow playback.
-        let elapsed = lastTimestamp > 0 ? l.timestamp - lastTimestamp : (l.targetTimestamp - l.timestamp)
-        lastTimestamp = l.timestamp
-        accumulated += max(0, elapsed)
-        guard accumulated >= frameDelay, !frames.isEmpty else { return }
-        let steps = Int(accumulated / frameDelay)
-        accumulated -= Double(steps) * frameDelay
-        let previous = index
-        index = (index + steps) % frames.count
-        image = frames[index]
-        if index < previous, !loggedFirstLoop {
-            loggedFirstLoop = true
-            AppLogger.shared.log("Live artwork: completed first animation loop (frames are advancing)", category: .other)
+    deinit {
+        if let activationObserver {
+            NotificationCenter.default.removeObserver(activationObserver)
         }
     }
 }
