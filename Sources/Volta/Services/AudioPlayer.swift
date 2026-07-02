@@ -275,6 +275,8 @@ final class AudioPlayer {
     private var currentBassID: UInt64 = 0
 
     private var gaplessNextItem: AVPlayerItem? = nil
+    private var gaplessNextSongID: String? = nil
+    private var currentPlayerItem: AVPlayerItem? = nil
     // Lets deferred play requests detect newer track changes.
     private var playRequestID: UInt64 = 0
     private var autoplayAppendTask: Task<Void, Never>?
@@ -332,11 +334,6 @@ final class AudioPlayer {
 
     // Pick the time-stretch algorithm once; switching later audibly re-primes.
     private func makePlayerItem(url: URL) -> AVPlayerItem {
-        // Ask for precise duration so VBR-encoded originals report their true length
-        // instead of a short header estimate, which is what made the progress bar hit
-        // 0:00 remaining while audio kept playing. Duration resolves asynchronously, so
-        // playback still starts immediately (we fall back to server metadata until it
-        // lands) and the pre-queued gapless item parses well before its hand-off.
         let asset = AVURLAsset(
             url: url,
             options: [AVURLAssetPreferPreciseDurationAndTimingKey: true]
@@ -548,6 +545,9 @@ final class AudioPlayer {
         warmStreamsTask?.cancel(); warmStreamsTask = nil
         primaryPlayer.replaceCurrentItem(with: nil)
         secondaryPlayer.replaceCurrentItem(with: nil)
+        currentPlayerItem = nil
+        gaplessNextItem = nil
+        gaplessNextSongID = nil
         isPlaying = false
         currentSong = nil
         currentArtwork = nil
@@ -1084,9 +1084,12 @@ final class AudioPlayer {
 
     private func invalidatePreloadedNext() {
         if let gaplessNextItem {
-            player.remove(gaplessNextItem)
+            if gaplessNextItem !== currentPlayerItem {
+                player.remove(gaplessNextItem)
+            }
         }
         gaplessNextItem = nil
+        gaplessNextSongID = nil
     }
 
     private func startPlaying(song: Song) {
@@ -1107,29 +1110,16 @@ final class AudioPlayer {
             category: .playback
         )
 
-        let gapless = UserDefaults.standard.string(forKey: "gaplessPlayback") ?? "off"
-
-        let item: AVPlayerItem
-        if gapless != "off",
-           let preloaded = gaplessNextItem,
-           let preloadedURL = (preloaded.asset as? AVURLAsset)?.url,
-           preloadedURL == url {
-            item = preloaded
-            gaplessNextItem = nil
-        } else {
-            item = makePlayerItem(url: url)
-        }
+        invalidatePreloadedNext()
+        let item = makePlayerItem(url: url)
 
         applyEqualizer(to: item)
-
-        if gapless == "on" {
-            player.removeAllItems()
-            player.insert(item, after: nil)
-        } else {
-            player.replaceCurrentItem(with: item)
-        }
+        player.pause()
+        player.removeAllItems()
+        player.insert(item, after: nil)
+        currentPlayerItem = item
         try? AVAudioSession.sharedInstance().setActive(true)
-        player.play()
+        player.playImmediately(atRate: 1)
         applyReplayGain(for: song)
         currentSong = song
         isPlaying = true
@@ -1157,21 +1147,114 @@ final class AudioPlayer {
     }
 
     private func scheduleGaplessPreload() {
-        guard transitionMode == .off else { gaplessNextItem = nil; return }
-        let gapless = UserDefaults.standard.string(forKey: "gaplessPlayback") ?? "off"
-        guard gapless != "off" else { gaplessNextItem = nil; return }
+        if let gaplessNextItem, gaplessNextItem !== currentPlayerItem {
+            player.remove(gaplessNextItem)
+        }
+        gaplessNextItem = nil
+        gaplessNextSongID = nil
+        guard transitionMode == .off,
+              UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
+              repeatMode != .one,
+              let currentItem = player.currentItem,
+              currentItem === currentPlayerItem else { return }
         let nextIndex = currentIndex + 1
-        guard nextIndex < queue.count else { gaplessNextItem = nil; return }
+        guard nextIndex < queue.count else { return }
         let nextSong = queue[nextIndex]
         let localURL = DownloadService.shared.localURL(for: nextSong)
-        guard let url = localURL ?? client?.streamURL(id: nextSong.id) else { return }
+        guard let url = localURL ?? client?.streamURL(id: nextSong.id) else {
+            AppLogger.shared.log(
+                "Gapless pre-buffer skipped: no stream URL for '\(nextSong.title)'",
+                category: .playback,
+                level: .warning
+            )
+            return
+        }
         let nextItem = makePlayerItem(url: url)
         applyEqualizer(to: nextItem)
-        gaplessNextItem = nextItem
-        if gapless == "on" {
-            player.insert(nextItem, after: player.currentItem)
+        guard player.canInsert(nextItem, after: currentItem) else {
+            AppLogger.shared.log(
+                "Gapless pre-buffer skipped: AVQueuePlayer rejected next item for '\(nextSong.title)'",
+                category: .playback,
+                level: .warning
+            )
+            return
         }
-        AppLogger.shared.log("Gapless pre-buffer started; title='\(nextSong.title)'; mode=\(gapless)", category: .playback)
+        gaplessNextItem = nextItem
+        gaplessNextSongID = nextSong.id
+        player.insert(nextItem, after: currentItem)
+        AppLogger.shared.log(
+            "Gapless pre-buffer queued; title='\(nextSong.title)'; index=\(nextIndex)",
+            category: .playback
+        )
+    }
+
+    private func completeQueuedGaplessHandoff(finishedItem: AVPlayerItem) -> Bool {
+        guard transitionMode == .off,
+              UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
+              repeatMode == .off,
+              currentIndex + 1 < queue.count,
+              let queuedItem = gaplessNextItem else { return false }
+
+        let nextIndex = currentIndex + 1
+        let song = queue[nextIndex]
+        guard gaplessNextSongID == song.id else {
+            AppLogger.shared.log(
+                "Gapless handoff rejected: queued song id mismatch; expected=\(song.id); queued=\(gaplessNextSongID ?? "nil")",
+                category: .playback,
+                level: .warning
+            )
+            invalidatePreloadedNext()
+            return false
+        }
+
+        if player.currentItem === finishedItem {
+            player.advanceToNextItem()
+        }
+
+        guard let activeItem = player.currentItem, activeItem === queuedItem else {
+            AppLogger.shared.log(
+                "Gapless handoff fell back: queued item was not active for '\(song.title)'",
+                category: .playback,
+                level: .warning
+            )
+            invalidatePreloadedNext()
+            return false
+        }
+
+        currentIndex = nextIndex
+        currentPlayerItem = queuedItem
+        gaplessNextItem = nil
+        gaplessNextSongID = nil
+        if DownloadService.shared.localURL(for: song) != nil {
+            DownloadService.shared.markPlayed(song.id)
+        }
+        applyReplayGain(for: song)
+        currentSong = song
+        currentTime = 0
+        duration = 0
+        currentArtwork = nil
+        currentAnimatedArtwork = nil
+        currentLiveArtwork = nil
+        loggedSongIDs.remove(song.id)
+        if song.starred != nil { starredIDs.insert(song.id) }
+
+        AppLogger.shared.log(
+            "Gapless handoff active; title='\(song.title)'; index=\(currentIndex)",
+            category: .playback
+        )
+        updateNowPlaying()
+        artworkLoadTask?.cancel()
+        artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: song) }
+        durationLoadTask?.cancel()
+        durationLoadTask = Task { [weak self] in await self?.loadDuration(from: queuedItem) }
+        ensureAutoplayPreloadedIfNeeded()
+        warmUpcomingStreams()
+        if isPlaying, player.rate == 0 {
+            try? AVAudioSession.sharedInstance().setActive(true)
+            player.playImmediately(atRate: 1)
+        }
+        scheduleGaplessPreload()
+        return true
     }
 
     private func prepareTransitionPlanIfNeeded() {
@@ -1585,6 +1668,7 @@ final class AudioPlayer {
         let newTargetVolume = replayGainVolume(for: nextSong) * plan.volumeMatch
 
         activePlayer = newPlayer
+        currentPlayerItem = nextItem
         targetVolume = newTargetVolume
         currentIndex += 1
         currentSong = nextSong
@@ -1818,7 +1902,7 @@ final class AudioPlayer {
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
         AppLogger.shared.log(
-            "Playback duration was not ready after 6 seconds; songID=\(currentSong?.id ?? "none")",
+            "Playback duration was not ready after 6 seconds; songID=\(currentSong?.id ?? "none"); itemStatus=\(item.status.rawValue); itemError=\(item.error?.localizedDescription ?? "none"); isCurrent=\(item === player.currentItem); playerStatus=\(player.timeControlStatus.rawValue); waiting=\(String(describing: player.reasonForWaitingToPlay)); rate=\(String(format: "%.2f", player.rate))",
             category: .playback,
             level: .warning
         )
@@ -1826,20 +1910,20 @@ final class AudioPlayer {
 
     private func addTimeObservers() {
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
-        primaryTimeObserverToken = primaryPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+        primaryTimeObserverToken = primaryPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
                 guard self.activePlayer === self.primaryPlayer else { return }
-                self.currentTime = time.seconds
+                self.currentTime = self.player.currentTime().seconds
                 self.checkLogPlay()
                 self.checkScheduledTransition()
             }
         }
-        secondaryTimeObserverToken = secondaryPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+        secondaryTimeObserverToken = secondaryPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
                 guard self.activePlayer === self.secondaryPlayer else { return }
-                self.currentTime = time.seconds
+                self.currentTime = self.player.currentTime().seconds
                 self.checkLogPlay()
                 self.checkScheduledTransition()
             }
@@ -1868,7 +1952,9 @@ final class AudioPlayer {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 guard let finishedItem = note.object as? AVPlayerItem else { return }
-                if self.isTransitioning, finishedItem !== self.player.currentItem { return }
+                guard finishedItem === self.currentPlayerItem else {
+                    return
+                }
                 if self.sleepEndsAtTrackEnd {
                     self.player.pause()
                     self.isPlaying = false
@@ -1876,30 +1962,10 @@ final class AudioPlayer {
                     self.updateNowPlaying()
                     return
                 }
-                let gapless = UserDefaults.standard.string(forKey: "gaplessPlayback") ?? "off"
-                if gapless == "on",
-                   self.repeatMode == .off,
-                   self.currentIndex + 1 < self.queue.count {
-                    self.currentIndex += 1
-                    let song = self.queue[self.currentIndex]
-                    self.applyReplayGain(for: song)
-                    self.currentSong = song
-                    self.currentTime = 0
-                    self.duration = 0
-                    self.currentArtwork = nil
-                    self.currentAnimatedArtwork = nil
-                    self.currentLiveArtwork = nil
-                    self.loggedSongIDs.remove(song.id)
-                    if song.starred != nil { self.starredIDs.insert(song.id) }
-                    self.updateNowPlaying()
-                    Task { await self.loadArtwork(for: song) }
-                    if let item = self.player.currentItem {
-                        Task { await self.loadDuration(from: item) }
-                    }
-                    self.scheduleGaplessPreload()
-                } else {
-                    self.skipNext()
+                if self.completeQueuedGaplessHandoff(finishedItem: finishedItem) {
+                    return
                 }
+                self.skipNext()
             }
         }
     }

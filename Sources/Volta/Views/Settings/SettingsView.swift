@@ -39,6 +39,7 @@ private struct AccentIconLabelStyle: LabelStyle {
 struct SettingsView: View {
     @Environment(AppState.self) var appState
     @Environment(\.dismiss) var dismiss
+    @Environment(\.openURL) var openURL
 
     @AppStorage("infinitePlayStyle")   var infinitePlayStyle   = "random"
     @AppStorage("gaplessPlayback")     var gaplessPlayback     = "on"

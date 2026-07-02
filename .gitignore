@@ -7,3 +7,6 @@ discordbot/
 changelog/
 # full res sources
 img/*.png
+# xcode files
+xcuserdata/
+*.xcuserstate

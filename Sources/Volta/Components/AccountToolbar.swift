@@ -17,6 +17,7 @@ enum SettingsRoute: Hashable {
     case performanceOverlay
     case notifications
     case logs
+    case changelog
     case editConnection
     case serverInfo
 }
@@ -76,6 +77,8 @@ private struct SettingsDestinations: ViewModifier {
                 NotificationSettingsView()
             case .logs:
                 LogsView()
+            case .changelog:
+                ChangelogSettingsView()
             case .editConnection:
                 EditConnectionView()
             case .serverInfo:
