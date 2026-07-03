@@ -16,6 +16,9 @@ struct MainTabView: View {
     @State private var searchPath = NavigationPath()
 
     private var audio: AudioPlayer { appState.audioPlayer }
+    private var shouldShowMiniPlayer: Bool {
+        audio.hasActivePlaybackSession && audio.currentSong != nil
+    }
     private var tabSelection: Binding<Int> {
         Binding(
             get: { selectedTab },
@@ -68,19 +71,18 @@ struct MainTabView: View {
     }
 
     @available(iOS 26.0, *)
-    private var modernTabs: some View {
-        modernTabView
-            .tabViewBottomAccessory {
-                modernMiniPlayerAccessory
-            }
-    }
-
     @ViewBuilder
-    private var modernMiniPlayerAccessory: some View {
-        if audio.currentSong != nil {
-            MiniPlayerAccessory(onExpand: presentNowPlaying)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 2)
+    private var modernTabs: some View {
+        if #available(iOS 26.1, *) {
+            modernTabView
+                .tabViewBottomAccessory(isEnabled: shouldShowMiniPlayer) {
+                    modernMiniPlayerAccessory
+                }
+        } else {
+            modernTabView
+                .modifier(ModernMiniPlayerModifier(shouldShow: shouldShowMiniPlayer) {
+                    modernMiniPlayerAccessory
+                })
         }
     }
 
@@ -103,8 +105,15 @@ struct MainTabView: View {
                 SearchView(path: $searchPath)
             }
         }
-        .tabBarMinimizeBehavior(audio.currentSong != nil ? .onScrollDown : .automatic)
+        .tabBarMinimizeBehavior(.onScrollDown)
         .tint(Theme.accent)
+    }
+
+    @ViewBuilder
+    private var modernMiniPlayerAccessory: some View {
+        MiniPlayerAccessory(onExpand: presentNowPlaying)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 2)
     }
 
     private var legacyTabs: some View {
@@ -151,7 +160,7 @@ struct MainTabView: View {
 
     @ViewBuilder
     private var legacyMiniPlayer: some View {
-        if audio.currentSong != nil {
+        if shouldShowMiniPlayer {
             MiniPlayerAccessory(onExpand: presentNowPlaying)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -171,6 +180,23 @@ struct MainTabView: View {
         // No overshoot so the player settles on open without bouncing.
         withAnimation(.smooth(duration: 0.4)) {
             showNowPlaying = true
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+private struct ModernMiniPlayerModifier<Accessory: View>: ViewModifier {
+    let shouldShow: Bool
+    @ViewBuilder var accessory: () -> Accessory
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if shouldShow {
+            content.tabViewBottomAccessory {
+                accessory()
+            }
+        } else {
+            content
         }
     }
 }
