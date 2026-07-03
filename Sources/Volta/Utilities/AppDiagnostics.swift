@@ -44,7 +44,7 @@ enum AppDiagnostics {
         [
             "TabDecision",
             "shell=\(availability26() ? "modern-iOS26" : "legacy-fallback")",
-            "mini=\(availability261() ? "tabViewBottomAccessory" : "safeAreaInset")",
+            "mini=\(availability26() ? "tabViewBottomAccessory" : "safeAreaInset")",
             "ios26=\(availability26())",
             "ios261=\(availability261())",
             "systemVersion=\(UIDevice.current.systemVersion)",

@@ -215,6 +215,7 @@ enum AutoMixTempo {
 @Observable
 final class AudioPlayer {
     private(set) var currentSong: Song?
+    private(set) var hasActivePlaybackSession = false
     private(set) var isPlaying = false
     private(set) var currentTime: TimeInterval = 0
     private(set) var duration: TimeInterval = 0
@@ -549,6 +550,7 @@ final class AudioPlayer {
         gaplessNextItem = nil
         gaplessNextSongID = nil
         isPlaying = false
+        hasActivePlaybackSession = false
         currentSong = nil
         currentArtwork = nil
         currentAnimatedArtwork = nil
@@ -1121,6 +1123,7 @@ final class AudioPlayer {
         try? AVAudioSession.sharedInstance().setActive(true)
         player.playImmediately(atRate: 1)
         applyReplayGain(for: song)
+        hasActivePlaybackSession = true
         currentSong = song
         isPlaying = true
         currentTime = 0
@@ -1229,6 +1232,7 @@ final class AudioPlayer {
             DownloadService.shared.markPlayed(song.id)
         }
         applyReplayGain(for: song)
+        hasActivePlaybackSession = true
         currentSong = song
         currentTime = 0
         duration = 0
@@ -1671,6 +1675,7 @@ final class AudioPlayer {
         currentPlayerItem = nextItem
         targetVolume = newTargetVolume
         currentIndex += 1
+        hasActivePlaybackSession = true
         currentSong = nextSong
         isPlaying = true
         currentTime = incomingStart
