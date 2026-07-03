@@ -10,6 +10,8 @@ struct ServerRecord: Codable, Identifiable, Hashable {
     var cellularUsername: String?
     var username: String
     var isCurrent: Bool
+    var isDefault: Bool
+    var isFallback: Bool
     var addedAt: Date
     // Server protocol for this connection.
     var backend: MusicBackendKind
@@ -21,6 +23,8 @@ struct ServerRecord: Codable, Identifiable, Hashable {
          cellularUsername: String? = nil,
          username: String,
          isCurrent: Bool = false,
+         isDefault: Bool = false,
+         isFallback: Bool = false,
          addedAt: Date = .now,
          backend: MusicBackendKind = .subsonic) {
         self.id = id
@@ -30,16 +34,18 @@ struct ServerRecord: Codable, Identifiable, Hashable {
         self.cellularUsername = cellularUsername
         self.username = username
         self.isCurrent = isCurrent
+        self.isDefault = isDefault
+        self.isFallback = isFallback
         self.addedAt = addedAt
         self.backend = backend
     }
 
     enum CodingKeys: String, CodingKey {
         case id, displayName, urlString, cellularURLString, cellularUsername
-        case username, isCurrent, addedAt, backend
+        case username, isCurrent, isDefault, isFallback, addedAt, backend
     }
 
-    // Older servers.json files have no backend key.
+    // Older servers.json files have no backend/default/fallback keys.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -49,6 +55,8 @@ struct ServerRecord: Codable, Identifiable, Hashable {
         cellularUsername = try c.decodeIfPresent(String.self, forKey: .cellularUsername)
         username = try c.decode(String.self, forKey: .username)
         isCurrent = try c.decode(Bool.self, forKey: .isCurrent)
+        isDefault = try c.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+        isFallback = try c.decodeIfPresent(Bool.self, forKey: .isFallback) ?? false
         addedAt = try c.decode(Date.self, forKey: .addedAt)
         backend = try c.decodeIfPresent(MusicBackendKind.self, forKey: .backend) ?? .subsonic
     }

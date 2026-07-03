@@ -41,10 +41,16 @@ final class AppState {
             self?.handleNetworkChange(cellular: conn == .cellular)
         }
         let cellular = NetworkMonitor.shared.isCellular
-        if let record = store.currentServer(), let config = store.config(for: record, cellular: cellular) {
+        let candidates = store.startupServers()
+        if let restored = candidates.compactMap({ record -> (ServerRecord, SubsonicConfig)? in
+            guard let config = store.config(for: record, cellular: cellular) else { return nil }
+            return (record, config)
+        }).first {
+            let (record, config) = restored
             AppLogger.shared.log("Stored session found; server=\(record.displayName); cellular=\(cellular)", category: .networking)
+            store.setCurrent(record)
             activeIsCellular = cellular
-            activate(config: config, record: record)
+            activate(config: config, record: store.currentServer() ?? record, allowFallback: true)
             phase = .authenticated
         } else {
             AppLogger.shared.log("No stored session; showing login", category: .other)
@@ -86,7 +92,7 @@ final class AppState {
         // Rebuild only when the effective base URL changes.
         guard config != client?.config else { return }
         AppLogger.shared.log("Network URL switching to \(activeIsCellular ? "cellular" : "Wi-Fi"): \(config.baseURL.absoluteString)", category: .networking)
-        activate(config: config, record: record)
+        activate(config: config, record: record, allowFallback: true)
     }
 
     func logout() {
@@ -104,10 +110,29 @@ final class AppState {
         store.allServers()
     }
 
+    func defaultServer() -> ServerRecord? {
+        store.defaultServer()
+    }
+
+    func fallbackServer() -> ServerRecord? {
+        store.fallbackServer()
+    }
+
+    func setDefaultServer(_ record: ServerRecord) {
+        _ = store.setDefault(record)
+        refreshCurrentServerFromStore()
+    }
+
+    func setFallbackServer(_ record: ServerRecord?) {
+        _ = store.setFallback(record)
+        refreshCurrentServerFromStore()
+    }
+
     func removeServer(_ record: ServerRecord) {
         // Never delete the server we're currently connected to.
         guard record.id != currentServer?.id else { return }
         store.remove(record)
+        refreshCurrentServerFromStore()
     }
 
     func switchTo(_ record: ServerRecord) {
@@ -128,7 +153,7 @@ final class AppState {
         phase = .authenticated
     }
 
-    private func activate(config: SubsonicConfig, record: ServerRecord) {
+    private func activate(config: SubsonicConfig, record: ServerRecord, allowFallback: Bool = false) {
         currentServer = record
         sharingAvailable = false
         AppLogger.shared.log("Activating server: \(record.displayName) [\(record.backend.rawValue)]", category: .networking)
@@ -137,25 +162,79 @@ final class AppState {
         activationID = token
         Task {
             let started = ProcessInfo.processInfo.systemUptime
-            let service = try? await MusicServiceFactory.make(config: config, kind: record.backend)
-            guard activationID == token else {
-                AppLogger.shared.log("Server activation superseded; server=\(record.displayName)", category: .networking)
-                return
-            }
-            guard let service else {
+            do {
+                let service = try await MusicServiceFactory.make(config: config, kind: record.backend)
+                guard activationID == token else {
+                    AppLogger.shared.log("Server activation superseded; server=\(record.displayName)", category: .networking)
+                    return
+                }
+                if await shouldUseFallback(afterBuilding: service, record: record, allowFallback: allowFallback),
+                   beginFallbackActivation(from: record, reason: "primary health check failed") {
+                    return
+                }
+                finishActivation(service: service, config: config, record: record, started: started)
+            } catch {
+                guard activationID == token else {
+                    AppLogger.shared.log("Server activation superseded; server=\(record.displayName)", category: .networking)
+                    return
+                }
+                if beginFallbackActivation(from: record, reason: "primary activation failed") {
+                    return
+                }
                 AppLogger.shared.log("Server activation failed: \(record.displayName)", category: .networking, level: .error)
                 return
             }
-            client = service
-            audioPlayer.updateClient(service)
-            IntentBridge.shared.setup(client: service, audioPlayer: audioPlayer)
-            AppLogger.shared.log(
-                "Server activated; server=\(record.displayName); backend=\(record.backend.rawValue); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
-                category: .networking
-            )
-            // Probe sharing and warm Home in the background.
-            Task { sharingAvailable = await service.sharingAvailable() }
-            Task { await homeViewModel.load(appState: self) }
         }
+    }
+
+    private func finishActivation(service: any MusicService, config: SubsonicConfig, record: ServerRecord, started: TimeInterval) {
+        var activeRecord = record
+        if record.backend == .plex, service.config != config {
+            activeRecord = store.update(
+                record: record,
+                config: service.config,
+                displayName: record.displayName,
+                backend: record.backend
+            )
+            currentServer = activeRecord
+        }
+        client = service
+        audioPlayer.updateClient(service)
+        IntentBridge.shared.setup(client: service, audioPlayer: audioPlayer)
+        AppLogger.shared.log(
+            "Server activated; server=\(activeRecord.displayName); backend=\(activeRecord.backend.rawValue); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+            category: .networking
+        )
+        // Probe sharing and warm Home in the background.
+        Task { sharingAvailable = await service.sharingAvailable() }
+        Task { await homeViewModel.load(appState: self) }
+    }
+
+    private func shouldUseFallback(afterBuilding service: any MusicService, record: ServerRecord, allowFallback: Bool) async -> Bool {
+        guard allowFallback,
+              NetworkMonitor.shared.connection != .none,
+              store.fallbackServer(excluding: record) != nil else { return false }
+        do {
+            try await service.ping()
+            return false
+        } catch {
+            AppLogger.shared.log("Primary server health check failed; server=\(record.displayName)", category: .networking, level: .error)
+            return true
+        }
+    }
+
+    private func beginFallbackActivation(from record: ServerRecord, reason: String) -> Bool {
+        guard NetworkMonitor.shared.connection != .none,
+              let fallback = store.fallbackServer(excluding: record),
+              let config = store.config(for: fallback, cellular: activeIsCellular) else { return false }
+        AppLogger.shared.log("Trying fallback server; from=\(record.displayName); fallback=\(fallback.displayName); reason=\(reason)", category: .networking)
+        store.setCurrent(fallback)
+        activate(config: config, record: store.currentServer() ?? fallback, allowFallback: false)
+        return true
+    }
+
+    private func refreshCurrentServerFromStore() {
+        guard let currentServer else { return }
+        self.currentServer = store.allServers().first { $0.id == currentServer.id }
     }
 }

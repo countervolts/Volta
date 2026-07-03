@@ -13,6 +13,11 @@ final class LoginViewModel {
         case unreachable
     }
 
+    enum ConnectionResult: Equatable {
+        case completed
+        case needsInsecureHTTPConfirmation
+    }
+
     // nil while choosing a service.
     var selectedBackend: MusicBackendKind?
 
@@ -24,9 +29,11 @@ final class LoginViewModel {
     private(set) var isPlexHostedSigningIn = false
     private(set) var serverError: String?
     private(set) var credentialsError: String?
+    private(set) var didCompleteLogin = false
 
     private(set) var reachability: ServerReachability = .idle
     @ObservationIgnored private var reachabilityTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingPlexHostedToken: String?
 
     // incremented to retrigger the shake animation on the relevant fields.
     private(set) var serverShake = 0
@@ -66,6 +73,7 @@ final class LoginViewModel {
         selectedBackend = backend
         serverError = nil
         credentialsError = nil
+        pendingPlexHostedToken = nil
     }
 
     func deselect() {
@@ -74,6 +82,7 @@ final class LoginViewModel {
         credentialsError = nil
         reachabilityTask?.cancel()
         reachability = .idle
+        pendingPlexHostedToken = nil
     }
 
     // Prefill the public demo for the selected backend so people can explore
@@ -96,6 +105,7 @@ final class LoginViewModel {
     // the host answers (and on which scheme) without touching credentials.
     func serverAddressChanged() {
         reachabilityTask?.cancel()
+        pendingPlexHostedToken = nil
         let address = serverAddress
         let candidates = SubsonicConfig.candidateURLs(from: address)
         guard !candidates.isEmpty else {
@@ -137,33 +147,51 @@ final class LoginViewModel {
         }
     }
 
-    func connect(using appState: AppState) async {
-        guard !isConnecting, let kind = selectedBackend else { return }
+    @discardableResult
+    func connect(using appState: AppState, allowInsecureHTTP: Bool = false) async -> ConnectionResult {
+        guard !isConnecting, let kind = selectedBackend else { return .completed }
+        didCompleteLogin = false
         serverError = nil
         credentialsError = nil
 
+        let address = serverAddress
         let candidates = SubsonicConfig.candidateURLs(from: serverAddress)
         guard !candidates.isEmpty else {
             failServer()
-            return
+            return .completed
+        }
+        guard !needsImmediateInsecureHTTPConfirmation(candidates: candidates, allowInsecureHTTP: allowInsecureHTTP) else {
+            return .needsInsecureHTTPConfirmation
+        }
+        let credentialCandidates = candidatesForCredentialProbe(candidates, allowInsecureHTTP: allowInsecureHTTP)
+        guard !credentialCandidates.isEmpty else {
+            failServer()
+            return .completed
         }
 
         isConnecting = true
         defer { isConnecting = false }
 
         do {
-            let config = try await probe(candidates: candidates, kind: kind) {
+            let config = try await probe(candidates: credentialCandidates, kind: kind) {
                 SubsonicConfig(baseURL: $0, username: username, password: password)
             }
-            warnIfInsecureFallback(config.baseURL)
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             appState.completeLogin(config: config, kind: kind)
+            didCompleteLogin = true
+            return .completed
         } catch ProbeFailure.authFailure {
             failCredentials()
+            return .completed
         } catch ProbeFailure.unreachable(let error) {
+            if await shouldOfferInsecureHTTPFallback(candidates: candidates, address: address, allowInsecureHTTP: allowInsecureHTTP) {
+                return .needsInsecureHTTPConfirmation
+            }
             failServer(message: error?.errorDescription)
+            return .completed
         } catch {
             failServer()
+            return .completed
         }
     }
 
@@ -182,8 +210,7 @@ final class LoginViewModel {
         for url in candidates {
             let config = makeConfig(url)
             do {
-                try await AuthService.validate(config: config, kind: kind, session: Self.probeSession)
-                return config
+                return try await AuthService.validate(config: config, kind: kind, session: Self.probeSession)
             } catch let error as SubsonicError {
                 if error.isAuthFailure { throw ProbeFailure.authFailure }
                 lastError = error
@@ -194,50 +221,110 @@ final class LoginViewModel {
         throw ProbeFailure.unreachable(lastError)
     }
 
-    // When the user gave no scheme and we ended up connecting over http, surface
-    // a one-off warning. Explicit http:// is already warned about before connecting.
-    private func warnIfInsecureFallback(_ url: URL) {
-        guard url.scheme?.lowercased() == "http",
-              !SubsonicConfig.hasExplicitScheme(serverAddress) else { return }
-        VoltaNotificationCenter.shared.post(L(.http_warning_title), tone: .warning)
+    private func candidatesForCredentialProbe(_ candidates: [URL], allowInsecureHTTP: Bool) -> [URL] {
+        guard !allowInsecureHTTP,
+              !SubsonicConfig.hasExplicitScheme(serverAddress) else {
+            return candidates
+        }
+        return candidates.filter { $0.scheme?.lowercased() != "http" }
     }
 
-    func signInWithPlex(using appState: AppState, openAuthURL: @escaping (URL) -> Void) async {
-        guard canStartPlexHostedSignIn else { return }
+    private func needsImmediateInsecureHTTPConfirmation(candidates: [URL], allowInsecureHTTP: Bool) -> Bool {
+        !allowInsecureHTTP
+            && SubsonicConfig.hasExplicitScheme(serverAddress)
+            && candidates.contains { $0.scheme?.lowercased() == "http" }
+    }
+
+    private func shouldOfferInsecureHTTPFallback(
+        candidates: [URL],
+        address: String,
+        allowInsecureHTTP: Bool
+    ) async -> Bool {
+        guard !allowInsecureHTTP,
+              !SubsonicConfig.hasExplicitScheme(address),
+              address == serverAddress,
+              let httpURL = candidates.first(where: { $0.scheme?.lowercased() == "http" }) else {
+            return false
+        }
+        guard await Self.hostResponds(httpURL), address == serverAddress else { return false }
+        reachability = .reachable(insecure: true)
+        return true
+    }
+
+    func cancelInsecureHTTPContinuation() {
+        pendingPlexHostedToken = nil
+    }
+
+    @discardableResult
+    func signInWithPlex(
+        using appState: AppState,
+        allowInsecureHTTP: Bool = false,
+        openAuthURL: @escaping (URL) -> Void
+    ) async -> ConnectionResult {
+        guard canStartPlexHostedSignIn || pendingPlexHostedToken != nil else { return .completed }
+        didCompleteLogin = false
         serverError = nil
         credentialsError = nil
 
+        let address = serverAddress
         let candidates = SubsonicConfig.candidateURLs(from: serverAddress)
         guard !candidates.isEmpty else {
             failServer()
-            return
+            return .completed
+        }
+        guard !needsImmediateInsecureHTTPConfirmation(candidates: candidates, allowInsecureHTTP: allowInsecureHTTP) else {
+            return .needsInsecureHTTPConfirmation
+        }
+        let credentialCandidates = candidatesForCredentialProbe(candidates, allowInsecureHTTP: allowInsecureHTTP)
+        guard !credentialCandidates.isEmpty else {
+            failServer()
+            return .completed
         }
 
         isPlexHostedSigningIn = true
         defer { isPlexHostedSigningIn = false }
 
         do {
-            let authSession = try await PlexHostedAuth.start()
-            openAuthURL(authSession.authURL)
-            VoltaNotificationCenter.shared.post(L(.plex_finish_sign_in), tone: .info)
+            let token: String
+            if let pendingPlexHostedToken {
+                token = pendingPlexHostedToken
+            } else {
+                let authSession = try await PlexHostedAuth.start()
+                openAuthURL(authSession.authURL)
+                VoltaNotificationCenter.shared.post(L(.plex_finish_sign_in), tone: .info)
+                token = try await PlexHostedAuth.waitForToken(session: authSession)
+                pendingPlexHostedToken = token
+            }
 
-            let token = try await PlexHostedAuth.waitForToken(session: authSession)
             isConnecting = true
             defer { isConnecting = false }
-            let config = try await probe(candidates: candidates, kind: .plex) {
-                SubsonicConfig(baseURL: $0, username: "Plex", password: token)
+            let config = try await probe(candidates: credentialCandidates, kind: .plex) {
+                SubsonicConfig(baseURL: $0, username: PlexClient.tokenUsername, password: token)
             }
-            warnIfInsecureFallback(config.baseURL)
+            pendingPlexHostedToken = nil
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             appState.completeLogin(config: config, kind: .plex)
+            didCompleteLogin = true
+            return .completed
         } catch PlexHostedAuth.AuthError.timedOut {
+            pendingPlexHostedToken = nil
             failCredentials(message: L(.error_plex_timeout))
+            return .completed
         } catch ProbeFailure.authFailure {
+            pendingPlexHostedToken = nil
             failCredentials()
+            return .completed
         } catch ProbeFailure.unreachable(let error) {
+            if await shouldOfferInsecureHTTPFallback(candidates: candidates, address: address, allowInsecureHTTP: allowInsecureHTTP) {
+                return .needsInsecureHTTPConfirmation
+            }
+            pendingPlexHostedToken = nil
             failServer(message: error?.errorDescription)
+            return .completed
         } catch {
+            pendingPlexHostedToken = nil
             failCredentials(message: L(.error_plex_failed))
+            return .completed
         }
     }
 

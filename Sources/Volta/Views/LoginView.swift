@@ -3,16 +3,21 @@ import SafariServices
 import UIKit
 
 struct LoginView: View {
+    var onLoginComplete: () -> Void = {}
+    var isEmbeddedInSheet = false
+
     @Environment(AppState.self) private var appState
     @State private var vm = LoginViewModel()
     @State private var localization = LocalizationManager.shared
     @State private var appeared = false
     @State private var showHTTPWarning = false
+    @State private var pendingHTTPWarningAction: HTTPWarningAction = .credentials
     @State private var isPasswordVisible = false
     @State private var plexAuthPage: SafariPage?
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable { case server, username, password }
+    private enum HTTPWarningAction { case credentials, plexHosted }
 
     var body: some View {
         @Bindable var vm = vm
@@ -41,14 +46,18 @@ struct LoginView: View {
             if vm.selectedBackend != nil { backButton }
         }
         .overlay(alignment: .topTrailing) {
-            if vm.selectedBackend == nil { languageMenu }
+            if vm.selectedBackend == nil && !isEmbeddedInSheet { languageMenu }
         }
         .preferredColorScheme(Theme.colorScheme)
-        .opacity(appeared ? 1 : 0)
-        .offset(y: appeared ? 0 : 24)
+        .opacity(isEmbeddedInSheet || appeared ? 1 : 0)
+        .offset(y: isEmbeddedInSheet || appeared ? 0 : 24)
         .onAppear {
-            withAnimation(.spring(response: 0.7, dampingFraction: 0.85)) {
+            if isEmbeddedInSheet {
                 appeared = true
+            } else {
+                withAnimation(.spring(response: 0.7, dampingFraction: 0.85)) {
+                    appeared = true
+                }
             }
         }
         .onChange(of: vm.serverAddress) { vm.serverAddressChanged() }
@@ -61,9 +70,12 @@ struct LoginView: View {
             }
         }
         .alert(L(.http_warning_title), isPresented: $showHTTPWarning) {
-            Button(L(.action_edit_server), role: .cancel) {}
+            Button(L(.action_edit_server), role: .cancel) {
+                vm.cancelInsecureHTTPContinuation()
+            }
             Button(L(.action_continue), role: .destructive) {
-                Task { await vm.connect(using: appState) }
+                let action = pendingHTTPWarningAction
+                Task { await continueAfterHTTPWarning(action) }
             }
         } message: {
             Text(L(.http_warning_message))
@@ -147,7 +159,7 @@ struct LoginView: View {
                     .padding(.top, 2)
             }
             .padding(.horizontal, 24)
-            .padding(.top, 72)
+            .padding(.top, isEmbeddedInSheet ? 28 : 72)
             .padding(.bottom, 40)
             .frame(maxWidth: .infinity)
         }
@@ -305,7 +317,7 @@ struct LoginView: View {
                 }
             }
             .padding(.horizontal, 28)
-            .padding(.top, 64)   // clears the back button overlaid at the top
+            .padding(.top, isEmbeddedInSheet ? 56 : 64)   // clears the back button overlaid at the top
             .padding(.bottom, 40)
             .frame(maxWidth: .infinity)
         }
@@ -319,10 +331,11 @@ struct LoginView: View {
     private func plexHostedSignInButton(tint: Color) -> some View {
         Button {
             Task {
-                await vm.signInWithPlex(using: appState) { url in
+                let result = await vm.signInWithPlex(using: appState) { url in
                     plexAuthPage = SafariPage(url: url)
                 }
                 plexAuthPage = nil
+                handleConnectionResult(result, warningAction: .plexHosted)
             }
         } label: {
             HStack(spacing: 8) {
@@ -374,9 +387,39 @@ struct LoginView: View {
         guard vm.canSubmit else { return }
         focusedField = nil
         if vm.usesInsecureHTTP {
-            showHTTPWarning = true
+            showHTTPWarning(for: .credentials)
         } else {
-            Task { await vm.connect(using: appState) }
+            Task {
+                let result = await vm.connect(using: appState)
+                handleConnectionResult(result, warningAction: .credentials)
+            }
+        }
+    }
+
+    private func showHTTPWarning(for action: HTTPWarningAction) {
+        pendingHTTPWarningAction = action
+        showHTTPWarning = true
+    }
+
+    private func continueAfterHTTPWarning(_ action: HTTPWarningAction) async {
+        let result: LoginViewModel.ConnectionResult
+        switch action {
+        case .credentials:
+            result = await vm.connect(using: appState, allowInsecureHTTP: true)
+        case .plexHosted:
+            result = await vm.signInWithPlex(using: appState, allowInsecureHTTP: true) { url in
+                plexAuthPage = SafariPage(url: url)
+            }
+            plexAuthPage = nil
+        }
+        handleConnectionResult(result, warningAction: action)
+    }
+
+    private func handleConnectionResult(_ result: LoginViewModel.ConnectionResult, warningAction: HTTPWarningAction) {
+        if result == .needsInsecureHTTPConfirmation {
+            showHTTPWarning(for: warningAction)
+        } else if vm.didCompleteLogin {
+            onLoginComplete()
         }
     }
 
@@ -386,7 +429,10 @@ struct LoginView: View {
             // Connect directly: demo URLs are https and some (Jellyfin) use an
             // empty password, which the normal canSubmit gate would reject.
             guard vm.fillDemoServer() else { return }
-            Task { await vm.connect(using: appState) }
+            Task {
+                let result = await vm.connect(using: appState)
+                handleConnectionResult(result, warningAction: .credentials)
+            }
         } label: {
             Text(L(.login_try_demo))
                 .font(.system(size: 14, weight: .medium))
@@ -422,18 +468,25 @@ struct LoginView: View {
     // MARK: - Backdrop
 
     // soft color wash behind the form, tinted to the selected service's brand color.
+    @ViewBuilder
     private var backdrop: some View {
         let tint = vm.selectedBackend.flatMap { Self.option(for: $0)?.tint } ?? Theme.accent
-        return RadialGradient(
+        let gradient = RadialGradient(
             colors: [tint.opacity(0.30), .clear],
             center: .top,
             startRadius: 0,
             endRadius: 460
         )
         .ignoresSafeArea()
-        .scaleEffect(appeared ? 1 : 1.3)
-        .animation(.easeOut(duration: 0.5), value: vm.selectedBackend)
-        .animation(.easeOut(duration: 1.2), value: appeared)
+        .scaleEffect(isEmbeddedInSheet ? 1 : (appeared ? 1 : 1.3))
+
+        if isEmbeddedInSheet {
+            gradient
+        } else {
+            gradient
+                .animation(.easeOut(duration: 0.5), value: vm.selectedBackend)
+                .animation(.easeOut(duration: 1.2), value: appeared)
+        }
     }
 
     // MARK: - Field
@@ -603,7 +656,7 @@ struct LoginView: View {
             serverPlaceholder: "http://192.168.1.10:32400",
             usernamePlaceholder: "Plex account email",
             passwordPlaceholder: "Password or Plex token",
-            hint: "Use hosted Plex sign-in for Google, Apple, or 2FA. You can also enter your Plex email and password, or paste an X-Plex-Token."
+            hint: "Use hosted Plex sign-in for Google, Apple, or 2FA. You can also enter your Plex email and password. For a raw X-Plex-Token, use Plex as the username."
         ),
     ]
 

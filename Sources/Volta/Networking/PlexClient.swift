@@ -25,6 +25,7 @@ final class PlexClient: MusicService, @unchecked Sendable {
 
     static let product = "Volta"
     static let version = "1.0"
+    static let tokenUsername = "Plex"
 
     init(config: SubsonicConfig, token: String, clientId: String, machineId: String,
          sectionKey: String, session: URLSession) {
@@ -41,18 +42,17 @@ final class PlexClient: MusicService, @unchecked Sendable {
     static func connect(config: SubsonicConfig, session: URLSession = .shared) async throws -> PlexClient {
         let clientId = Self.clientID()
 
-        // 1) password may already be an X-Plex-Token.
-        var token: String?
-        if let candidate = config.password.nonBlank,
-           await Self.tokenWorks(candidate, baseURL: config.baseURL, clientId: clientId, session: session) {
+        let token: String
+        if config.username.caseInsensitiveCompare(Self.tokenUsername) == .orderedSame {
+            guard let candidate = config.password.nonBlank,
+                  await Self.tokenWorks(candidate, baseURL: config.baseURL, clientId: clientId, session: session) else {
+                throw SubsonicError.invalidCredentials
+            }
             token = candidate
-        }
-        // 2) otherwise mint one through plex.tv.
-        if token == nil {
+        } else {
             token = try await Self.plexSignIn(login: config.username, password: config.password,
-                                              clientId: clientId, session: session)
+                                             clientId: clientId, session: session)
         }
-        guard let token else { throw SubsonicError.invalidCredentials }
 
         let machineId = try await Self.serverMachineId(baseURL: config.baseURL, token: token,
                                                        clientId: clientId, session: session)
@@ -60,7 +60,8 @@ final class PlexClient: MusicService, @unchecked Sendable {
                                                              clientId: clientId, session: session) else {
             throw SubsonicError.server(code: 0, message: "No music library found on this Plex server")
         }
-        return PlexClient(config: config, token: token, clientId: clientId, machineId: machineId,
+        let tokenConfig = SubsonicConfig(baseURL: config.baseURL, username: Self.tokenUsername, password: token)
+        return PlexClient(config: tokenConfig, token: token, clientId: clientId, machineId: machineId,
                           sectionKey: section, session: session)
     }
 
