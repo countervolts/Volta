@@ -28,7 +28,7 @@ struct ArtistEntity: AppEntity {
 
 struct ArtistEntityQuery: EntityStringQuery {
     func entities(for identifiers: [String]) async throws -> [ArtistEntity] {
-        guard let client = IntentBridge.shared.client else { return [] }
+        guard let client = await IntentBridge.shared.readyClient() else { return [] }
         var matches: [ArtistEntity] = []
         for id in identifiers where !id.isEmpty {
             if let artist = try? await client.artist(id: id) {
@@ -39,7 +39,7 @@ struct ArtistEntityQuery: EntityStringQuery {
     }
 
     func entities(matching string: String) async throws -> [ArtistEntity] {
-        guard let client = IntentBridge.shared.client else { return [] }
+        guard let client = await IntentBridge.shared.readyClient() else { return [] }
         let (artists, _, _) = try await client.search(
             query: string, artistCount: 8, albumCount: 0, songCount: 0
         )
@@ -61,7 +61,7 @@ struct SongEntity: AppEntity {
 
 struct SongEntityQuery: EntityStringQuery {
     func entities(for identifiers: [String]) async throws -> [SongEntity] {
-        guard let client = IntentBridge.shared.client else { return [] }
+        guard let client = await IntentBridge.shared.readyClient() else { return [] }
         var matches: [SongEntity] = []
         for id in identifiers where !id.isEmpty {
             if let song = try? await client.song(id: id) {
@@ -72,7 +72,7 @@ struct SongEntityQuery: EntityStringQuery {
     }
 
     func entities(matching string: String) async throws -> [SongEntity] {
-        guard let client = IntentBridge.shared.client else { return [] }
+        guard let client = await IntentBridge.shared.readyClient() else { return [] }
         let (_, _, songs) = try await client.search(
             query: string, artistCount: 0, albumCount: 0, songCount: 8
         )
@@ -94,7 +94,7 @@ struct AlbumEntity: AppEntity {
 
 struct AlbumEntityQuery: EntityStringQuery {
     func entities(for identifiers: [String]) async throws -> [AlbumEntity] {
-        guard let client = IntentBridge.shared.client else { return [] }
+        guard let client = await IntentBridge.shared.readyClient() else { return [] }
         var matches: [AlbumEntity] = []
         for id in identifiers where !id.isEmpty {
             if let album = try? await client.album(id: id) {
@@ -105,7 +105,7 @@ struct AlbumEntityQuery: EntityStringQuery {
     }
 
     func entities(matching string: String) async throws -> [AlbumEntity] {
-        guard let client = IntentBridge.shared.client else { return [] }
+        guard let client = await IntentBridge.shared.readyClient() else { return [] }
         let (_, albums, _) = try await client.search(
             query: string, artistCount: 0, albumCount: 8, songCount: 0
         )
@@ -124,14 +124,14 @@ struct PlaylistEntity: AppEntity {
 
 struct PlaylistEntityQuery: EntityStringQuery {
     func entities(for identifiers: [String]) async throws -> [PlaylistEntity] {
-        guard let client = IntentBridge.shared.client else { return [] }
+        guard let client = await IntentBridge.shared.readyClient() else { return [] }
         let ids = Set(identifiers)
         let all = (try? await client.playlists()) ?? []
         return all.filter { ids.contains($0.id) }.map { PlaylistEntity(id: $0.id, name: $0.name) }
     }
 
     func entities(matching string: String) async throws -> [PlaylistEntity] {
-        guard let client = IntentBridge.shared.client else { return [] }
+        guard let client = await IntentBridge.shared.readyClient() else { return [] }
         let all = (try? await client.playlists()) ?? []
         return all
             .filter { $0.name.localizedCaseInsensitiveContains(string) }
@@ -141,7 +141,7 @@ struct PlaylistEntityQuery: EntityStringQuery {
 
 // MARK: - Play Artist
 
-struct PlayArtistIntent: AppIntent {
+struct PlayArtistIntent: AudioPlaybackIntent {
     static var title: LocalizedStringResource = "Play Artist"
     static var description = IntentDescription("Play music from an artist in Volta")
     static var openAppWhenRun: Bool = false
@@ -150,7 +150,7 @@ struct PlayArtistIntent: AppIntent {
     var artist: ArtistEntity
 
     func perform() async throws -> some ProvidesDialog {
-        guard let client = IntentBridge.shared.client else {
+        guard let client = await IntentBridge.shared.readyClient() else {
             throw VoltaIntentError.notAuthenticated
         }
         let songs = (try? await client.topSongs(artistName: artist.name, count: 25)) ?? []
@@ -171,7 +171,7 @@ struct PlayArtistIntent: AppIntent {
 
 // MARK: - Play Song
 
-struct PlaySongIntent: AppIntent {
+struct PlaySongIntent: AudioPlaybackIntent {
     static var title: LocalizedStringResource = "Play Song"
     static var description = IntentDescription("Play a specific song in Volta")
     static var openAppWhenRun: Bool = false
@@ -180,7 +180,7 @@ struct PlaySongIntent: AppIntent {
     var song: SongEntity
 
     func perform() async throws -> some ProvidesDialog {
-        guard let client = IntentBridge.shared.client else {
+        guard let client = await IntentBridge.shared.readyClient() else {
             throw VoltaIntentError.notAuthenticated
         }
         guard let full = try? await client.song(id: song.id) else {
@@ -193,7 +193,7 @@ struct PlaySongIntent: AppIntent {
 
 // MARK: - Play Album
 
-struct PlayAlbumIntent: AppIntent {
+struct PlayAlbumIntent: AudioPlaybackIntent {
     static var title: LocalizedStringResource = "Play Album"
     static var description = IntentDescription("Play an album in Volta")
     static var openAppWhenRun: Bool = false
@@ -202,7 +202,7 @@ struct PlayAlbumIntent: AppIntent {
     var album: AlbumEntity
 
     func perform() async throws -> some ProvidesDialog {
-        guard let client = IntentBridge.shared.client else {
+        guard let client = await IntentBridge.shared.readyClient() else {
             throw VoltaIntentError.notAuthenticated
         }
         guard let full = try? await client.album(id: album.id),
@@ -216,7 +216,7 @@ struct PlayAlbumIntent: AppIntent {
 
 // MARK: - Play Playlist
 
-struct PlayPlaylistIntent: AppIntent {
+struct PlayPlaylistIntent: AudioPlaybackIntent {
     static var title: LocalizedStringResource = "Play Playlist"
     static var description = IntentDescription("Play a playlist in Volta")
     static var openAppWhenRun: Bool = false
@@ -225,7 +225,7 @@ struct PlayPlaylistIntent: AppIntent {
     var playlist: PlaylistEntity
 
     func perform() async throws -> some ProvidesDialog {
-        guard let client = IntentBridge.shared.client else {
+        guard let client = await IntentBridge.shared.readyClient() else {
             throw VoltaIntentError.notAuthenticated
         }
         guard let full = try? await client.playlist(id: playlist.id),
@@ -239,7 +239,7 @@ struct PlayPlaylistIntent: AppIntent {
 
 // MARK: - Pause
 
-struct PauseIntent: AppIntent {
+struct PauseIntent: AudioPlaybackIntent {
     static var title: LocalizedStringResource = "Pause"
     static var description = IntentDescription("Pause playback in Volta")
     static var openAppWhenRun: Bool = false
@@ -252,7 +252,7 @@ struct PauseIntent: AppIntent {
 
 // MARK: - Resume
 
-struct ResumeIntent: AppIntent {
+struct ResumeIntent: AudioPlaybackIntent {
     static var title: LocalizedStringResource = "Resume"
     static var description = IntentDescription("Resume playback in Volta")
     static var openAppWhenRun: Bool = false
@@ -265,7 +265,7 @@ struct ResumeIntent: AppIntent {
 
 // MARK: - Skip
 
-struct SkipIntent: AppIntent {
+struct SkipIntent: AudioPlaybackIntent {
     static var title: LocalizedStringResource = "Skip"
     static var description = IntentDescription("Skip to next song in Volta")
     static var openAppWhenRun: Bool = false
@@ -283,6 +283,8 @@ struct VoltaShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: PlayArtistIntent(),
             phrases: [
+                "Ask \(.applicationName) to play \(\.$artist)",
+                "\(.applicationName) play \(\.$artist)",
                 "Play \(\.$artist) on \(.applicationName)",
                 "Play music by \(\.$artist) on \(.applicationName)",
                 "Play artist \(\.$artist) in \(.applicationName)",
@@ -295,6 +297,8 @@ struct VoltaShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: PlaySongIntent(),
             phrases: [
+                "Ask \(.applicationName) to play the song \(\.$song)",
+                "\(.applicationName) play the song \(\.$song)",
                 "Play the song \(\.$song) on \(.applicationName)",
                 "Play \(\.$song) on \(.applicationName)",
                 "Play song \(\.$song) in \(.applicationName)"
@@ -305,6 +309,8 @@ struct VoltaShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: PlayAlbumIntent(),
             phrases: [
+                "Ask \(.applicationName) to play the album \(\.$album)",
+                "\(.applicationName) play the album \(\.$album)",
                 "Play the album \(\.$album) on \(.applicationName)",
                 "Play \(\.$album) album on \(.applicationName)",
                 "Play album \(\.$album) in \(.applicationName)"
@@ -315,6 +321,8 @@ struct VoltaShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: PlayPlaylistIntent(),
             phrases: [
+                "Ask \(.applicationName) to play playlist \(\.$playlist)",
+                "\(.applicationName) play playlist \(\.$playlist)",
                 "Play playlist \(\.$playlist) on \(.applicationName)",
                 "Play the playlist \(\.$playlist) on \(.applicationName)",
                 "Start playlist \(\.$playlist) in \(.applicationName)"
@@ -325,6 +333,8 @@ struct VoltaShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: PauseIntent(),
             phrases: [
+                "Ask \(.applicationName) to pause",
+                "\(.applicationName) pause",
                 "Pause \(.applicationName)",
                 "Pause music on \(.applicationName)"
             ],
@@ -334,6 +344,8 @@ struct VoltaShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: ResumeIntent(),
             phrases: [
+                "Ask \(.applicationName) to resume",
+                "\(.applicationName) resume",
                 "Resume \(.applicationName)",
                 "Resume music on \(.applicationName)",
                 "Continue playing on \(.applicationName)"
@@ -344,6 +356,8 @@ struct VoltaShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: SkipIntent(),
             phrases: [
+                "Ask \(.applicationName) to skip",
+                "\(.applicationName) skip",
                 "Skip on \(.applicationName)",
                 "Next song on \(.applicationName)",
                 "Skip song in \(.applicationName)"

@@ -110,19 +110,28 @@ final class OutputRouteMonitor: NSObject, ObservableObject {
         // Apple speakers
         if n.contains("homepod") { return "homepod.fill" }
         // Non-Apple speakers / soundbars
-        if n.contains("speaker") || n.contains("soundbar") || n.contains("boom")
-            || n.contains("sonos") || n.contains("jbl") || n.contains("echo") {
+        if Self.isSpeakerLikeBluetoothName(n) {
             return "hifispeaker.fill"
         }
         // Motion tells us these are Apple earbuds; BLE narrows down the model.
         if appleEarbudsConnected { return detectedModel?.iconName ?? "airpods" }
+        if let detectedModel { return detectedModel.iconName }
         return "headphones"
     }
 
     private static func shouldProbeBluetoothModel(for name: String, appleEarbudsConnected: Bool) -> Bool {
         let n = name.lowercased()
         if n.contains("airpods max") || n.contains("airpods pro") { return false }
-        return n.contains("airpod") || appleEarbudsConnected
+        if n.contains("beats") || n.contains("powerbeats") || n.contains("homepod")
+            || Self.isSpeakerLikeBluetoothName(n) {
+            return false
+        }
+        return n.contains("airpod") || appleEarbudsConnected || !n.isEmpty
+    }
+
+    private static func isSpeakerLikeBluetoothName(_ n: String) -> Bool {
+        n.contains("speaker") || n.contains("soundbar") || n.contains("boom")
+            || n.contains("sonos") || n.contains("jbl") || n.contains("echo")
     }
 
     // USB-C/Lightning: distinguish headphones from speakers/interfaces by name.
@@ -158,6 +167,10 @@ private enum AppleAudioRouteModel: Equatable {
     }
 
     static func fromBluetoothModelCode(_ code: UInt16) -> AppleAudioRouteModel? {
+        Self.model(forBluetoothProductID: code) ?? Self.model(forBluetoothProductID: code.byteSwapped)
+    }
+
+    private static func model(forBluetoothProductID code: UInt16) -> AppleAudioRouteModel? {
         switch code {
         case 0x0220, 0x0F20, 0x1320, 0x1920, 0x1B20:
             return .airPods
