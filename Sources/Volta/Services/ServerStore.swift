@@ -27,6 +27,24 @@ final class ServerStore {
         servers.first { $0.isCurrent }
     }
 
+    func defaultServer() -> ServerRecord? {
+        servers.first { $0.isDefault }
+    }
+
+    func fallbackServer(excluding record: ServerRecord? = nil) -> ServerRecord? {
+        servers.first { server in
+            server.isFallback && server.id != record?.id
+        }
+    }
+
+    func startupServers() -> [ServerRecord] {
+        uniqueServers([
+            defaultServer(),
+            currentServer(),
+            fallbackServer()
+        ])
+    }
+
     func config(for record: ServerRecord, cellular: Bool = false) -> SubsonicConfig? {
         // Cellular can use its own URL/login when configured.
         let chosen = (cellular ? record.cellularURLString?.nonBlank : nil) ?? record.urlString
@@ -67,11 +85,15 @@ final class ServerStore {
         if let idx = servers.firstIndex(where: { $0.urlString == urlString && $0.username == config.username }) {
             servers[idx].displayName = displayName
             servers[idx].backend = backend
+            if !servers.contains(where: \.isDefault) {
+                servers[idx].isDefault = true
+            }
             KeychainService.save(password: config.password, for: servers[idx].id)
             setCurrent(servers[idx])
             return servers[idx]
         }
         var record = ServerRecord(displayName: displayName, urlString: urlString, username: config.username, backend: backend)
+        record.isDefault = !servers.contains(where: \.isDefault)
         KeychainService.save(password: config.password, for: record.id)
         servers.append(record)
         setCurrent(record)
@@ -84,6 +106,46 @@ final class ServerStore {
         save()
     }
 
+    @discardableResult
+    func setDefault(_ record: ServerRecord) -> ServerRecord? {
+        guard let idx = servers.firstIndex(where: { $0.id == record.id }) else { return nil }
+        for i in servers.indices {
+            let matches = servers[i].id == record.id
+            servers[i].isDefault = matches
+            if matches { servers[i].isFallback = false }
+        }
+        save()
+        return servers[idx]
+    }
+
+    @discardableResult
+    func setFallback(_ record: ServerRecord?) -> ServerRecord? {
+        guard let record else {
+            for i in servers.indices { servers[i].isFallback = false }
+            save()
+            return nil
+        }
+        guard let idx = servers.firstIndex(where: { $0.id == record.id }),
+              !servers[idx].isDefault else { return nil }
+        for i in servers.indices {
+            servers[i].isFallback = servers[i].id == record.id
+        }
+        save()
+        return servers[idx]
+    }
+
+    @discardableResult
+    func update(record: ServerRecord, config: SubsonicConfig, displayName: String? = nil, backend: MusicBackendKind? = nil) -> ServerRecord {
+        guard let idx = servers.firstIndex(where: { $0.id == record.id }) else { return record }
+        servers[idx].urlString = config.baseURL.absoluteString
+        servers[idx].username = config.username
+        if let displayName { servers[idx].displayName = displayName }
+        if let backend { servers[idx].backend = backend }
+        KeychainService.save(password: config.password, for: servers[idx].id)
+        save()
+        return servers[idx]
+    }
+
     func clearCurrent() {
         for i in servers.indices { servers[i].isCurrent = false }
         save()
@@ -93,6 +155,7 @@ final class ServerStore {
         KeychainService.delete(for: record.id)
         KeychainService.delete(for: Self.cellularAccount(for: record.id))
         servers.removeAll { $0.id == record.id }
+        normalizeServerRoles()
         save()
     }
 
@@ -118,6 +181,7 @@ final class ServerStore {
     private func load() {
         if let data = try? Data(contentsOf: serversURL) {
             servers = (try? JSONDecoder().decode([ServerRecord].self, from: data)) ?? []
+            normalizeServerRoles()
         }
         if let data = try? Data(contentsOf: discoverURL) {
             discoverCaches = (try? JSONDecoder().decode([DiscoverCache].self, from: data)) ?? []
@@ -132,6 +196,48 @@ final class ServerStore {
 
     private static func cellularAccount(for id: String) -> String {
         "\(id).cellular"
+    }
+
+    private func normalizeServerRoles() {
+        guard !servers.isEmpty else { return }
+
+        let defaultIndices = servers.indices.filter { servers[$0].isDefault }
+        if defaultIndices.isEmpty {
+            let preferred = servers.firstIndex(where: \.isCurrent) ?? servers.indices.max { servers[$0].addedAt < servers[$1].addedAt }
+            if let preferred { servers[preferred].isDefault = true }
+        } else {
+            for idx in defaultIndices.dropFirst() {
+                servers[idx].isDefault = false
+            }
+        }
+
+        guard servers.count > 1 else {
+            for i in servers.indices { servers[i].isFallback = false }
+            return
+        }
+
+        let defaultID = servers.first(where: \.isDefault)?.id
+        var didKeepFallback = false
+        for i in servers.indices {
+            if servers[i].id == defaultID {
+                servers[i].isFallback = false
+            } else if servers[i].isFallback {
+                if didKeepFallback {
+                    servers[i].isFallback = false
+                } else {
+                    didKeepFallback = true
+                }
+            }
+        }
+    }
+
+    private func uniqueServers(_ candidates: [ServerRecord?]) -> [ServerRecord] {
+        var seen = Set<String>()
+        return candidates.compactMap { server in
+            guard let server, !seen.contains(server.id) else { return nil }
+            seen.insert(server.id)
+            return server
+        }
     }
 }
 

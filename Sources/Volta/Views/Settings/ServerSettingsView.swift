@@ -213,7 +213,7 @@ struct EditConnectionView: View {
                 let testClient = try await MusicServiceFactory.make(config: config, kind: backend)
                 try await testClient.ping()
                 await MainActor.run {
-                    appState.completeLogin(config: config, kind: backend)
+                    appState.completeLogin(config: testClient.config, kind: backend)
                     appState.updateCellularConnection(
                         urlString: normalizedCell,
                         username: cellUsername,

@@ -10,11 +10,11 @@ struct ServerMenuButton: View {
 
     var body: some View {
         Menu {
-            if appState.servers().count > 1 {
+            if !appState.servers().isEmpty {
                 Button {
                     showSwitcher = true
                 } label: {
-                    Label("Switch Server", systemImage: Symbols.switchServer)
+                    Label("Servers", systemImage: Symbols.switchServer)
                 }
             }
 
