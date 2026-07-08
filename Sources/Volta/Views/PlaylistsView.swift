@@ -889,6 +889,8 @@ private struct SmartPlaylistDetailView: View {
                 .preferredColorScheme(Theme.colorScheme)
             case .edit:
                 EmptyView()
+            case .reorder:
+                EmptyView()
             }
         }
     }

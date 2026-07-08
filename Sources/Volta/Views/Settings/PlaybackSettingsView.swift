@@ -8,7 +8,7 @@ extension SettingsView {
     @ViewBuilder
     var playbackSection: some View {
         let s = "Playback"
-        if sectionVisible(s, [["autoplay", "play"], ["autoplay", "infinite play", "infinite", "autoplay style", "fill", "similar", "random", "genre"], ["crossfade", "fade", "automix", "transition", "duration", "style", "blend", "silence", "bpm", "tempo"], ["gapless playback"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"], ["resume playback after interruption", "resume", "interruption", "interrupt", "phone call", "siri", "other app", "force stop"]]) {
+        if sectionVisible(s, [["autoplay", "play"], ["autoplay", "infinite play", "infinite", "autoplay style", "fill", "similar", "random", "genre"], ["crossfade", "fade", "automix", "transition", "duration", "style", "blend", "silence", "bpm", "tempo"], ["gapless playback"], ["enhanced caching", "playback cache", "prefetch", "seamless", "buffer"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"], ["resume playback after interruption", "resume", "interruption", "interrupt", "phone call", "siri", "other app", "force stop"]]) {
             Section(sectionTitle(s)) {
                 if rowVisible(s, ["autoplay", "play"]) {
                     Toggle(isOn: Binding(
@@ -68,6 +68,20 @@ extension SettingsView {
                     .onChange(of: gaplessPlayback) { _, mode in
                         if mode == "off", audio.transitionMode == .automix {
                             audio.setTransitionMode(.crossfade)
+                        }
+                    }
+                }
+
+                if rowVisible(s, ["enhanced caching", "playback cache", "prefetch", "seamless", "buffer"]) {
+                    Toggle(isOn: $enhancedPlaybackCaching) {
+                        Label("Enhanced Caching", systemImage: "bolt.horizontal.circle")
+                    }
+                    .tint(Theme.accent)
+                    .onChange(of: enhancedPlaybackCaching) { _, enabled in
+                        if enabled {
+                            audio.refreshPlaybackCache()
+                        } else {
+                            PlaybackCacheService.shared.cancelPrefetches()
                         }
                     }
                 }

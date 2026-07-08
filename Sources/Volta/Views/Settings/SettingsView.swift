@@ -43,6 +43,7 @@ struct SettingsView: View {
 
     @AppStorage("infinitePlayStyle")   var infinitePlayStyle   = "random"
     @AppStorage("gaplessPlayback")     var gaplessPlayback     = "on"
+    @AppStorage("enhancedPlaybackCaching") var enhancedPlaybackCaching = true
     @AppStorage("replayGainMode")      var replayGainMode      = "off"
     @AppStorage("crossfadeDurationSeconds") var crossfadeDurationSeconds = 6.0
     @AppStorage("automixStyle")        var automixStyle        = "balanced"
@@ -89,6 +90,7 @@ struct SettingsView: View {
     @AppStorage("hasConfirmedDownloadAllMissingSongs") var hasConfirmedDownloadAllMissingSongs = false
 
     @State var downloadsSize: String  = "…"
+    @State var playbackCacheSize: String = "…"
     @State var artworkSize: String     = "…"
     @State var localArtworkSize: String = "…"
     @State var lyricsSize: String = "…"

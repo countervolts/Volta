@@ -3,6 +3,7 @@ import AVKit
 import AVFoundation
 import MediaPlayer
 import UIKit
+import UniformTypeIdentifiers
 
 enum PlayerTab { case nowPlaying, queue, lyrics }
 
@@ -30,6 +31,12 @@ struct NowPlayingScreen: View {
     @State private var isFetchingArtist = false
     @State private var isFetchingAlbum = false
     @State private var tasteStore = TasteStore.shared
+    @State private var showQueueHistory = false
+    @State private var didPositionQueueScroll = false
+    @State private var queueScrollRequest = 0
+    @State private var queueAnchorOffset: CGFloat = 0
+    @State private var draggingQueueIndex: Int?
+    @State private var draggingQueueSongID: String?
     @AppStorage("showLosslessBadge") private var showLosslessBadge = true
     @AppStorage(DeveloperExperiments.preciseTimestampsKey) private var preciseTimestamps = false
     @AppStorage("artworkAnimation") private var artworkAnimation = true
@@ -48,6 +55,7 @@ struct NowPlayingScreen: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     private var audio: AudioPlayer { appState.audioPlayer }
+    private let queueContentAnchor = "queue-content-anchor"
     private var currentTaste: TasteState {
         audio.currentSong.map { tasteStore.state(for: $0.id) } ?? .neutral
     }
@@ -70,6 +78,11 @@ struct NowPlayingScreen: View {
         .gesture(
             DragGesture(coordinateSpace: .global)
                 .onChanged { v in
+                    if shouldSuppressPlayerDismissDrag(v) {
+                        pendingDragOffset = 0
+                        dragOffset = 0
+                        return
+                    }
                     pendingDragOffset = max(0, v.translation.height)
                     if let dragThrottler {
                         dragThrottler.schedule()
@@ -78,6 +91,11 @@ struct NowPlayingScreen: View {
                     }
                 }
                 .onEnded { v in
+                    if shouldSuppressPlayerDismissDrag(v) {
+                        pendingDragOffset = 0
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { dragOffset = 0 }
+                        return
+                    }
                     if v.translation.height > 120 || v.predictedEndTranslation.height > 300 {
                         AppLogger.shared.log(
                             "Player dismissed by drag; translation=\(Int(v.translation.height)); predicted=\(Int(v.predictedEndTranslation.height))",
@@ -186,6 +204,13 @@ struct NowPlayingScreen: View {
         }
         .onChange(of: dynamicBackground) { _, _ in
             refreshPlayerBackground(animated: true)
+        }
+        .onChange(of: activeTab) { _, tab in
+            if tab != .queue {
+                showQueueHistory = false
+                didPositionQueueScroll = false
+                queueAnchorOffset = 0
+            }
         }
         .preferredColorScheme(Theme.colorScheme)
     }
@@ -863,10 +888,301 @@ struct NowPlayingScreen: View {
         case .nowPlaying:
             nowPlayingContent
         case .queue:
-            altContent { QueueView().transition(.opacity) }
+            queuePagerContent
         case .lyrics:
             altContent { LyricsViewWithState().transition(.opacity) }
         }
+    }
+
+    private var queuePagerContent: some View {
+        ScrollViewReader { proxy in
+            VStack(spacing: 0) {
+                GeometryReader { scrollGeo in
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            queueHistoryHeader
+                                .padding(.horizontal, 24)
+                                .padding(.top, 52)
+                                .padding(.bottom, 18)
+
+                            queueHistoryRows
+                                .padding(.bottom, 34)
+
+                            Color.clear
+                                .frame(height: 1)
+                                .id(queueContentAnchor)
+                                .background(
+                                    GeometryReader { geo in
+                                        Color.clear.preference(
+                                            key: QueueAnchorOffsetKey.self,
+                                            value: geo.frame(in: .named("queueScroll")).minY
+                                        )
+                                    }
+                                )
+
+                            VStack(alignment: .leading, spacing: 0) {
+                                compactTrackHeader
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 4)
+                                    .padding(.bottom, 20)
+
+                                queueModeToggles
+                                    .padding(.horizontal, 20)
+                                    .padding(.bottom, 26)
+
+                                queueContinueHeader
+                                    .padding(.horizontal, 24)
+                                    .padding(.bottom, 18)
+
+                                queueUpcomingRows
+                                    .padding(.horizontal, 24)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: scrollGeo.size.height, alignment: .top)
+                        }
+                        .padding(.bottom, 28)
+                    }
+                    .coordinateSpace(name: "queueScroll")
+                    .scrollIndicators(.visible)
+                    .task(id: activeTab) {
+                        guard activeTab == .queue, !didPositionQueueScroll else { return }
+                        didPositionQueueScroll = true
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                        proxy.scrollTo(queueContentAnchor, anchor: .top)
+                    }
+                    .onChange(of: queueScrollRequest) { _, _ in
+                        withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
+                            proxy.scrollTo(queueContentAnchor, anchor: .top)
+                        }
+                    }
+                    .onPreferenceChange(QueueAnchorOffsetKey.self) { offset in
+                        queueAnchorOffset = offset
+                        let visible = offset > 24
+                        if visible != showQueueHistory {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            showQueueHistory = visible
+                        }
+                    }
+                }
+
+                scrubber
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+            }
+        }
+    }
+
+    private var queueHistoryHeader: some View {
+        HStack {
+            Text("History")
+                .font(.title2.bold())
+                .foregroundStyle(.white)
+            Spacer()
+            Button {
+                audio.clearPlaybackHistory()
+            } label: {
+                Text(L(.action_clear))
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(audio.playbackHistory.isEmpty ? .white.opacity(0.28) : .white.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+            .disabled(audio.playbackHistory.isEmpty)
+        }
+    }
+
+    @ViewBuilder
+    private var queueHistoryRows: some View {
+        let history = audio.playbackHistory.filter { $0.id != audio.currentSong?.id }
+        if history.isEmpty {
+            Text("No history yet")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.42))
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+        } else {
+            LazyVStack(spacing: 0) {
+                ForEach(history, id: \.id) { song in
+                    queueHistoryRow(song)
+                }
+            }
+            .padding(.horizontal, 24)
+        }
+    }
+
+    private func queueHistoryRow(_ song: Song) -> some View {
+        Button {
+            audio.playFromHistory(song)
+            queueScrollRequest += 1
+        } label: {
+            HStack(spacing: 12) {
+                ArtworkView(coverArtID: song.coverArt, size: 80, cornerRadius: 6)
+                    .frame(width: 44, height: 44)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(song.title)
+                        .font(.body)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(song.artist ?? "")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var queueModeToggles: some View {
+        let autoplayIcon: String = switch audio.autoplayMode {
+        case .off, .random: "infinity"
+        case .algorithm: "wand.and.stars"
+        }
+        return HStack(spacing: 16) {
+            queueModeButton(icon: Symbols.shuffle, active: audio.isShuffle) {
+                audio.toggleShuffle()
+            }
+            queueModeButton(
+                icon: audio.repeatMode == .one ? Symbols.repeatOne : Symbols.repeatAll,
+                active: audio.repeatMode != .off
+            ) {
+                audio.cycleRepeat()
+            }
+            queueModeButton(icon: autoplayIcon, active: audio.autoplayMode != .off) {
+                audio.cycleAutoplay()
+            }
+            queueModeButton(icon: audio.transitionMode.icon, active: audio.transitionMode != .off) {
+                audio.cycleTransitionMode()
+            }
+        }
+    }
+
+    private func queueModeButton(icon: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(active ? Color(white: 0.18) : .white.opacity(0.76))
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(active ? .white.opacity(0.68) : .white.opacity(0.11))
+                )
+                .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .animation(.spring(response: 0.3, dampingFraction: 0.74), value: active)
+    }
+
+    private var queueContinueHeader: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(L(.queue_continue_playing))
+                .font(.headline)
+                .foregroundStyle(.white)
+            if !audio.queueSourceTitle.isEmpty {
+                Text(audio.queueSourceTitle)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var queueUpcomingSongs: [Song] {
+        let next = audio.currentIndex + 1
+        guard next < audio.queue.count else { return [] }
+        return Array(audio.queue[next...])
+    }
+
+    @ViewBuilder
+    private var queueUpcomingRows: some View {
+        let upcoming = queueUpcomingSongs
+        if upcoming.isEmpty {
+            Text("Nothing queued")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.42))
+                .frame(maxWidth: .infinity, minHeight: 74, alignment: .leading)
+        } else {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(upcoming.enumerated()), id: \.element.id) { item in
+                    let globalIndex = audio.currentIndex + 1 + item.offset
+                    queueUpcomingRow(song: item.element, globalIndex: globalIndex)
+                }
+            }
+        }
+    }
+
+    private func queueUpcomingRow(song: Song, globalIndex: Int) -> some View {
+        HStack(spacing: 12) {
+            ArtworkView(coverArtID: song.coverArt, size: 80, cornerRadius: 6)
+                .frame(width: 44, height: 44)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song.title)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(song.artist ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 10)
+
+            Image(systemName: Symbols.dragHandle)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.25))
+                .frame(width: 36, height: 44)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 8)
+        .opacity(draggingQueueSongID == song.id ? 0.45 : 1)
+        .onTapGesture {
+            audio.skipTo(index: globalIndex)
+        }
+        .onDrag {
+            draggingQueueIndex = globalIndex
+            draggingQueueSongID = song.id
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            return NSItemProvider(object: song.id as NSString)
+        }
+        .onDrop(
+            of: [UTType.text],
+            delegate: QueueReorderDropDelegate(
+                destinationIndex: globalIndex,
+                draggingIndex: $draggingQueueIndex,
+                draggingSongID: $draggingQueueSongID,
+                move: moveQueuedSong
+            )
+        )
+        .animation(.spring(response: 0.24, dampingFraction: 0.82), value: draggingQueueSongID)
+    }
+
+    private func moveQueuedSong(from source: Int, to destination: Int) {
+        guard source != destination,
+              source > audio.currentIndex,
+              destination > audio.currentIndex,
+              source < audio.queue.count,
+              destination < audio.queue.count else { return }
+        let insertionIndex = source < destination ? destination + 1 : destination
+        audio.moveQueueItem(from: IndexSet(integer: source), to: min(insertionIndex, audio.queue.count))
+    }
+
+    private func shouldSuppressPlayerDismissDrag(_ value: DragGesture.Value) -> Bool {
+        guard !isPhoneLandscape,
+              sizeClass != .regular,
+              activeTab == .queue else { return false }
+        if showQueueHistory, value.translation.height > 0, queueAnchorOffset > 260 {
+            return false
+        }
+        return true
     }
 
     // compact artwork+title+artist at top, content in middle, full scrubber at bottom
@@ -1327,8 +1643,12 @@ struct NowPlayingScreen: View {
                 sleepTimerMenu
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        activeTab = activeTab == .queue ? .nowPlaying : .queue
+                    if activeTab == .queue, showQueueHistory {
+                        queueScrollRequest += 1
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            activeTab = activeTab == .queue ? .nowPlaying : .queue
+                        }
                     }
                 } label: {
                     Image(systemName: Symbols.queue)
@@ -1385,6 +1705,44 @@ struct NowPlayingScreen: View {
         }
         let s = Int(t)
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+private struct QueueAnchorOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct QueueReorderDropDelegate: DropDelegate {
+    let destinationIndex: Int
+    @Binding var draggingIndex: Int?
+    @Binding var draggingSongID: String?
+    let move: (Int, Int) -> Void
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let sourceIndex = draggingIndex,
+              sourceIndex != destinationIndex else { return }
+        move(sourceIndex, destinationIndex)
+        draggingIndex = destinationIndex
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingIndex = nil
+        draggingSongID = nil
+        return true
+    }
+
+    func dropExited(info: DropInfo) {
+        guard !info.hasItemsConforming(to: [UTType.text]) else { return }
+        draggingIndex = nil
+        draggingSongID = nil
     }
 }
 
@@ -1566,72 +1924,137 @@ private struct AudioVisualizerScreen: View {
             }
         }
         .preferredColorScheme(Theme.colorScheme)
+        .onAppear { audio.setVisualizerActive(true) }
+        .onDisappear { audio.setVisualizerActive(false) }
     }
 
     private func drawVoltaVisual(context: inout GraphicsContext, size: CGSize, date: Date) {
         let center = CGPoint(x: size.width / 2, y: size.height * 0.43)
         let side = min(size.width, size.height)
-        let baseRadius = side * 0.18
+        let baseRadius = side * 0.17
         let liveTime = audio.liveTime()
         let clock = date.timeIntervalSinceReferenceDate + liveTime
-        let seed = Double(abs(audio.currentSong?.id.hashValue ?? 13) % 997) / 97.0
-        let energy = audio.isPlaying ? 1.0 : 0.18
+        let snapshot = audio.visualizerSnapshot()
+        let bands = snapshot.bands.isEmpty ? AudioVisualizerSnapshot.silent.bands : snapshot.bands
+        let rms = audio.isPlaying ? min(1.0, snapshot.rms * 4.0) : 0
+        let peak = audio.isPlaying ? min(1.0, snapshot.peak * 1.7) : 0
+        let beat = audio.isPlaying ? min(1.0, snapshot.beat) : 0
+        let energy = max(0.08, rms)
+        let rotation = clock * (0.035 + energy * 0.035)
 
         let glowRect = CGRect(x: center.x - side * 0.46, y: center.y - side * 0.46, width: side * 0.92, height: side * 0.92)
         context.fill(
             Path(ellipseIn: glowRect),
             with: .radialGradient(
-                Gradient(colors: [Theme.accent.opacity(0.34 * energy), .clear]),
+                Gradient(colors: [
+                    .white.opacity(0.07 + 0.08 * peak),
+                    Theme.accent.opacity(0.28 + 0.20 * beat),
+                    .cyan.opacity(0.06 + 0.10 * rms),
+                    .clear
+                ]),
                 center: center,
                 startRadius: 0,
                 endRadius: side * 0.46
             )
         )
 
-        for ring in 0..<5 {
-            let progress = Double(ring) / 4.0
-            let pulse = 0.5 + 0.5 * sin(clock * (1.2 + progress) + seed + progress * 4.0)
-            let radius = baseRadius + CGFloat(ring) * side * 0.052 + CGFloat(pulse * energy) * 18
+        let coreRadius = baseRadius * CGFloat(0.72 + rms * 0.16 + beat * 0.12)
+        context.fill(
+            Path(ellipseIn: CGRect(x: center.x - coreRadius, y: center.y - coreRadius, width: coreRadius * 2, height: coreRadius * 2)),
+            with: .radialGradient(
+                Gradient(colors: [
+                    .white.opacity(0.92),
+                    Theme.accent.opacity(0.88),
+                    .cyan.opacity(0.46),
+                    .clear
+                ]),
+                center: center,
+                startRadius: 0,
+                endRadius: coreRadius
+            )
+        )
+
+        for ring in 0..<3 {
+            let progress = CGFloat(ring) / 2
+            let radius = baseRadius * (1.08 + progress * 0.42) + CGFloat(beat) * 10
             let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-            let path = Path(ellipseIn: rect)
-            let dash = [CGFloat(5 + ring * 3), CGFloat(8 + ring * 2)]
+            var path = Path()
+            path.addEllipse(in: rect)
             context.stroke(
                 path,
-                with: .linearGradient(
-                    Gradient(colors: [Theme.accent.opacity(0.85), .white.opacity(0.55), .cyan.opacity(0.55)]),
-                    startPoint: CGPoint(x: rect.minX, y: rect.minY),
-                    endPoint: CGPoint(x: rect.maxX, y: rect.maxY)
-                ),
-                style: StrokeStyle(lineWidth: CGFloat(1.4 + progress * 2.2), lineCap: .round, dash: dash, dashPhase: CGFloat(clock * (18 + progress * 20)))
+                with: .color(.white.opacity(0.14 + Double(progress) * 0.09 + rms * 0.18)),
+                style: StrokeStyle(lineWidth: 0.8 + progress * 1.4, lineCap: .round, dash: [8 + progress * 8, 14 + progress * 10], dashPhase: CGFloat(clock * (10 + Double(ring) * 7)))
             )
         }
 
-        let spokeCount = 72
-        for i in 0..<spokeCount {
-            let p = Double(i) / Double(spokeCount)
-            let phase = clock * (1.6 + p * 2.0) + p * .pi * 8 + seed
-            let wave = abs(sin(phase) * 0.6 + sin(phase * 0.37 + seed) * 0.4)
-            let angle = p * .pi * 2 + clock * 0.18
-            let inner = baseRadius * 0.82 + CGFloat(wave * 16 * energy)
-            let outer = inner + CGFloat(18 + wave * 72 * energy)
+        let count = bands.count
+        for i in 0..<count {
+            let raw = max(0, min(1, bands[i]))
+            let neighbor = (bands[max(0, i - 1)] + raw + bands[min(count - 1, i + 1)]) / 3
+            let shaped = pow(neighbor, 0.72)
+            let fraction = Double(i) / Double(count)
+            let angle = -Double.pi / 2 + fraction * Double.pi * 2 + rotation
+            let lineWidth = max(1.4, side * 0.0036)
+            let inner = baseRadius * CGFloat(1.22 + peak * 0.05)
+            let outer = inner + side * CGFloat(0.055 + shaped * 0.28 + beat * 0.025)
+            let cap = side * CGFloat(0.009 + shaped * 0.016)
             let a = CGFloat(angle)
             let p1 = CGPoint(x: center.x + cos(a) * inner, y: center.y + sin(a) * inner)
             let p2 = CGPoint(x: center.x + cos(a) * outer, y: center.y + sin(a) * outer)
             var path = Path()
             path.move(to: p1)
             path.addLine(to: p2)
-            context.stroke(path, with: .color(.white.opacity(0.18 + wave * 0.72)), lineWidth: CGFloat(1.0 + wave * 2.4))
+            let hue = fraction
+            let color = Color(
+                hue: 0.56 + hue * 0.19,
+                saturation: 0.50 + shaped * 0.34,
+                brightness: 0.78 + shaped * 0.22
+            )
+            context.stroke(
+                path,
+                with: .color(color.opacity(0.38 + shaped * 0.58)),
+                style: StrokeStyle(lineWidth: lineWidth + CGFloat(shaped) * 2.8, lineCap: .round)
+            )
+            if shaped > 0.18 {
+                let dot = CGPoint(x: center.x + cos(a) * (outer + cap * 0.25), y: center.y + sin(a) * (outer + cap * 0.25))
+                context.fill(
+                    Path(ellipseIn: CGRect(x: dot.x - cap / 2, y: dot.y - cap / 2, width: cap, height: cap)),
+                    with: .color(.white.opacity(0.12 + shaped * 0.48))
+                )
+            }
         }
 
-        for i in 0..<18 {
-            let p = Double(i) / 18.0
-            let angle = clock * (0.35 + p * 0.18) + p * .pi * 2 + seed
-            let radius = baseRadius * 1.55 + CGFloat(sin(clock + p * 5) * 20)
+        var waveform = Path()
+        let waveformRadius = baseRadius * 2.16 + CGFloat(beat) * 8
+        for i in 0...count {
+            let band = bands[i % count]
+            let fraction = Double(i) / Double(count)
+            let angle = -Double.pi / 2 + fraction * Double.pi * 2 - rotation * 0.72
+            let radius = waveformRadius + CGFloat(pow(band, 0.7)) * side * 0.075
+            let point = CGPoint(x: center.x + cos(CGFloat(angle)) * radius, y: center.y + sin(CGFloat(angle)) * radius)
+            if i == 0 { waveform.move(to: point) } else { waveform.addLine(to: point) }
+        }
+        context.stroke(
+            waveform,
+            with: .linearGradient(
+                Gradient(colors: [.white.opacity(0.32 + rms * 0.28), Theme.accent.opacity(0.52), .cyan.opacity(0.36)]),
+                startPoint: CGPoint(x: center.x - waveformRadius, y: center.y - waveformRadius),
+                endPoint: CGPoint(x: center.x + waveformRadius, y: center.y + waveformRadius)
+            ),
+            style: StrokeStyle(lineWidth: 1.1 + CGFloat(rms) * 2.2, lineCap: .round, lineJoin: .round)
+        )
+
+        for i in stride(from: 0, to: count, by: 4) {
+            let amplitude = bands[i]
+            guard amplitude > 0.10 else { continue }
+            let fraction = Double(i) / Double(count)
+            let angle = -Double.pi / 2 + fraction * Double.pi * 2 + rotation * 1.6
+            let radius = baseRadius * CGFloat(2.54 + amplitude * 0.42 + beat * 0.08)
+            let dotSize = side * CGFloat(0.004 + amplitude * 0.012)
             let dot = CGPoint(x: center.x + cos(CGFloat(angle)) * radius, y: center.y + sin(CGFloat(angle)) * radius)
-            let size = CGFloat(3 + (sin(clock * 2 + p * 8) + 1) * 3 * energy)
             context.fill(
-                Path(ellipseIn: CGRect(x: dot.x - size / 2, y: dot.y - size / 2, width: size, height: size)),
-                with: .color(Theme.accent.opacity(0.35 + 0.55 * energy))
+                Path(ellipseIn: CGRect(x: dot.x - dotSize / 2, y: dot.y - dotSize / 2, width: dotSize, height: dotSize)),
+                with: .color(Theme.accent.opacity(0.22 + amplitude * 0.50))
             )
         }
     }
@@ -1691,6 +2114,9 @@ private struct SystemVolumeSlider: UIViewRepresentable {
                 subview.frame = .zero
             }
             slider.isHidden = false
+            // MPVolumeView's slider jumps to a tapped track location. Route touch
+            // changes through our pan gesture so press/release does not change volume.
+            slider.isUserInteractionEnabled = false
             slider.frame = bounds
         }
     }
@@ -1705,10 +2131,8 @@ private struct SystemVolumeSlider: UIViewRepresentable {
         v.setVolumeThumbImage(blank, for: .highlighted)
         context.coordinator.volumeView = v
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
-        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
-        tap.require(toFail: pan)
+        pan.cancelsTouchesInView = true
         v.addGestureRecognizer(pan)
-        v.addGestureRecognizer(tap)
         return v
     }
     func updateUIView(_ uiView: SliderOnlyVolumeView, context: Context) {}
@@ -1727,22 +2151,9 @@ private struct SystemVolumeSlider: UIViewRepresentable {
             volumeView?.subviews.compactMap { $0 as? UISlider }.first
         }
 
-        // Only the real slider track should catch taps.
+        // Only gestures that start on the real slider track should affect volume.
         private func onTrack(_ point: CGPoint, _ slider: UISlider) -> Bool {
             point.x >= 0 && point.x <= slider.bounds.width
-        }
-
-        @objc func handleTap(_ g: UITapGestureRecognizer) {
-            guard let slider, slider.bounds.width > 0 else { return }
-            let p = g.location(in: slider)
-            guard onTrack(p, slider) else { return }   // tap off the track does nothing
-            let frac = Float(max(0, min(1, p.x / slider.bounds.width)))
-            isInteracting.wrappedValue = true
-            slider.setValue(frac, animated: false)
-            slider.sendActions(for: .valueChanged)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
-                self?.isInteracting.wrappedValue = false
-            }
         }
 
         @objc func handlePan(_ g: UIPanGestureRecognizer) {

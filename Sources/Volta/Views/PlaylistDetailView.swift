@@ -6,6 +6,7 @@ enum PlaylistSheet: Identifiable {
     case album(Album)
     case artist(Artist)
     case edit
+    case reorder
 
     var id: String {
         switch self {
@@ -13,6 +14,7 @@ enum PlaylistSheet: Identifiable {
         case .album(let a):         return "album-\(a.id)"
         case .artist(let a):        return "artist-\(a.id)"
         case .edit:                 return "edit"
+        case .reorder:              return "reorder"
         }
     }
 }
@@ -174,6 +176,8 @@ struct PlaylistDetailView: View {
             .preferredColorScheme(Theme.colorScheme)
         case .edit:
             editSheet
+        case .reorder:
+            reorderSheet
         }
     }
 
@@ -266,6 +270,19 @@ struct PlaylistDetailView: View {
         }
     }
 
+    private var canReorderPlaylist: Bool {
+        vm.songs.count > 1 && appState.client?.capabilities.contains(.playlistReordering) == true
+    }
+
+    private var reorderSheet: some View {
+        PlaylistReorderSheet(songs: vm.songs) { reordered in
+            guard let client = appState.client else { throw SubsonicError.serverUnreachable }
+            try await vm.reorderSongs(reordered, client: client)
+        }
+        .preferredColorScheme(Theme.colorScheme)
+        .presentationDetents([.large])
+    }
+
     private var artworkSection: some View {
         GeometryReader { geo in
             PlaylistCover(playlist: vm.playlist, size: 800, cornerRadius: 0,
@@ -346,6 +363,19 @@ struct PlaylistDetailView: View {
             .buttonStyle(.plain)
 
             DownloadAlbumButton(songs: vm.songs)
+
+            if canReorderPlaylist {
+                Button {
+                    activeSheet = .reorder
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 50, height: 50)
+                        .glassCircle()
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
@@ -481,5 +511,97 @@ struct PlaylistDetailView: View {
         let nextIndex = max(0, min(vm.songs.count - 1, currentIndex + delta))
         guard nextIndex != currentIndex else { return }
         appState.audioPlayer.playQueue(vm.songs, startIndex: nextIndex, source: vm.playlist.name, playlist: vm.playlist)
+    }
+}
+
+private struct PlaylistReorderSheet: View {
+    private struct Row: Identifiable {
+        let id = UUID()
+        let song: Song
+    }
+
+    let onSave: ([Song]) async throws -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var rows: [Row]
+    @State private var originalIDs: [String]
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    init(songs: [Song], onSave: @escaping ([Song]) async throws -> Void) {
+        self.onSave = onSave
+        let rows = songs.map(Row.init(song:))
+        _rows = State(initialValue: rows)
+        _originalIDs = State(initialValue: songs.map(\.id))
+    }
+
+    private var hasChanges: Bool {
+        rows.map { $0.song.id } != originalIDs
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+                ForEach(rows) { row in
+                    HStack(spacing: 12) {
+                        ArtworkView(coverArtID: row.song.coverArt, size: 80, cornerRadius: 6)
+                            .frame(width: 44, height: 44)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.song.title)
+                                .font(.body)
+                                .foregroundStyle(Theme.primaryText)
+                                .lineLimit(1)
+                            Text(row.song.artist ?? "")
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryText)
+                                .lineLimit(1)
+                        }
+                    }
+                    .listRowBackground(Theme.secondaryBackground)
+                }
+                .onMove { indices, destination in
+                    rows.move(fromOffsets: indices, toOffset: destination)
+                    errorMessage = nil
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.background.ignoresSafeArea())
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle("Reorder Playlist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L(.action_cancel)) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? L(.action_saving) : L(.action_save)) {
+                        save()
+                    }
+                    .disabled(isSaving || !hasChanges)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        guard !isSaving else { return }
+        isSaving = true
+        errorMessage = nil
+        let reordered = rows.map(\.song)
+        Task {
+            do {
+                try await onSave(reordered)
+                await MainActor.run { dismiss() }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    isSaving = false
+                }
+            }
+        }
     }
 }

@@ -21,6 +21,7 @@ struct MixDetailView: View {
     @State private var dominantColor: UIColor = .black
     @State private var activeSheet: MixSheet? = nil
     @State private var toastMessage: String? = nil
+    @State private var isSavingMix = false
     @AppStorage("showTrackArtwork") private var showTrackArtwork = true
 
     private var bg: Color { Color(ColorExtractor.backgroundVariant(of: dominantColor)) }
@@ -91,9 +92,9 @@ struct MixDetailView: View {
         ArtworkView(coverArtID: mix.coverArt, size: 800, cornerRadius: 14,
                     onImageLoaded: { dominantColor = ColorExtractor.dominantColor(from: $0) })
             .aspectRatio(1, contentMode: .fit)
-            .frame(width: 220, height: 220)
+            .padding(.horizontal, 36)
             .shadow(color: .black.opacity(0.45), radius: 28, x: 0, y: 10)
-            .padding(.top, 96)
+            .padding(.top, 32)
     }
 
     private var infoSection: some View {
@@ -141,6 +142,26 @@ struct MixDetailView: View {
                 .background(.white, in: Capsule())
             }
             .buttonStyle(.plain)
+
+            Button {
+                saveMixAsPlaylist()
+            } label: {
+                ZStack {
+                    if isSavingMix {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: Symbols.newPlaylist)
+                    }
+                }
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .glassCircle()
+            }
+            .buttonStyle(.plain)
+            .disabled(isSavingMix || appState.client == nil || mix.songs.isEmpty)
+            .opacity((appState.client == nil || mix.songs.isEmpty) ? 0.45 : 1)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
@@ -184,6 +205,28 @@ struct MixDetailView: View {
         Task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             withAnimation { toastMessage = nil }
+        }
+    }
+
+    private func saveMixAsPlaylist() {
+        guard !isSavingMix, let client = appState.client, !mix.songs.isEmpty else { return }
+        isSavingMix = true
+        let title = mix.localizedTitle
+
+        Task {
+            do {
+                let name = try await PlaylistWriter.saveMixAsPlaylist(mix, client: client, title: title)
+                await MainActor.run {
+                    isSavingMix = false
+                    showToast(L(.home_saved_to, name))
+                }
+            } catch {
+                AppLogger.shared.log("Failed saving mix '\(mix.title)' as playlist: \(error.localizedDescription)", category: .other, level: .error)
+                await MainActor.run {
+                    isSavingMix = false
+                    showToast(L(.home_save_mix_failed))
+                }
+            }
         }
     }
 }

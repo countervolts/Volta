@@ -33,6 +33,19 @@ final class PlaylistDetailViewModel {
         await PlaylistBackupStore.shared.backup(playlistID: playlist.id, client: client)
     }
 
+    func reorderSongs(_ reordered: [Song], client: any MusicService) async throws {
+        let previous = songs
+        songs = reordered
+        do {
+            try await client.replacePlaylistSongs(playlistID: playlist.id, songIDs: reordered.map(\.id))
+            await load(client: client)
+            await PlaylistBackupStore.shared.backup(playlistID: playlist.id, client: client)
+        } catch {
+            songs = previous
+            throw error
+        }
+    }
+
     // Edit sheet state. Covers stay local via PlaylistCoverStore.
     func update(name: String, comment: String, client: any MusicService) async {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
