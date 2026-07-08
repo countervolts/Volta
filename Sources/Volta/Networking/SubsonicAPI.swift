@@ -109,6 +109,12 @@ extension SubsonicClient {
         return try? await playlists().first { $0.name == name }
     }
 
+    func replacePlaylistSongs(playlistID: String, songIDs: [String]) async throws {
+        var query = [URLQueryItem(name: "playlistId", value: playlistID)]
+        query.append(contentsOf: songIDs.map { URLQueryItem(name: "songId", value: $0) })
+        _ = try await request("createPlaylist", query: query)
+    }
+
     func addToPlaylist(playlistID: String, songID: String) async throws {
         _ = try await request("updatePlaylist", query: [
             URLQueryItem(name: "playlistId", value: playlistID),
@@ -243,6 +249,18 @@ extension SubsonicClient {
         ])
         // No stats endpoint here; return the cheap counts.
         return (artistCount, albumBody.albumList2?.album?.count ?? 0, 0)
+    }
+
+    func scrobble(id: String, at date: Date?, submission: Bool) async throws {
+        var query = [
+            URLQueryItem(name: "id", value: id),
+            URLQueryItem(name: "submission", value: submission ? "true" : "false"),
+        ]
+        if let date {
+            let milliseconds = Int64((date.timeIntervalSince1970 * 1000).rounded())
+            query.append(URLQueryItem(name: "time", value: String(milliseconds)))
+        }
+        _ = try await request("scrobble", query: query)
     }
 
     // OpenSubsonic synced lyrics extension

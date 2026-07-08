@@ -24,7 +24,7 @@ extension SettingsView {
         // Stays fully hidden (even from search) until unlocked via 7 taps on
         // the Version/Build row in About.
         if developerUnlocked,
-           sectionVisible(s, [["developer tools", "simulation", "simulate", "slow server", "expired session", "no network", "profiling", "ram", "automix", "autoplay"], ["experiments", "raw animated artwork", "disable ram optimizations", "app worker limit", "workers", "threads", "concurrency"], ["performance overlay", "overlay", "fps", "ram", "frame pacing", "metrics"], ["notifications", "toast", "warning", "preview"], ["verbose logging", "logging"], ["log device specs", "device", "specs", "ios", "liquid glass", "diagnostics"], ["dump app files", "export app data", "zip", "all files"], ["export all logs"], ["clear all logs"], ["force refresh home"], ["logged play events"], ["queue length"], ["logs", "diagnostics"], ["developer"]]) {
+           sectionVisible(s, [["developer tools", "simulation", "simulate", "slow server", "expired session", "no network", "profiling", "ram", "automix", "autoplay"], ["experiments", "raw animated artwork", "disable ram optimizations", "app worker limit", "workers", "threads", "concurrency"], ["enhanced caching", "playback cache", "cache performance", "prefetch", "force cache mode", "seamless", "buffer"], ["performance overlay", "overlay", "fps", "ram", "frame pacing", "metrics"], ["notifications", "toast", "warning", "preview"], ["verbose logging", "logging"], ["log device specs", "device", "specs", "ios", "liquid glass", "diagnostics"], ["dump app files", "export app data", "zip", "all files"], ["export all logs"], ["clear all logs"], ["force refresh home"], ["logged play events"], ["queue length"], ["logs", "diagnostics"], ["developer"]]) {
         Section {
             NavigationLink(value: SettingsRoute.developerTools) {
                 Label("Developer Tools", systemImage: "hammer")
@@ -33,6 +33,11 @@ extension SettingsView {
 
             NavigationLink(value: SettingsRoute.developerExperiments) {
                 Label("Experiments", systemImage: "testtube.2")
+            }
+            .foregroundStyle(Theme.primaryText)
+
+            NavigationLink(value: SettingsRoute.playbackCacheDiagnostics) {
+                Label("Playback Cache", systemImage: "bolt.horizontal.circle")
             }
             .foregroundStyle(Theme.primaryText)
 

@@ -10,11 +10,15 @@ struct LyricsViewWithState: View {
     @State private var activeLine: Int = 0
     @State private var translatedTexts: [Int: String] = [:]
     @State private var isShowingTranslation = false
+    @State private var isTranslationRequestPending = false
     @State private var isTranslating = false
     @State private var translationRequestID = 0
 
+    private static let translationRequestTimeoutNanoseconds: UInt64 = 5_000_000_000
+
     private var audio: AudioPlayer { appState.audioPlayer }
     private var isSynced: Bool { lines.first.map { $0.time >= 0 } ?? false }
+    private var isTranslationBusy: Bool { isTranslationRequestPending || isTranslating }
 
     var body: some View {
         Group {
@@ -140,22 +144,30 @@ struct LyricsViewWithState: View {
     private var translationButton: some View {
 #if canImport(Translation)
         if #available(iOS 18.0, *), !lines.isEmpty {
-            Button { toggleTranslation() } label: {
-                ZStack {
-                    if isTranslating {
-                        ProgressView().tint(.white)
-                    } else {
-                        Image(systemName: "translate")
-                            .font(.system(size: 15, weight: .semibold))
+            ZStack {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {}
+
+                Button { toggleTranslation() } label: {
+                    ZStack {
+                        if isTranslationBusy {
+                            ProgressView().tint(.white)
+                        } else {
+                            Image(systemName: "translate")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
                     }
+                    .foregroundStyle(isShowingTranslation ? Theme.accent : .white.opacity(0.78))
+                    .frame(width: 36, height: 36)
+                    .glassCircle()
+                    .frame(width: 52, height: 52)
+                    .contentShape(Rectangle())
                 }
-                .foregroundStyle(isShowingTranslation ? Theme.accent : .white.opacity(0.78))
-                .frame(width: 36, height: 36)
-                .glassCircle()
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-            .padding(.top, 8)
-            .padding(.trailing, 14)
+            .frame(width: 60, height: 52)
+            .padding(.trailing, 4)
         }
 #endif
     }
@@ -168,8 +180,14 @@ struct LyricsViewWithState: View {
                 requestID: translationRequestID,
                 lines: lines,
                 isShowing: isShowingTranslation,
-                setTranslating: { isTranslating = $0 },
-                finish: { translatedTexts = $0 }
+                setTranslating: {
+                    if $0 { isTranslationRequestPending = false }
+                    isTranslating = $0
+                },
+                finish: {
+                    translatedTexts = $0
+                    isTranslationRequestPending = false
+                }
             )
         }
 #else
@@ -180,12 +198,23 @@ struct LyricsViewWithState: View {
 #if canImport(Translation)
     @available(iOS 18.0, *)
     private func toggleTranslation() {
+        guard !isTranslationBusy else { return }
+
         if isShowingTranslation {
             isShowingTranslation = false
             return
         }
+
+        isTranslationRequestPending = true
         isShowingTranslation = true
         translationRequestID += 1
+        let requestID = translationRequestID
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.translationRequestTimeoutNanoseconds)
+            if isTranslationRequestPending, translationRequestID == requestID {
+                isTranslationRequestPending = false
+            }
+        }
     }
 #endif
 
@@ -200,6 +229,8 @@ struct LyricsViewWithState: View {
         lines = await LyricsService.shared.lyrics(for: song, client: client)
         translatedTexts = [:]
         isShowingTranslation = false
+        isTranslationRequestPending = false
+        isTranslating = false
         translationRequestID = 0
         activeLine = 0
         updateActiveLine(for: audio.currentTime)

@@ -37,12 +37,14 @@ struct MusicServiceCapabilities: OptionSet, Sendable {
     static let playCounts        = MusicServiceCapabilities(rawValue: 1 << 9)
     static let replayGain        = MusicServiceCapabilities(rawValue: 1 << 10)
     static let bpmTag            = MusicServiceCapabilities(rawValue: 1 << 11)
+    static let serverScrobbling  = MusicServiceCapabilities(rawValue: 1 << 12)
+    static let playlistReordering = MusicServiceCapabilities(rawValue: 1 << 13)
 
     // OpenSubsonic reference surface.
     static let subsonicFull: MusicServiceCapabilities = [
         .folderBrowsing, .publicSharing, .favorites, .syncedLyrics, .topSongsByArtist,
         .playlistComments, .artistBiography, .songsByGenre, .recentlyPlayed,
-        .playCounts, .replayGain, .bpmTag,
+        .playCounts, .replayGain, .bpmTag, .serverScrobbling, .playlistReordering,
     ]
 }
 
@@ -98,6 +100,7 @@ protocol MusicService: Sendable {
     func deletePlaylist(id: String) async throws
     func renamePlaylist(playlistID: String, name: String) async throws
     func updatePlaylistComment(playlistID: String, comment: String) async throws
+    func replacePlaylistSongs(playlistID: String, songIDs: [String]) async throws
 
     // favorites
     func star(id: String) async throws
@@ -105,6 +108,7 @@ protocol MusicService: Sendable {
 
     // stats
     func getMusicFolderStats() async throws -> (artists: Int, albums: Int, songs: Int)
+    func scrobble(id: String, at date: Date?, submission: Bool) async throws
 
     // lyrics
     func lyricsBySongId(id: String) async throws -> LyricsList?
@@ -144,6 +148,10 @@ extension MusicService {
     func allAlbums(size: Int) async throws -> [Album] { try await allAlbums(size: size, offset: 0) }
     func songsByGenre(_ genre: String, count: Int) async throws -> [Song] {
         try await songsByGenre(genre, count: count, offset: 0)
+    }
+    func scrobble(id: String, at date: Date?, submission: Bool) async throws {}
+    func replacePlaylistSongs(playlistID: String, songIDs: [String]) async throws {
+        throw SubsonicError.server(code: 0, message: "Playlist reordering is not supported by this server.")
     }
 }
 

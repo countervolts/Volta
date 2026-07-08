@@ -148,9 +148,11 @@ extension SettingsView {
     @ViewBuilder
     var cacheSection: some View {
         let s = "Storage"
-        if sectionVisible(s, [["downloaded tracks", "download missing songs", "download all missing", "download all music", "artwork cache", "local artwork library", "cover", "artist pictures", "lyrics cache", "local lyrics", "save lyrics", "app data", "total", "clear downloads", "clear artwork", "delete local artwork", "clear lyrics", "cache", "storage"], ["download local artwork library", "cover", "covers", "album artwork", "artist pictures", "local images"]]) {
+        if sectionVisible(s, [["downloaded tracks", "download missing songs", "download all missing", "download all music", "playback cache", "enhanced caching", "prefetch", "artwork cache", "local artwork library", "cover", "artist pictures", "lyrics cache", "local lyrics", "save lyrics", "app data", "total", "clear downloads", "clear playback cache", "clear artwork", "delete local artwork", "clear lyrics", "cache", "storage"], ["download local artwork library", "cover", "covers", "album artwork", "artist pictures", "local images"]]) {
         Section {
             LabeledContent("Downloaded Tracks", value: downloadsSize)
+                .foregroundStyle(Theme.primaryText)
+            LabeledContent("Playback Cache", value: playbackCacheSize)
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("Artwork Cache", value: artworkSize)
                 .foregroundStyle(Theme.primaryText)
@@ -182,6 +184,11 @@ extension SettingsView {
                 showClearCacheAlert = true
             } label: {
                 Label("Clear Downloads", systemImage: "trash")
+            }
+            Button(role: .destructive) {
+                clearPlaybackCache()
+            } label: {
+                Label("Clear Playback Cache", systemImage: "bolt.horizontal.circle")
             }
             Button(role: .destructive) {
                 showClearArtworkAlert = true
@@ -591,9 +598,11 @@ extension SettingsView {
             }
             let localArtwork = await ArtworkLoader.shared.pinnedArtworkSize()
             let lyrics = await LyricsService.shared.storageSizeBytes()
-            let total = sizes.downloads + sizes.artwork + sizes.data + sizes.logs
+            let playback = PlaybackCacheService.shared.totalBytes()
+            let total = sizes.downloads + playback + sizes.artwork + sizes.data + sizes.logs
 
             downloadsSize  = SettingsView.formatBytes(sizes.downloads)
+            playbackCacheSize = SettingsView.formatBytes(playback)
             artworkSize    = SettingsView.formatBytes(sizes.artwork)
             localArtworkSize = SettingsView.formatBytes(localArtwork)
             lyricsSize = SettingsView.formatBytes(lyrics)
@@ -604,6 +613,12 @@ extension SettingsView {
             logsSize       = SettingsView.formatBytes(sizes.logs)
             totalCacheSize = SettingsView.formatBytes(total)
         }
+    }
+
+    func clearPlaybackCache() {
+        PlaybackCacheService.shared.clear()
+        VoltaNotificationCenter.shared.post("Playback cache cleared", tone: .success)
+        refreshCacheSize()
     }
 
     func clearArtworkCache() {

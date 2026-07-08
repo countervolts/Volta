@@ -86,6 +86,7 @@ struct SettingsBackupPayload: Codable {
 enum SettingsBackupManager {
     private static let keys: Set<String> = [
         "gaplessPlayback", "replayGainMode", "crossfadeDurationSeconds",
+        "enhancedPlaybackCaching", "developerPlaybackCacheMode",
         "automixStyle", "automixMaxBlendSeconds", "automixSilenceTrim",
         "automixTempoMatch", "autoplayEnabled", "playbackTransitionMode",
         "crossfadeEnabled", "streamingBitrate", "streamingBitrateCell",

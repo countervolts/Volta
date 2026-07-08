@@ -23,6 +23,7 @@ struct JellyfinClient: MusicService {
         var caps: MusicServiceCapabilities = [
             .folderBrowsing, .favorites, .topSongsByArtist, .artistBiography,
             .songsByGenre, .recentlyPlayed, .playCounts, .replayGain,
+            .playlistReordering,
         ]
         if flavor == .jellyfin { caps.insert(.syncedLyrics) }
         return caps
@@ -409,6 +410,38 @@ struct JellyfinClient: MusicService {
         _ = try await request("DELETE", "/Playlists/\(playlistID)/Items", query: [
             URLQueryItem(name: "EntryIds", value: entryId),
         ])
+    }
+
+    func replacePlaylistSongs(playlistID: String, songIDs: [String]) async throws {
+        let items = try await get("/Playlists/\(playlistID)/Items", query: [
+            URLQueryItem(name: "UserId", value: userId),
+        ], as: JFItemsResponse.self).Items ?? []
+
+        var entries: [(songID: String, playlistItemID: String)] = items.compactMap { item in
+            guard let playlistItemID = item.PlaylistItemId else { return nil }
+            return (item.Id, playlistItemID)
+        }
+
+        var used = Set<Int>()
+        let targetOrder: [(songID: String, playlistItemID: String)] = songIDs.compactMap { songID in
+            guard let index = entries.indices.first(where: { entries[$0].songID == songID && !used.contains($0) }) else {
+                return nil
+            }
+            used.insert(index)
+            return entries[index]
+        }
+        guard targetOrder.count == entries.count, targetOrder.count == songIDs.count else {
+            throw SubsonicError.invalidResponse
+        }
+
+        for targetIndex in targetOrder.indices {
+            let target = targetOrder[targetIndex]
+            guard let currentIndex = entries.firstIndex(where: { $0.playlistItemID == target.playlistItemID }),
+                  currentIndex != targetIndex else { continue }
+            _ = try await request("POST", "/Playlists/\(playlistID)/Items/\(target.playlistItemID)/Move/\(targetIndex)")
+            let moved = entries.remove(at: currentIndex)
+            entries.insert(moved, at: targetIndex)
+        }
     }
 
     func deletePlaylist(id: String) async throws {

@@ -35,6 +35,23 @@ private enum SavedPlaybackSessionStore {
     static let version = 1
 }
 
+private enum PlaybackHistoryStore {
+    static let keyPrefix = "playbackHistory"
+    static let maxCount = 50
+
+    static func key(for serverID: String) -> String {
+        "\(keyPrefix).\(serverID)"
+    }
+}
+
+private enum PlaybackURLSource: String {
+    case download
+    case playbackCache = "cache"
+    case stream
+
+    var isUserDownload: Bool { self == .download }
+}
+
 // User-tunable infinite-play fill style.
 enum InfinitePlayStyle: String, CaseIterable, Identifiable, Sendable {
     case random      // any songs from the library
@@ -248,6 +265,7 @@ final class AudioPlayer {
     private(set) var queueSourceTitle: String = ""
     private(set) var queueSourceAlbum: Album?
     private(set) var queueSourcePlaylist: Playlist?
+    private(set) var playbackHistory: [Song] = []
 
     private(set) var isShuffle = false
     private(set) var repeatMode: RepeatMode = .off
@@ -371,13 +389,21 @@ final class AudioPlayer {
     }
 
     private func applyEqualizer(to item: AVPlayerItem) {
-        guard EqualizerEngine.shared.isAnyEffectActive, !PerformanceMode.bypassAudioEffects else {
+        let visualizerActive = AudioVisualizerEngine.shared.isActive
+        let effectsActive = EqualizerEngine.shared.isAnyEffectActive && !PerformanceMode.bypassAudioEffects
+        guard visualizerActive || effectsActive else {
             item.audioMix = nil; return
         }
         Task { @MainActor [weak self] in
             guard self != nil else { return }
+            let currentVisualizerActive = AudioVisualizerEngine.shared.isActive
+            let currentEffectsActive = EqualizerEngine.shared.isAnyEffectActive && !PerformanceMode.bypassAudioEffects
+            guard currentVisualizerActive || currentEffectsActive else {
+                item.audioMix = nil
+                return
+            }
             guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first,
-                  let tap = EqualizerEngine.shared.makeTap() else { return }
+                  let tap = EqualizerEngine.shared.makeTap(bypassEffects: !currentEffectsActive) else { return }
             let params = AVMutableAudioMixInputParameters(track: track)
             params.audioTapProcessor = tap
             let mix = AVMutableAudioMix()
@@ -391,6 +417,7 @@ final class AudioPlayer {
         transitionMode == .automix
             && AutoMixBassSwap.shared.isEnabled
             && !EqualizerEngine.shared.isAnyEffectActive
+            && !AudioVisualizerEngine.shared.isActive
             && !PerformanceMode.bypassAudioEffects
     }
 
@@ -434,8 +461,15 @@ final class AudioPlayer {
     }
 
     func updateClient(_ client: (any MusicService)?, serverID: String? = nil) {
+        let previousServerID = currentServerID
+        if previousServerID != serverID || client == nil {
+            PlaybackCacheService.shared.cancelPrefetches()
+        }
         self.client = client
         currentServerID = serverID
+        if previousServerID != serverID {
+            loadPlaybackHistory(for: serverID)
+        }
         DownloadService.shared.updateClient(client)
         AppLogger.shared.log(
             "Playback client updated; connected=\(client != nil)",
@@ -474,6 +508,34 @@ final class AudioPlayer {
 
     func play(song: Song) {
         playQueue([song], startIndex: 0, source: song.album ?? "")
+    }
+
+    func playFromHistory(_ song: Song) {
+        suppressTransitionsBriefly()
+        cancelTransitionPlayback()
+
+        if currentSong?.id == song.id, queue.indices.contains(currentIndex) {
+            playCurrent()
+            return
+        }
+
+        guard !queue.isEmpty else {
+            play(song: song)
+            return
+        }
+
+        invalidatePreloadedNext()
+        resetPreparedTransitionPlan()
+        let insertionIndex = min(currentIndex + 1, queue.count)
+        queue.insert(song, at: insertionIndex)
+        currentIndex = insertionIndex
+        playCurrent()
+    }
+
+    func clearPlaybackHistory() {
+        playbackHistory = []
+        guard let currentServerID else { return }
+        UserDefaults.standard.removeObject(forKey: PlaybackHistoryStore.key(for: currentServerID))
     }
 
     func playArtist(_ songs: [Song], artist: Artist) {
@@ -547,7 +609,7 @@ final class AudioPlayer {
             if currentSongStartedAt == nil {
                 currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, currentTime))
             }
-            ThirdPartyScrobbler.shared.notifyNowPlaying(song: song, startedAt: currentSongStartedAt ?? Date())
+            notifyNowPlaying(for: song)
         }
         AppLogger.shared.log(
             "Playback \(isPlaying ? "resumed" : "paused"); songID=\(currentSong?.id ?? "none"); elapsed=\(String(format: "%.3f", liveTime()))s",
@@ -575,6 +637,7 @@ final class AudioPlayer {
             "Playback stopped and queue cleared; songID=\(currentSong?.id ?? "none"); queueCount=\(queue.count)",
             category: .playback
         )
+        PlaybackCacheService.shared.cancelPrefetches()
         pauseAllPlayers()
         cancelTransitionPlayback(keepPaused: true)
         artworkLoadTask?.cancel(); artworkLoadTask = nil
@@ -628,6 +691,57 @@ final class AudioPlayer {
 
     func liveDuration() -> TimeInterval {
         playbackTimeSnapshot().duration
+    }
+
+    func setVisualizerActive(_ active: Bool) {
+        AudioVisualizerEngine.shared.setActive(active)
+        if let item = player.currentItem {
+            applyEqualizer(to: item)
+        }
+        if let gaplessNextItem {
+            applyEqualizer(to: gaplessNextItem)
+        }
+    }
+
+    func visualizerSnapshot() -> AudioVisualizerSnapshot {
+        AudioVisualizerEngine.shared.snapshot()
+    }
+
+    private func notifyNowPlaying(for song: Song) {
+        let startedAt = currentSongStartedAt ?? Date()
+        ThirdPartyScrobbler.shared.notifyNowPlaying(song: song, startedAt: startedAt)
+        guard let client, client.capabilities.contains(.serverScrobbling) else { return }
+        Task {
+            do {
+                try await client.scrobble(id: song.id, at: nil, submission: false)
+            } catch {
+                AppLogger.shared.log(
+                    "Server now-playing scrobble failed: '\(song.title)' - \(error.localizedDescription)",
+                    category: .playback,
+                    level: .warning
+                )
+            }
+        }
+    }
+
+    private func submitServerScrobble(for song: Song, startedAt: Date) {
+        guard let client, client.capabilities.contains(.serverScrobbling) else { return }
+        Task {
+            do {
+                try await client.scrobble(id: song.id, at: startedAt, submission: true)
+                AppLogger.shared.log("Server scrobble submitted: '\(song.title)'", category: .playback)
+            } catch {
+                AppLogger.shared.log(
+                    "Server scrobble failed: '\(song.title)' - \(error.localizedDescription)",
+                    category: .playback,
+                    level: .warning
+                )
+            }
+        }
+    }
+
+    func refreshPlaybackCache() {
+        warmUpcomingStreams()
     }
 
     // Read the AVPlayer clock and item duration once, normalize them together,
@@ -850,6 +964,7 @@ final class AudioPlayer {
                 currentIndex += 1
             }
         }
+        warmUpcomingStreams()
     }
 
     func playNext(_ song: Song) {
@@ -868,12 +983,14 @@ final class AudioPlayer {
         resetPreparedTransitionPlan()
         scheduleGaplessPreload()
         prepareTransitionPlanIfNeeded()
+        warmUpcomingStreams()
     }
 
     func addToQueue(_ song: Song) {
         guard !queue.isEmpty else { play(song: song); return }
         queue.append(song)
         VoltaNotificationCenter.shared.post(L(.notif_added_to_queue), tone: .queue)
+        warmUpcomingStreams()
     }
 
     func playNext(_ songs: [Song]) {
@@ -890,12 +1007,14 @@ final class AudioPlayer {
         resetPreparedTransitionPlan()
         scheduleGaplessPreload()
         prepareTransitionPlanIfNeeded()
+        warmUpcomingStreams()
     }
 
     func addToQueue(_ songs: [Song]) {
         guard !songs.isEmpty else { return }
         guard !queue.isEmpty else { playQueue(songs, startIndex: 0, source: "Selection"); return }
         queue.append(contentsOf: songs)
+        warmUpcomingStreams()
     }
 
     private func insertSongsNext(_ songs: [Song]) {
@@ -930,6 +1049,7 @@ final class AudioPlayer {
             if currentIndex >= queue.count { currentIndex = max(0, queue.count - 1) }
             if !queue.isEmpty { playCurrent() }
         }
+        warmUpcomingStreams()
     }
 
     // MARK: - Modes
@@ -943,6 +1063,7 @@ final class AudioPlayer {
         resetPreparedTransitionPlan()
         scheduleGaplessPreload()
         if Date() >= transitionSuppressedUntil { prepareTransitionPlanIfNeeded() }
+        warmUpcomingStreams()
     }
 
     // Shuffle only the songs after the current one; played + current stay put.
@@ -1263,6 +1384,57 @@ final class AudioPlayer {
 
     // MARK: - Private
 
+    private func recordCurrentSongInHistory(unless nextSongID: String? = nil) {
+        guard let song = currentSong,
+              song.id != nextSongID else { return }
+
+        playbackHistory.removeAll { $0.id == song.id }
+        playbackHistory.insert(song, at: 0)
+        if playbackHistory.count > PlaybackHistoryStore.maxCount {
+            playbackHistory.removeLast(playbackHistory.count - PlaybackHistoryStore.maxCount)
+        }
+        persistPlaybackHistory()
+    }
+
+    private func loadPlaybackHistory(for serverID: String?) {
+        guard let serverID else {
+            playbackHistory = []
+            return
+        }
+        guard let data = UserDefaults.standard.data(forKey: PlaybackHistoryStore.key(for: serverID)) else {
+            playbackHistory = []
+            return
+        }
+
+        do {
+            let songs = try JSONDecoder().decode([Song].self, from: data)
+            var seen = Set<String>()
+            playbackHistory = Array(songs.filter { seen.insert($0.id).inserted }.prefix(PlaybackHistoryStore.maxCount))
+        } catch {
+            AppLogger.shared.log(
+                "Playback history unreadable: \(error.localizedDescription)",
+                category: .playback,
+                level: .warning
+            )
+            playbackHistory = []
+            UserDefaults.standard.removeObject(forKey: PlaybackHistoryStore.key(for: serverID))
+        }
+    }
+
+    private func persistPlaybackHistory() {
+        guard let currentServerID else { return }
+        do {
+            let data = try JSONEncoder().encode(Array(playbackHistory.prefix(PlaybackHistoryStore.maxCount)))
+            UserDefaults.standard.set(data, forKey: PlaybackHistoryStore.key(for: currentServerID))
+        } catch {
+            AppLogger.shared.log(
+                "Playback history save failed: \(error.localizedDescription)",
+                category: .playback,
+                level: .warning
+            )
+        }
+    }
+
     private func playCurrent() {
         guard !queue.isEmpty, currentIndex < queue.count else { return }
         let song = queue[currentIndex]
@@ -1292,6 +1464,13 @@ final class AudioPlayer {
     // Best-effort metadata warmup for upcoming original streams.
     private func warmUpcomingStreams() {
         guard let client else { return }
+        var cacheCandidates = Array(queue.dropFirst(currentIndex + 1).prefix(5))
+        if let first = cacheCandidates.first,
+           first.id == gaplessNextSongID {
+            cacheCandidates.removeFirst()
+        }
+        PlaybackCacheService.shared.prefetch(cacheCandidates, client: client)
+
         let upper = min(currentIndex + 3, queue.count)
         guard currentIndex + 1 < upper else { return }
         let ids = queue[(currentIndex + 1)..<upper]
@@ -1323,16 +1502,15 @@ final class AudioPlayer {
         resetPreparedTransitionPlan()
         inactivePlayer.pause()
         inactivePlayer.removeAllItems()
-        let localURL = DownloadService.shared.localURL(for: song)
-        let streamURL = localURL ?? client?.streamURL(id: song.id)
-        guard let url = streamURL else {
+        guard let urlInfo = playbackURL(for: song) else {
             AppLogger.shared.log("Playback failed: no stream URL for '\(song.title)'", category: .playback, level: .error)
             return
         }
-        let src = localURL != nil ? "local" : "stream"
-        if localURL != nil { DownloadService.shared.markPlayed(song.id) }
+        recordCurrentSongInHistory(unless: song.id)
+        let url = urlInfo.url
+        if urlInfo.source.isUserDownload { DownloadService.shared.markPlayed(song.id) }
         AppLogger.shared.log(
-            "Track starting; title='\(song.title)'; artist='\(song.artist ?? "?")'; source=\(src); index=\(currentIndex); queueCount=\(queue.count)",
+            "Track starting; title='\(song.title)'; artist='\(song.artist ?? "?")'; source=\(urlInfo.source.rawValue); index=\(currentIndex); queueCount=\(queue.count)",
             category: .playback
         )
 
@@ -1363,7 +1541,7 @@ final class AudioPlayer {
         }
 
         updateNowPlaying()
-        ThirdPartyScrobbler.shared.notifyNowPlaying(song: song, startedAt: currentSongStartedAt ?? Date())
+        notifyNowPlaying(for: song)
         persistLastPlaybackSession()
         artworkLoadTask?.cancel()
         artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: song) }
@@ -1390,8 +1568,7 @@ final class AudioPlayer {
         let nextIndex = currentIndex + 1
         guard nextIndex < queue.count else { return }
         let nextSong = queue[nextIndex]
-        let localURL = DownloadService.shared.localURL(for: nextSong)
-        guard let url = localURL ?? client?.streamURL(id: nextSong.id) else {
+        guard let urlInfo = playbackURL(for: nextSong) else {
             AppLogger.shared.log(
                 "Gapless pre-buffer skipped: no stream URL for '\(nextSong.title)'",
                 category: .playback,
@@ -1399,6 +1576,7 @@ final class AudioPlayer {
             )
             return
         }
+        let url = urlInfo.url
         let nextItem = makePlayerItem(url: url)
         applyEqualizer(to: nextItem)
         guard player.canInsert(nextItem, after: currentItem) else {
@@ -1451,6 +1629,7 @@ final class AudioPlayer {
             return false
         }
 
+        recordCurrentSongInHistory(unless: song.id)
         currentIndex = nextIndex
         currentPlayerItem = queuedItem
         gaplessNextItem = nil
@@ -1475,7 +1654,7 @@ final class AudioPlayer {
             category: .playback
         )
         updateNowPlaying()
-        ThirdPartyScrobbler.shared.notifyNowPlaying(song: song, startedAt: currentSongStartedAt ?? Date())
+        notifyNowPlaying(for: song)
         persistLastPlaybackSession()
         artworkLoadTask?.cancel()
         artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: song) }
@@ -1895,12 +2074,13 @@ final class AudioPlayer {
         primedSongID = nil
         AutoMixBassSwap.shared.activate(currentBassID)
 
-        if urlInfo.isLocal { DownloadService.shared.markPlayed(nextSong.id) }
+        if urlInfo.source.isUserDownload { DownloadService.shared.markPlayed(nextSong.id) }
         let oldStartVolume = oldPlayer.volume
         // plan.volumeMatch ducks a hotter incoming master to the outgoing's level
         // (Sound Check-style); 1.0 whenever ReplayGain already normalizes it.
         let newTargetVolume = replayGainVolume(for: nextSong) * plan.volumeMatch
 
+        recordCurrentSongInHistory(unless: nextSong.id)
         activePlayer = newPlayer
         currentPlayerItem = nextItem
         targetVolume = newTargetVolume
@@ -1921,7 +2101,7 @@ final class AudioPlayer {
         // Incoming stays at true tempo.
         newPlayer.play()
         updateNowPlaying()
-        ThirdPartyScrobbler.shared.notifyNowPlaying(song: nextSong, startedAt: currentSongStartedAt ?? Date())
+        notifyNowPlaying(for: nextSong)
         persistLastPlaybackSession()
         artworkLoadTask?.cancel()
         artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: nextSong) }
@@ -1994,12 +2174,18 @@ final class AudioPlayer {
         }
     }
 
-    private func playbackURL(for song: Song) -> (url: URL, isLocal: Bool)? {
+    private func playbackURL(for song: Song) -> (url: URL, source: PlaybackURLSource)? {
         if let localURL = DownloadService.shared.localURL(for: song) {
-            return (localURL, true)
+            return (localURL, .download)
         }
-        guard let streamURL = client?.streamURL(id: song.id) else { return nil }
-        return (streamURL, false)
+        if let client,
+           let cachedURL = PlaybackCacheService.shared.cachedURL(for: song, client: client) {
+            return (cachedURL, .playbackCache)
+        }
+        guard let client,
+              let streamURL = client.streamURL(id: song.id) else { return nil }
+        PlaybackCacheService.shared.cancelPrefetch(for: song, client: client)
+        return (streamURL, .stream)
     }
 
     private func cancelTransitionPlayback(keepPaused: Bool = false) {
@@ -2191,6 +2377,7 @@ final class AudioPlayer {
                 listenedDuration: listenedDuration,
                 trackDuration: trackDuration
             )
+            submitServerScrobble(for: song, startedAt: startedAt)
             AppLogger.shared.log("Play event recorded: '\(song.title)' at \(Int(currentTime))s / \(Int(duration))s", category: .playback)
         }
     }

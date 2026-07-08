@@ -84,39 +84,50 @@ struct QueueView: View {
             }()
 
             List {
-                ForEach(Array(upcoming.enumerated()), id: \.element.id) { i, song in
-                    let globalIndex = audio.currentIndex + 1 + i
-                    queueRow(song: song, globalIndex: globalIndex)
-                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            Button {
-                                let nextSlot = audio.currentIndex + 1
-                                if globalIndex != nextSlot {
-                                    audio.moveQueueItem(
-                                        from: IndexSet(integer: globalIndex),
-                                        to: nextSlot
-                                    )
-                                }
-                            } label: {
-                                Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
-                            }
-                            .tint(.orange)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                audio.removeQueueItem(at: globalIndex)
-                            } label: {
-                                Label(L(.action_remove), systemImage: Symbols.trash)
-                            }
-                        }
+                if upcoming.isEmpty {
+                    Text("Nothing queued")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .frame(maxWidth: .infinity, minHeight: 74, alignment: .leading)
+                        .padding(.horizontal, 20)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                         .listRowSeparator(.hidden)
-                }
-                .onMove { indices, destination in
-                    let offset = audio.currentIndex + 1
-                    let globalFrom = IndexSet(indices.map { $0 + offset })
-                    let globalTo = destination + offset
-                    audio.moveQueueItem(from: globalFrom, to: globalTo)
+                } else {
+                    ForEach(Array(upcoming.enumerated()), id: \.element.id) { i, song in
+                        let globalIndex = audio.currentIndex + 1 + i
+                        queueRow(song: song, globalIndex: globalIndex)
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    let nextSlot = audio.currentIndex + 1
+                                    if globalIndex != nextSlot {
+                                        audio.moveQueueItem(
+                                            from: IndexSet(integer: globalIndex),
+                                            to: nextSlot
+                                        )
+                                    }
+                                } label: {
+                                    Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
+                                }
+                                .tint(.orange)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    audio.removeQueueItem(at: globalIndex)
+                                } label: {
+                                    Label(L(.action_remove), systemImage: Symbols.trash)
+                                }
+                            }
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                    }
+                    .onMove { indices, destination in
+                        let offset = audio.currentIndex + 1
+                        let globalFrom = IndexSet(indices.map { $0 + offset })
+                        let globalTo = destination + offset
+                        audio.moveQueueItem(from: globalFrom, to: globalTo)
+                    }
                 }
             }
             .listStyle(.plain)

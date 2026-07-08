@@ -7,8 +7,208 @@ extension Notification.Name {
     static let equalizerToggled = Notification.Name("EqualizerToggled")
 }
 
+struct AudioVisualizerSnapshot: Sendable {
+    static let bandCount = 48
+    static let silent = AudioVisualizerSnapshot(
+        bands: [Double](repeating: 0, count: bandCount),
+        rms: 0,
+        peak: 0,
+        beat: 0,
+        timestamp: 0
+    )
+
+    let bands: [Double]
+    let rms: Double
+    let peak: Double
+    let beat: Double
+    let timestamp: Double
+}
+
+final class AudioVisualizerEngine {
+    static let shared = AudioVisualizerEngine()
+
+    private let windowSize = 1024
+    private let analysisHop = 512
+    private let bandCount = AudioVisualizerSnapshot.bandCount
+    private var lock = os_unfair_lock_s()
+    private var active = false
+    private var sampleRate = 44_100.0
+    private var ring = [Double](repeating: 0, count: 1024)
+    private var window: [Double]
+    private var bandFrequencies: [Double]
+    private var writeIndex = 0
+    private var hasWindow = false
+    private var samplesSinceAnalysis = 0
+    private var bands = [Double](repeating: 0, count: AudioVisualizerSnapshot.bandCount)
+    private var rms = 0.0
+    private var peak = 0.0
+    private var beat = 0.0
+    private var bassFloor = 0.05
+    private var lastBeatAt = 0.0
+    private var timestamp = 0.0
+
+    private init() {
+        let size = 1024
+        let initialSampleRate = 44_100.0
+        window = (0..<size).map { i in
+            0.5 - 0.5 * cos((2.0 * Double.pi * Double(i)) / Double(size - 1))
+        }
+        bandFrequencies = Self.makeBandFrequencies(count: AudioVisualizerSnapshot.bandCount, sampleRate: initialSampleRate)
+    }
+
+    var isActive: Bool {
+        os_unfair_lock_lock(&lock)
+        let value = active
+        os_unfair_lock_unlock(&lock)
+        return value
+    }
+
+    func setActive(_ enabled: Bool) {
+        os_unfair_lock_lock(&lock)
+        active = enabled
+        if !enabled {
+            bands = [Double](repeating: 0, count: bandCount)
+            rms = 0
+            peak = 0
+            beat = 0
+        }
+        os_unfair_lock_unlock(&lock)
+    }
+
+    func snapshot() -> AudioVisualizerSnapshot {
+        os_unfair_lock_lock(&lock)
+        let snapshot = AudioVisualizerSnapshot(
+            bands: bands,
+            rms: rms,
+            peak: peak,
+            beat: beat,
+            timestamp: timestamp
+        )
+        os_unfair_lock_unlock(&lock)
+        return snapshot
+    }
+
+    func ingest(_ bufferList: UnsafeMutablePointer<AudioBufferList>, frames: Int, sampleRate incomingSampleRate: Double) {
+        guard frames > 0 else { return }
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        guard active else { return }
+
+        if incomingSampleRate > 0, abs(incomingSampleRate - sampleRate) > 1 {
+            sampleRate = incomingSampleRate
+            bandFrequencies = Self.makeBandFrequencies(count: bandCount, sampleRate: sampleRate)
+        }
+
+        var sumSquares = 0.0
+        var instantPeak = 0.0
+        var count = 0
+
+        func append(_ sample: Double) {
+            let clipped = max(-1.0, min(1.0, sample))
+            ring[writeIndex] = clipped
+            writeIndex = (writeIndex + 1) % windowSize
+            if writeIndex == 0 { hasWindow = true }
+            let absSample = abs(clipped)
+            instantPeak = max(instantPeak, absSample)
+            sumSquares += clipped * clipped
+            count += 1
+        }
+
+        let abl = UnsafeMutableAudioBufferListPointer(bufferList)
+        if abl.count >= 2 {
+            var frameCount = frames
+            for buffer in abl {
+                frameCount = min(frameCount, Int(buffer.mDataByteSize) / MemoryLayout<Float>.size)
+            }
+            for frame in 0..<frameCount {
+                var mixed = 0.0
+                var channelCount = 0
+                for buffer in abl {
+                    guard let raw = buffer.mData else { continue }
+                    mixed += Double(raw.assumingMemoryBound(to: Float.self)[frame])
+                    channelCount += 1
+                }
+                if channelCount > 0 {
+                    append(mixed / Double(channelCount))
+                }
+            }
+        } else if abl.count == 1 {
+            let buffer = abl[0]
+            guard let raw = buffer.mData else { return }
+            let channelCount = max(1, Int(buffer.mNumberChannels))
+            let samples = raw.assumingMemoryBound(to: Float.self)
+            let totalSamples = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+            let frameCount = min(frames, totalSamples / channelCount)
+            for frame in 0..<frameCount {
+                var mixed = 0.0
+                let base = frame * channelCount
+                for channel in 0..<channelCount {
+                    mixed += Double(samples[base + channel])
+                }
+                append(mixed / Double(channelCount))
+            }
+        }
+
+        guard count > 0 else { return }
+        let instantRMS = sqrt(sumSquares / Double(count))
+        rms = rms * 0.78 + instantRMS * 0.22
+        peak = max(instantPeak, peak * 0.88)
+        samplesSinceAnalysis += count
+        if hasWindow, samplesSinceAnalysis >= analysisHop {
+            samplesSinceAnalysis = 0
+            analyzeLocked()
+        }
+    }
+
+    private func analyzeLocked() {
+        let now = ProcessInfo.processInfo.systemUptime
+        for band in 0..<bandCount {
+            let frequency = bandFrequencies[band]
+            let omega = (2.0 * Double.pi * frequency) / sampleRate
+            let coefficient = 2.0 * cos(omega)
+            var q1 = 0.0
+            var q2 = 0.0
+
+            for i in 0..<windowSize {
+                let index = (writeIndex + i) % windowSize
+                let sample = ring[index] * window[i]
+                let q0 = coefficient * q1 - q2 + sample
+                q2 = q1
+                q1 = q0
+            }
+
+            let power = max(q1 * q1 + q2 * q2 - coefficient * q1 * q2, 1.0e-12)
+            let db = 10.0 * log10(power / Double(windowSize))
+            let normalized = max(0.0, min(1.0, (db + 72.0) / 56.0))
+            let shaped = pow(normalized, 0.58)
+            let smoothing = shaped > bands[band] ? 0.48 : 0.16
+            bands[band] += (shaped - bands[band]) * smoothing
+        }
+
+        let bassValues = zip(bands, bandFrequencies).filter { $0.1 <= 180 }.map(\.0)
+        let bass = bassValues.isEmpty ? bands.prefix(6).reduce(0, +) / 6.0 : bassValues.reduce(0, +) / Double(bassValues.count)
+        bassFloor = max(0.025, bassFloor * 0.96 + bass * 0.04)
+        if bass > max(0.16, bassFloor * 1.55), rms > 0.025, now - lastBeatAt > 0.22 {
+            beat = 1
+            lastBeatAt = now
+        } else {
+            beat *= 0.86
+        }
+        timestamp = now
+    }
+
+    private static func makeBandFrequencies(count: Int, sampleRate: Double) -> [Double] {
+        let low = 45.0
+        let high = min(16_000.0, sampleRate * 0.45)
+        return (0..<count).map { index in
+            let t = Double(index) / Double(max(1, count - 1))
+            return low * pow(high / low, t)
+        }
+    }
+}
+
 // Global 10-band EQ through MTAudioProcessingTap.
-// Disabled by default; no tap is attached unless an effect is active.
+// Disabled by default; no tap is attached unless an effect or the visualizer is active.
 final class EqualizerEngine {
     static let shared = EqualizerEngine()
 
@@ -98,8 +298,8 @@ final class EqualizerEngine {
     // MARK: - Tap creation
 
     // Fresh tap for one AVPlayerItem.
-    func makeTap() -> MTAudioProcessingTap? {
-        let context = TapContext()
+    func makeTap(bypassEffects: Bool = false) -> MTAudioProcessingTap? {
+        let context = TapContext(bypassEffects: bypassEffects)
         let clientInfo = UnsafeMutableRawPointer(Unmanaged.passRetained(context).toOpaque())
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
@@ -126,6 +326,7 @@ final class EqualizerEngine {
 
 // Biquad coefficients and state for one AVPlayerItem tap.
 private final class TapContext {
+    let bypassEffects: Bool
     var sampleRate: Double = 44_100
     var channels: Int = 2
     var generation: UInt64 = .max   // force first compute
@@ -146,6 +347,10 @@ private final class TapContext {
     private var coeffs = [[Double]](repeating: [1, 0, 0, 0, 0], count: EqualizerEngine.bandCount)
     // direct-form-I state per channel per band: x1, x2, y1, y2
     private var state: [[[Double]]] = []
+
+    init(bypassEffects: Bool = false) {
+        self.bypassEffects = bypassEffects
+    }
 
     func prepare(sampleRate: Double, channels: Int) {
         self.sampleRate = sampleRate > 0 ? sampleRate : 44_100
@@ -170,9 +375,9 @@ private final class TapContext {
         guard EqualizerEngine.shared.generation != generation else { return }
         let snap = EqualizerEngine.shared.snapshot()
         generation = snap.generation
-        eqEnabled = snap.eqEnabled
-        mono = snap.mono
-        spatial = snap.spatial
+        eqEnabled = !bypassEffects && snap.eqEnabled
+        mono = !bypassEffects && snap.mono
+        spatial = !bypassEffects && snap.spatial
         spatialAmount = snap.spatialAmount
         spatialEnhanced = snap.enhanced
         let q = 1.4
@@ -198,6 +403,7 @@ private final class TapContext {
     func process(_ bufferList: UnsafeMutablePointer<AudioBufferList>, frames: Int) {
         recomputeIfNeeded()
         guard frames > 0, !state.isEmpty else { return }
+        AudioVisualizerEngine.shared.ingest(bufferList, frames: frames, sampleRate: sampleRate)
 
         let abl = UnsafeMutableAudioBufferListPointer(bufferList)
 

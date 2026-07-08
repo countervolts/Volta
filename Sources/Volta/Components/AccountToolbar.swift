@@ -14,6 +14,7 @@ enum SettingsRoute: Hashable {
     case performanceMode
     case developerTools
     case developerExperiments
+    case playbackCacheDiagnostics
     case performanceOverlay
     case notifications
     case scrobbling
@@ -72,6 +73,8 @@ private struct SettingsDestinations: ViewModifier {
                 DeveloperToolsView()
             case .developerExperiments:
                 DeveloperExperimentsView()
+            case .playbackCacheDiagnostics:
+                PlaybackCacheDiagnosticsView()
             case .performanceOverlay:
                 PerformanceOverlaySettingsView()
             case .notifications:
