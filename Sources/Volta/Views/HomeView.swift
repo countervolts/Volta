@@ -120,7 +120,7 @@ struct HomeView: View {
     }
 
     private func artistKey(for song: Song) -> String {
-        song.artistId ?? "offline-artist-\(song.artist ?? "Unknown Artist")"
+        song.offlineArtistKey
     }
 
     private func stableSeed(_ text: String) -> UInt64 {
@@ -147,8 +147,8 @@ struct HomeView: View {
             return Album(
                 id: id,
                 name: first.album ?? "Unknown Album",
-                artist: first.artist,
-                artistId: first.artistId,
+                artist: first.primaryArtistName,
+                artistId: first.primaryArtistID,
                 coverArt: first.coverArt,
                 songCount: sortedSongs.count,
                 duration: sortedSongs.reduce(0) { $0 + ($1.duration ?? 0) },
@@ -168,15 +168,14 @@ struct HomeView: View {
     private func downloadedArtists(from songs: [Song]) -> [Artist] {
         var grouped: [String: [Song]] = [:]
         for song in songs {
-            let name = song.artist ?? "Unknown Artist"
-            grouped[song.artistId ?? "offline-artist-\(name)", default: []].append(song)
+            grouped[artistKey(for: song), default: []].append(song)
         }
         return grouped.map { id, artistSongs in
             let first = artistSongs[0]
             let albumIDs = Set(artistSongs.compactMap(\.albumId))
             return Artist(
                 id: id,
-                name: first.artist ?? "Unknown Artist",
+                name: first.primaryArtistName,
                 coverArt: first.coverArt,
                 albumCount: max(1, albumIDs.count),
                 artistImageUrl: nil,
@@ -293,7 +292,8 @@ struct HomeView: View {
         let artistGroups = Dictionary(grouping: uniqueSongs) { artistKey(for: $0) }
             .filter { $0.value.count >= 3 }
             .sorted { $0.value.count > $1.value.count }
-        if let (_, group) = artistGroups.first, let artist = group.first?.artist {
+        if let (_, group) = artistGroups.first {
+            let artist = group.first?.primaryArtistName ?? ArtistNameResolver.unknownArtist
             let picked = mixSongs(group, salt: 0xA27157)
             mixes.append(MusicMix(
                 id: "artist-\(artist)",
@@ -312,7 +312,8 @@ struct HomeView: View {
         let artistSongGroups = Dictionary(grouping: songs) { artistKey(for: $0) }
             .sorted { $0.value.count > $1.value.count }
         return artistSongGroups.prefix(2).compactMap { id, artistSongs in
-            guard let artistName = artistSongs.first?.artist else { return nil }
+            guard let first = artistSongs.first else { return nil }
+            let artistName = first.primaryArtistName
             let artistAlbums = albums.filter { album in
                 if let artistID = album.artistId {
                     return artistID == id

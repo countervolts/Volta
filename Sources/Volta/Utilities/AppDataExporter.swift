@@ -51,7 +51,7 @@ enum AppDataExporter {
             "Library/Caches/live-artwork",
             "Spotlight thumbnail caches",
             "",
-            "Note: server passwords are stored in Keychain and are never exported.",
+            "Note: server passwords and scrobbling tokens are stored in Keychain and are never exported.",
         ].joined(separator: "\n")
         try manifest.write(to: manifestURL, atomically: true, encoding: .utf8)
         files.insert(ZipSourceFile(url: manifestURL, path: "Volta-App-Data.txt"), at: 0)

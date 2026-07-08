@@ -1,6 +1,7 @@
 import Intents
 import UIKit
 
+@MainActor
 final class VoltaAppDelegate: NSObject, UIApplicationDelegate {
     private let siriMediaIntentHandler = SiriMediaIntentHandler()
 
@@ -10,5 +11,12 @@ final class VoltaAppDelegate: NSObject, UIApplicationDelegate {
         }
         return nil
     }
-}
 
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        AppState.shared.persistPlaybackSession()
+    }
+
+    func applicationWillTerminate(_ application: UIApplication) {
+        AppState.shared.persistPlaybackSession()
+    }
+}

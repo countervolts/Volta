@@ -102,7 +102,7 @@ extension SettingsView {
             .foregroundStyle(Theme.primaryText)
 
             LabeledContent("Logged Play Events") {
-                Text("\(StatsStore.shared.allEvents().count)")
+                Text(loggedPlayEventCount.map(String.init) ?? "...")
                     .foregroundStyle(Theme.secondaryText)
             }
             .foregroundStyle(Theme.primaryText)
@@ -196,6 +196,7 @@ extension SettingsView {
 
     func clearPlayEvents() {
         StatsStore.shared.clearAll()
+        loggedPlayEventCount = 0
         AppLogger.shared.log("Logged play events cleared by user", category: .other, level: .warning)
         VoltaNotificationCenter.shared.post(L(.notif_listening_stats_cleared), tone: .success)
         refreshCacheSize()
@@ -208,6 +209,7 @@ struct DeveloperExperimentsView: View {
     @AppStorage(DeveloperExperiments.appWorkerLimitKey) private var appWorkerLimit = 0
     @AppStorage(DeveloperExperiments.preciseTimestampsKey) private var preciseTimestamps = false
     @AppStorage(DeveloperExperiments.fakeListeningStatsKey) private var fakeListeningStats = false
+    @AppStorage(DeveloperExperiments.instantScrobblingKey) private var instantScrobbling = false
 
     var body: some View {
         ZStack {
@@ -248,12 +250,17 @@ struct DeveloperExperimentsView: View {
                 .listRowBackground(Theme.secondaryBackground)
 
                 Section {
+                    Toggle(isOn: $instantScrobbling) {
+                        Label("Instant Scrobbling", systemImage: "bolt.badge.clock")
+                    }
+                    .tint(Theme.accent)
+
                     Toggle(isOn: $fakeListeningStats) {
                         Label("Fake Listening Stats", systemImage: "wand.and.stars")
                     }
                     .tint(Theme.accent)
                 } footer: {
-                    Text("Replaces the Listening tab in Stats with a generated dataset for screenshots. Your real play history is kept in a separate file and is fully restored when this is turned off.")
+                    Text("Instant Scrobbling records local stats and sends third-party scrobbles 1 second into each song for debugging. Fake Listening Stats replaces the Listening tab in Stats with generated screenshot data; your real play history is kept separately.")
                 }
                 .listRowBackground(Theme.secondaryBackground)
             }
@@ -280,6 +287,9 @@ struct DeveloperExperimentsView: View {
         }
         .onChange(of: preciseTimestamps) { _, enabled in
             AppLogger.shared.logAlways("Developer experiment: precise timestamps \(enabled ? "enabled" : "disabled")", category: .other)
+        }
+        .onChange(of: instantScrobbling) { _, enabled in
+            AppLogger.shared.logAlways("Developer experiment: instant scrobbling \(enabled ? "enabled" : "disabled")", category: .other)
         }
         .onChange(of: fakeListeningStats) { _, enabled in
             AppLogger.shared.logAlways("Developer experiment: fake listening stats \(enabled ? "enabled" : "disabled")", category: .other)

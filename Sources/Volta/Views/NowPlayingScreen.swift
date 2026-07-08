@@ -26,6 +26,7 @@ struct NowPlayingScreen: View {
     @State private var isAdjustingVolume = false
     @State private var artistToShow: Artist?
     @State private var albumToShow: Album?
+    @State private var showArtistAlbumPicker = false
     @State private var isFetchingArtist = false
     @State private var isFetchingAlbum = false
     @State private var tasteStore = TasteStore.shared
@@ -44,17 +45,23 @@ struct NowPlayingScreen: View {
     @State private var prevNudge: CGFloat = 0
     @State private var playerBackground = Color(white: 0.08)
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     private var audio: AudioPlayer { appState.audioPlayer }
     private var currentTaste: TasteState {
         audio.currentSong.map { tasteStore.state(for: $0.id) } ?? .neutral
+    }
+    private var isPhoneLandscape: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone && verticalSizeClass == .compact
     }
 
     var body: some View {
         ZStack {
             playerBackground.ignoresSafeArea()
 
-            if sizeClass == .regular {
+            if isPhoneLandscape {
+                phoneLandscapeLayout
+            } else if sizeClass == .regular {
                 iPadLayout
             } else {
                 phoneLayout
@@ -97,6 +104,31 @@ struct NowPlayingScreen: View {
         }
         .fullScreenCover(isPresented: $showVisualizer) {
             AudioVisualizerScreen(audio: audio)
+        }
+        .confirmationDialog(
+            audio.currentSong?.artist ?? "",
+            isPresented: $showArtistAlbumPicker,
+            titleVisibility: .visible
+        ) {
+            if audio.currentSong?.artistId != nil {
+                Button {
+                    openCurrentArtist()
+                } label: {
+                    Label(L(.action_go_to_artist), systemImage: "person.fill")
+                }
+            }
+            if audio.currentSong?.albumId != nil {
+                Button {
+                    openCurrentAlbum()
+                } label: {
+                    Label(L(.action_go_to_album), systemImage: "square.stack")
+                }
+            }
+            Button(L(.action_cancel), role: .cancel) {}
+        } message: {
+            if let album = audio.currentSong?.album {
+                Text(album)
+            }
         }
         .sheet(item: $albumToShow) { album in
             NavigationStack {
@@ -228,6 +260,492 @@ struct NowPlayingScreen: View {
         }
     }
 
+    private var phoneLandscapeLayout: some View {
+        GeometryReader { geo in
+            let safe = geo.safeAreaInsets
+            let verticalInset = [
+                CGFloat(28),
+                geo.size.height * 0.09,
+                safe.top + 14,
+                safe.bottom + 14
+            ].max() ?? 28
+            let leadingInset = max(safe.leading + 22, geo.size.width * 0.06)
+            let trailingInset = max(safe.trailing + 22, geo.size.width * 0.045)
+            let columnSpacing = max(28, geo.size.width * 0.045)
+            let minimumPanelWidth = min(360, max(250, geo.size.width * 0.36))
+            let maxArtworkFromHeight = max(190, geo.size.height - verticalInset * 2)
+            let maxArtworkFromWidth = max(
+                190,
+                geo.size.width - leadingInset - trailingInset - columnSpacing - minimumPanelWidth
+            )
+            let artworkSide = min(maxArtworkFromHeight, geo.size.width * 0.43, maxArtworkFromWidth)
+
+            HStack(alignment: .center, spacing: columnSpacing) {
+                landscapeArtworkView
+                    .frame(width: artworkSide, height: artworkSide)
+
+                landscapeRightPanel
+                    .frame(maxWidth: .infinity)
+                    .frame(height: artworkSide)
+            }
+            .padding(.leading, leadingInset)
+            .padding(.trailing, trailingInset)
+            .padding(.vertical, verticalInset)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
+            .overlay(alignment: .top) {
+                dragHandle
+                    .padding(.top, max(0, safe.top - 2))
+            }
+        }
+    }
+
+    private var landscapeArtworkView: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(white: 0.12))
+                .shadow(color: .black.opacity(0.34), radius: 26, y: 18)
+            if let live = audio.currentLiveArtwork {
+                liveArtworkView(live)
+            } else if let image = audio.currentArtwork {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: Symbols.albumPlaceholder)
+                    .font(.system(size: 64, weight: .ultraLight))
+                    .foregroundStyle(.white.opacity(0.28))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .id(audio.currentSong?.id)
+    }
+
+    private var landscapeRightPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            landscapeTrackHeader
+
+            landscapePanelContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            landscapeBottomNavigation
+        }
+    }
+
+    @ViewBuilder
+    private var landscapePanelContent: some View {
+        switch activeTab {
+        case .nowPlaying:
+            landscapeNowPlayingPanel
+        case .queue:
+            landscapeQueuePanel
+        case .lyrics:
+            LandscapeLyricsPreview()
+        }
+    }
+
+    private var landscapeTrackHeader: some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(audio.currentSong?.title ?? " ")
+                    .font(.system(size: 25, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+
+                Button { presentArtistAlbumPicker() } label: {
+                    Text(audio.currentSong?.artist ?? " ")
+                        .font(.system(size: 23, weight: .regular))
+                        .foregroundStyle(.white.opacity((isFetchingArtist || isFetchingAlbum) ? 0.35 : 0.58))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                .buttonStyle(.plain)
+                .disabled(audio.currentSong?.artistId == nil && audio.currentSong?.albumId == nil)
+            }
+
+            Spacer(minLength: 12)
+
+            HStack(spacing: 12) {
+                landscapeStarButton
+                landscapeMoreMenu
+            }
+        }
+        .padding(.top, 14)
+    }
+
+    private var landscapeStarButton: some View {
+        Button {
+            if let id = audio.currentSong?.id { audio.toggleStar(songID: id) }
+        } label: {
+            Image(systemName: audio.currentSong.map { audio.isStarred($0.id) } == true
+                  ? Symbols.star : Symbols.starEmpty)
+                .font(.system(size: 25, weight: .regular))
+                .foregroundStyle(audio.currentSong.map { audio.isStarred($0.id) } == true
+                                 ? .yellow : .white)
+                .frame(width: 40, height: 40)
+                .background(.white.opacity(0.12), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6),
+                   value: audio.currentSong.map { audio.isStarred($0.id) })
+    }
+
+    private var landscapeMoreMenu: some View {
+        Menu {
+            Button {
+                if let s = audio.currentSong { tasteStore.toggleLove(s.id) }
+            } label: {
+                Label(currentTaste == .loved ? L(.action_unlove) : L(.action_love),
+                      systemImage: currentTaste == .loved ? "heart.fill" : "heart")
+            }
+            Button {
+                if let s = audio.currentSong { tasteStore.toggleDislike(s.id) }
+            } label: {
+                Label(currentTaste == .disliked ? L(.action_remove_dislike) : L(.action_dislike),
+                      systemImage: currentTaste == .disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+            }
+            Divider()
+            Button {
+                if let s = audio.currentSong { audio.playNext(s) }
+            } label: {
+                Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            Button {
+                if let s = audio.currentSong { audio.addToQueue(s) }
+            } label: {
+                Label(L(.action_play_last), systemImage: "text.line.last.and.arrowtriangle.forward")
+            }
+            Divider()
+            Button { infoSheet = .info } label: { Label(L(.action_info), systemImage: Symbols.info) }
+            Button { infoSheet = .credits } label: { Label(L(.action_view_credits), systemImage: "list.star") }
+            Button { shareCurrentSong() } label: { Label(L(.action_share), systemImage: Symbols.share) }
+            Divider()
+            if audio.currentSong?.albumId != nil {
+                Button { openCurrentAlbum() } label: {
+                    Label(L(.action_go_to_album), systemImage: "square.stack")
+                }
+            }
+            if audio.currentSong?.artistId != nil {
+                Button { openCurrentArtist() } label: {
+                    Label(L(.action_go_to_artist), systemImage: "person.fill")
+                }
+            }
+        } label: {
+            Image(systemName: Symbols.more)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(.white.opacity(0.12), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var landscapeNowPlayingPanel: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 16)
+
+            landscapeScrubber
+
+            Spacer(minLength: 18)
+
+            landscapeTransportControls
+
+            Spacer(minLength: 20)
+
+            landscapeVolumeControl
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var landscapeScrubber: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: preciseTimestamps ? 1.0 / 60.0 : 0.2,
+                paused: !playerSettled || scrubbing || !audio.isPlaying
+            )
+        ) { _ in
+            let snapshot = audio.playbackTimeSnapshot()
+            let total = snapshot.duration
+            let t = scrubbing ? min(scrubTime, total) : snapshot.elapsed
+            VStack(spacing: 7) {
+                ScrubBar(
+                    duration: total,
+                    currentTime: t,
+                    scrubbing: $scrubbing,
+                    scrubTime: $scrubTime,
+                    onSeek: { audio.seek(to: $0) }
+                )
+                landscapeTimeLabels(elapsed: t, total: total)
+            }
+        }
+        .transaction { $0.animation = nil }
+    }
+
+    private func landscapeTimeLabels(elapsed t: TimeInterval, total: TimeInterval) -> some View {
+        HStack {
+            timeText(formatTime(t))
+            Spacer()
+            timeText("-\(formatTime(max(0, total - t)))")
+        }
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(.white.opacity(0.42))
+        .frame(height: 18)
+    }
+
+    private var landscapeTransportControls: some View {
+        HStack(spacing: 0) {
+            Spacer()
+
+            Button {
+                animatePrev()
+                audio.skipPrevious()
+            } label: {
+                Image(systemName: Symbols.previous)
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 78, height: 62)
+                    .offset(x: prevNudge)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Button { audio.togglePlayPause() } label: {
+                Image(systemName: audio.isPlaying ? Symbols.pause : Symbols.play)
+                    .font(.system(size: 48, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 92, height: 74)
+                    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: audio.isPlaying)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Button {
+                animateSkip()
+                audio.skipNext()
+            } label: {
+                Image(systemName: Symbols.next)
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 78, height: 62)
+                    .offset(x: skipNudge)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+        }
+    }
+
+    private var landscapeVolumeControl: some View {
+        HStack(spacing: 14) {
+            Image(systemName: Symbols.volumeLow)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.54))
+            SystemVolumeSlider(isInteracting: $isAdjustingVolume)
+                .frame(height: 22)
+                .scaleEffect(x: 1, y: isAdjustingVolume ? 1.55 : 1, anchor: .center)
+                .animation(.spring(response: 0.24, dampingFraction: 0.72), value: isAdjustingVolume)
+            Image(systemName: Symbols.volumeHigh)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.54))
+        }
+    }
+
+    private var landscapeQueuePanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            landscapeModeToggles
+                .padding(.top, 34)
+                .padding(.bottom, 22)
+
+            Text(L(.queue_continue_playing))
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(.white)
+            if !audio.queueSourceTitle.isEmpty {
+                Text(audio.queueSourceTitle)
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.48))
+                    .lineLimit(1)
+            }
+
+            landscapeQueueList
+                .padding(.top, 14)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var landscapeModeToggles: some View {
+        let autoplayIcon: String = switch audio.autoplayMode {
+        case .off, .random: "infinity"
+        case .algorithm: "wand.and.stars"
+        }
+        return HStack(spacing: 16) {
+            landscapeModeButton(icon: Symbols.shuffle, active: audio.isShuffle) {
+                audio.toggleShuffle()
+            }
+            landscapeModeButton(
+                icon: audio.repeatMode == .one ? Symbols.repeatOne : Symbols.repeatAll,
+                active: audio.repeatMode != .off
+            ) {
+                audio.cycleRepeat()
+            }
+            landscapeModeButton(icon: autoplayIcon, active: audio.autoplayMode != .off) {
+                audio.cycleAutoplay()
+            }
+            landscapeModeButton(icon: audio.transitionMode.icon, active: audio.transitionMode != .off) {
+                audio.cycleTransitionMode()
+            }
+        }
+    }
+
+    private func landscapeModeButton(icon: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 19, weight: .bold))
+                .foregroundStyle(active ? Color(white: 0.18) : .white.opacity(0.76))
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(active ? .white.opacity(0.68) : .white.opacity(0.11))
+                )
+                .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .animation(.spring(response: 0.3, dampingFraction: 0.74), value: active)
+    }
+
+    private var landscapeUpcomingSongs: [Song] {
+        let next = audio.currentIndex + 1
+        guard next < audio.queue.count else { return [] }
+        return Array(audio.queue[next...])
+    }
+
+    @ViewBuilder
+    private var landscapeQueueList: some View {
+        let upcoming = landscapeUpcomingSongs
+        if upcoming.isEmpty {
+            Text("Nothing queued")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.42))
+                .frame(maxWidth: .infinity, minHeight: 74, alignment: .leading)
+        } else {
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(spacing: 8) {
+                    ForEach(Array(upcoming.enumerated()), id: \.offset) { item in
+                        let globalIndex = audio.currentIndex + 1 + item.offset
+                        landscapeQueueRow(song: item.element, globalIndex: globalIndex)
+                    }
+                }
+                .padding(.bottom, 30)
+            }
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.72),
+                        .init(color: .black.opacity(0.05), location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+        }
+    }
+
+    private func landscapeQueueRow(song: Song, globalIndex: Int) -> some View {
+        Button {
+            audio.skipTo(index: globalIndex)
+        } label: {
+            HStack(spacing: 14) {
+                ArtworkView(coverArtID: song.coverArt, size: 96, cornerRadius: 6)
+                    .frame(width: 58, height: 58)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(song.title)
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(song.artist ?? "")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.48))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 10)
+
+                Image(systemName: Symbols.dragHandle)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.25))
+                    .frame(width: 36, height: 44)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var landscapeBottomNavigation: some View {
+        HStack(spacing: 0) {
+            landscapeTabButton(
+                tab: .lyrics,
+                icon: activeTab == .lyrics ? Symbols.lyrics : Symbols.lyricsInactive
+            )
+            .frame(maxWidth: .infinity)
+
+            OutputRouteButton()
+                .frame(width: 48, height: 48)
+                .scaleEffect(1.16)
+                .frame(maxWidth: .infinity)
+
+            landscapeTabButton(tab: .queue, icon: Symbols.queue)
+                .frame(maxWidth: .infinity)
+        }
+        .frame(height: 54)
+        .overlay(alignment: .topTrailing) {
+            if activeTab != .queue && audio.isShuffle {
+                landscapeShuffleBadge
+                    .offset(x: 8, y: -19)
+            }
+        }
+    }
+
+    private func landscapeTabButton(tab: PlayerTab, icon: String) -> some View {
+        let active = activeTab == tab
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                activeTab = active ? .nowPlaying : tab
+            }
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 23, weight: .semibold))
+                .foregroundStyle(active ? Color(white: 0.20) : .white.opacity(0.58))
+                .frame(width: 46, height: 46)
+                .background(active ? .white.opacity(0.68) : .clear, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var landscapeShuffleBadge: some View {
+        Button {
+            audio.toggleShuffle()
+        } label: {
+            Image(systemName: Symbols.shuffle)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(.white.opacity(0.13), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private var iPadLayout: some View {
         if activeTab != .nowPlaying {
@@ -278,6 +796,29 @@ struct NowPlayingScreen: View {
             if let url = await SongLinkService.pageURL(for: song) {
                 ShareSheet.present([url])
             }
+        }
+    }
+
+    private func presentArtistAlbumPicker() {
+        guard audio.currentSong?.artistId != nil || audio.currentSong?.albumId != nil else { return }
+        showArtistAlbumPicker = true
+    }
+
+    private func openCurrentArtist() {
+        guard let artistId = audio.currentSong?.artistId, !isFetchingArtist else { return }
+        isFetchingArtist = true
+        Task {
+            defer { isFetchingArtist = false }
+            artistToShow = try? await appState.client?.artist(id: artistId)
+        }
+    }
+
+    private func openCurrentAlbum() {
+        guard let albumId = audio.currentSong?.albumId, !isFetchingAlbum else { return }
+        isFetchingAlbum = true
+        Task {
+            defer { isFetchingAlbum = false }
+            albumToShow = try? await appState.client?.album(id: albumId)
         }
     }
 
@@ -433,20 +974,14 @@ struct NowPlayingScreen: View {
                     Button { infoSheet = .credits } label: { Label(L(.action_view_credits), systemImage: "list.star") }
                     Button { shareCurrentSong() } label: { Label(L(.action_share), systemImage: Symbols.share) }
                     if audio.currentSong?.albumId != nil {
-                        Button {
-                            guard let albumId = audio.currentSong?.albumId else { return }
-                            Task { albumToShow = try? await appState.client?.album(id: albumId) }
-                        } label: { Label(L(.action_go_to_album), systemImage: "square.stack") }
+                        Button { openCurrentAlbum() } label: {
+                            Label(L(.action_go_to_album), systemImage: "square.stack")
+                        }
                     }
                     if audio.currentSong?.artistId != nil {
-                        Button {
-                            guard let artistId = audio.currentSong?.artistId, !isFetchingArtist else { return }
-                            isFetchingArtist = true
-                            Task {
-                                defer { isFetchingArtist = false }
-                                artistToShow = try? await appState.client?.artist(id: artistId)
-                            }
-                        } label: { Label(L(.action_go_to_artist), systemImage: "person.fill") }
+                        Button { openCurrentArtist() } label: {
+                            Label(L(.action_go_to_artist), systemImage: "person.fill")
+                        }
                     }
                 } label: {
                     Image(systemName: Symbols.more)
@@ -546,22 +1081,14 @@ struct NowPlayingScreen: View {
                     .font(.title2.bold())
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                Button {
-                    guard let song = audio.currentSong, let artistId = song.artistId else { return }
-                    guard !isFetchingArtist else { return }
-                    isFetchingArtist = true
-                    Task {
-                        defer { isFetchingArtist = false }
-                        artistToShow = try? await appState.client?.artist(id: artistId)
-                    }
-                } label: {
+                Button { presentArtistAlbumPicker() } label: {
                     Text(audio.currentSong?.artist ?? " ")
                         .font(.body)
-                        .foregroundStyle(.white.opacity(isFetchingArtist ? 0.35 : 0.65))
+                        .foregroundStyle(.white.opacity((isFetchingArtist || isFetchingAlbum) ? 0.35 : 0.65))
                         .lineLimit(1)
                 }
                 .buttonStyle(.plain)
-                .disabled(audio.currentSong?.artistId == nil)
+                .disabled(audio.currentSong?.artistId == nil && audio.currentSong?.albumId == nil)
             }
             Spacer()
             HStack(spacing: 4) {
@@ -610,24 +1137,14 @@ struct NowPlayingScreen: View {
                     Button { shareCurrentSong() } label: { Label(L(.action_share), systemImage: Symbols.share) }
                     Divider()
                     if audio.currentSong?.albumId != nil {
-                        Button {
-                            guard let albumId = audio.currentSong?.albumId, !isFetchingAlbum else { return }
-                            isFetchingAlbum = true
-                            Task {
-                                defer { isFetchingAlbum = false }
-                                albumToShow = try? await appState.client?.album(id: albumId)
-                            }
-                        } label: { Label(L(.action_go_to_album), systemImage: "square.stack") }
+                        Button { openCurrentAlbum() } label: {
+                            Label(L(.action_go_to_album), systemImage: "square.stack")
+                        }
                     }
                     if audio.currentSong?.artistId != nil {
-                        Button {
-                            guard let artistId = audio.currentSong?.artistId, !isFetchingArtist else { return }
-                            isFetchingArtist = true
-                            Task {
-                                defer { isFetchingArtist = false }
-                                artistToShow = try? await appState.client?.artist(id: artistId)
-                            }
-                        } label: { Label(L(.action_go_to_artist), systemImage: "person.fill") }
+                        Button { openCurrentArtist() } label: {
+                            Label(L(.action_go_to_artist), systemImage: "person.fill")
+                        }
                     }
                 } label: {
                     Image(systemName: Symbols.more)
@@ -868,6 +1385,107 @@ struct NowPlayingScreen: View {
         }
         let s = Int(t)
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+private struct LandscapeLyricsPreview: View {
+    @Environment(AppState.self) private var appState
+    @State private var lines: [LyricLine] = []
+    @State private var isLoading = false
+    @State private var activeIndex = 0
+
+    private var audio: AudioPlayer { appState.audioPlayer }
+    private var isSynced: Bool { lines.first.map { $0.time >= 0 } ?? false }
+
+    var body: some View {
+        Group {
+            if isLoading {
+                ProgressView()
+                    .tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if lines.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: Symbols.lyricsInactive)
+                        .font(.system(size: 36, weight: .ultraLight))
+                    Text(L(.lyrics_none))
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(.white.opacity(0.35))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                lyricStack
+            }
+        }
+        .task(id: audio.currentSong?.id) {
+            await loadLyrics()
+        }
+        .onChange(of: audio.currentTime) { _, time in
+            updateActiveLine(for: time)
+        }
+    }
+
+    private var lyricStack: some View {
+        VStack(alignment: .leading, spacing: 34) {
+            if let currentLine {
+                Text(displayText(for: currentLine))
+                    .font(.system(size: 37, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.68)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let nextLine {
+                Text(displayText(for: nextLine))
+                    .font(.system(size: 31, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.13))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.72)
+                    .multilineTextAlignment(.leading)
+                    .blur(radius: 3.2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(.bottom, 12)
+        .animation(.spring(response: 0.52, dampingFraction: 0.84), value: activeIndex)
+    }
+
+    private var currentLine: LyricLine? {
+        guard lines.indices.contains(activeIndex) else { return lines.first }
+        return lines[activeIndex]
+    }
+
+    private var nextLine: LyricLine? {
+        let next = activeIndex + 1
+        guard lines.indices.contains(next) else { return nil }
+        return lines[next]
+    }
+
+    private func displayText(for line: LyricLine) -> String {
+        line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? " " : line.text
+    }
+
+    private func loadLyrics() async {
+        guard let song = audio.currentSong, let client = appState.client else {
+            lines = []
+            activeIndex = 0
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+        lines = await LyricsService.shared.lyrics(for: song, client: client)
+        activeIndex = 0
+        updateActiveLine(for: audio.currentTime)
+    }
+
+    private func updateActiveLine(for time: TimeInterval) {
+        guard isSynced else { return }
+        if let index = lines.lastIndex(where: { $0.time <= time }), index != activeIndex {
+            activeIndex = index
+        }
     }
 }
 

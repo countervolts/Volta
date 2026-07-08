@@ -28,12 +28,16 @@ extension SettingsView {
                 .foregroundStyle(Theme.primaryText)
                 .disabled(!autoPlaylistBackupEnabled || isRefreshingPlaylistBackups || appState.client == nil)
 
-                if playlistBackupStore.deletedSnapshots.isEmpty {
+                if !hasLoadedPlaylistBackups {
+                    Text("Loading playlist backups...")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                } else if deletedPlaylistBackups.isEmpty {
                     Text("No deleted playlist backups")
                         .font(.caption)
                         .foregroundStyle(Theme.secondaryText)
                 } else {
-                    ForEach(playlistBackupStore.deletedSnapshots) { snapshot in
+                    ForEach(deletedPlaylistBackups) { snapshot in
                         HStack(spacing: 10) {
                             Button {
                                 restoreDeletedPlaylist(snapshot)
@@ -249,6 +253,7 @@ extension SettingsView {
             await PlaylistBackupStore.shared.backupAll(client: client)
             let count = PlaylistBackupStore.shared.snapshots.count
             let size = SettingsView.formatBytes(PlaylistBackupStore.shared.estimatedSizeBytes())
+            updateDeletedPlaylistBackupsFromStore()
             playlistBackupStatus = "Backed up \(count) playlist\(count == 1 ? "" : "s") · \(size)"
             isRefreshingPlaylistBackups = false
             VoltaNotificationCenter.shared.post(L(.notif_playlist_backups_updated), tone: .success)
@@ -266,6 +271,7 @@ extension SettingsView {
         Task {
             do {
                 let playlist = try await PlaylistBackupStore.shared.restore(snapshot, client: client)
+                updateDeletedPlaylistBackupsFromStore()
                 playlistBackupStatus = "Restored \(playlist.name)"
                 VoltaNotificationCenter.shared.post(L(.notif_playlist_restored), tone: .success)
             } catch {
@@ -279,6 +285,7 @@ extension SettingsView {
 
     func deletePlaylistBackup(_ snapshot: PlaylistBackupSnapshot) {
         PlaylistBackupStore.shared.delete(snapshot)
+        updateDeletedPlaylistBackupsFromStore()
         playlistBackupStatus = "Deleted backup for \(snapshot.name)"
         VoltaNotificationCenter.shared.post(L(.notif_playlist_backup_deleted), tone: .success)
     }

@@ -37,8 +37,10 @@ struct Child: Decodable, Sendable {
     let title: String
     let album: String?
     let artist: String?
+    let albumArtist: String?
     let albumId: String?
     let artistId: String?
+    let albumArtistId: String?
     let coverArt: String?
     let duration: Int?
     let track: Int?
@@ -54,7 +56,7 @@ struct Child: Decodable, Sendable {
     let starred: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, isDir, title, album, artist, albumId, artistId, coverArt
+        case id, isDir, title, album, artist, albumArtist, albumId, artistId, albumArtistId, coverArt
         case duration, track, discNumber, year, genre, size, contentType, suffix
         case bitRate, path, playCount, starred
     }
@@ -66,8 +68,10 @@ struct Child: Decodable, Sendable {
         title = (try? c.decode(String.self, forKey: .title)) ?? "Unknown"
         album = try? c.decode(String.self, forKey: .album)
         artist = try? c.decode(String.self, forKey: .artist)
+        albumArtist = try? c.decode(String.self, forKey: .albumArtist)
         albumId = c.flexibleIDIfPresent(.albumId)
         artistId = c.flexibleIDIfPresent(.artistId)
+        albumArtistId = c.flexibleIDIfPresent(.albumArtistId)
         coverArt = c.flexibleIDIfPresent(.coverArt)
         duration = try? c.decode(Int.self, forKey: .duration)
         track = try? c.decode(Int.self, forKey: .track)
@@ -84,8 +88,8 @@ struct Child: Decodable, Sendable {
     }
 
     var asSong: Song {
-        Song(id: id, title: title, album: album, artist: artist, albumId: albumId,
-             artistId: artistId, coverArt: coverArt, duration: duration, track: track,
+        Song(id: id, title: title, album: album, artist: artist, albumArtist: albumArtist, albumId: albumId,
+             artistId: artistId, albumArtistId: albumArtistId, coverArt: coverArt, duration: duration, track: track,
              discNumber: discNumber, year: year, genre: genre, size: size,
              contentType: contentType, suffix: suffix, bitRate: bitRate, path: path,
              playCount: playCount, bpm: nil, starred: starred, contributes: nil, replayGain: nil,

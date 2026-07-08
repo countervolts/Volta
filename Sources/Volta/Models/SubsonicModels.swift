@@ -38,8 +38,10 @@ struct Song: Codable, Identifiable, Hashable, Sendable {
     let title: String
     let album: String?
     let artist: String?
+    let albumArtist: String?
     let albumId: String?
     let artistId: String?
+    let albumArtistId: String?
     let coverArt: String?
     let duration: Int?
     let track: Int?

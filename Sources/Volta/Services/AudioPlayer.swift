@@ -15,6 +15,26 @@ struct PlaybackTimeSnapshot: Sendable {
     var remaining: TimeInterval { max(0, duration - elapsed) }
 }
 
+private struct SavedPlaybackSession: Codable {
+    let version: Int
+    let serverID: String
+    let savedAt: Date
+    let song: Song
+    let queue: [Song]
+    let currentIndex: Int
+    let elapsed: TimeInterval
+    let duration: TimeInterval
+    let wasPlaying: Bool
+    let queueSourceTitle: String
+    let queueSourceAlbum: Album?
+    let queueSourcePlaylist: Playlist?
+}
+
+private enum SavedPlaybackSessionStore {
+    static let key = "lastPlaybackSession"
+    static let version = 1
+}
+
 // User-tunable infinite-play fill style.
 enum InfinitePlayStyle: String, CaseIterable, Identifiable, Sendable {
     case random      // any songs from the library
@@ -286,6 +306,12 @@ final class AudioPlayer {
     private var durationLoadTask: Task<Void, Never>?
     private var warmStreamsTask: Task<Void, Never>?
     private let autoplayPreloadThreshold = 1
+    private var currentServerID: String?
+    private var didAttemptSavedSessionRestore = false
+    private var lastSessionAutosaveAt = Date.distantPast
+    private let sessionAutosaveInterval: TimeInterval = 5
+    private let maxSavedSessionQueueCount = 100
+    private var currentSongStartedAt: Date?
 
     private(set) var autoplayArtistName: String?
     private(set) var autoplayArtistId: String?
@@ -407,8 +433,9 @@ final class AudioPlayer {
         return shift
     }
 
-    func updateClient(_ client: (any MusicService)?) {
+    func updateClient(_ client: (any MusicService)?, serverID: String? = nil) {
         self.client = client
+        currentServerID = serverID
         DownloadService.shared.updateClient(client)
         AppLogger.shared.log(
             "Playback client updated; connected=\(client != nil)",
@@ -508,6 +535,7 @@ final class AudioPlayer {
 
     func togglePlayPause() {
         guard currentSong != nil else { return }
+        let wasPlaying = isPlaying
         if isPlaying {
             pauseAllPlayers()
             cancelTransitionPlayback(keepPaused: true)
@@ -515,11 +543,18 @@ final class AudioPlayer {
             player.play()
         }
         isPlaying.toggle()
+        if !wasPlaying, let song = currentSong {
+            if currentSongStartedAt == nil {
+                currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, currentTime))
+            }
+            ThirdPartyScrobbler.shared.notifyNowPlaying(song: song, startedAt: currentSongStartedAt ?? Date())
+        }
         AppLogger.shared.log(
             "Playback \(isPlaying ? "resumed" : "paused"); songID=\(currentSong?.id ?? "none"); elapsed=\(String(format: "%.3f", liveTime()))s",
             category: .playback
         )
         updateNowPlaying()
+        persistLastPlaybackSession()
     }
 
     func pause() {
@@ -531,6 +566,7 @@ final class AudioPlayer {
             category: .playback
         )
         updateNowPlaying()
+        persistLastPlaybackSession()
     }
 
     // Full stop for logout.
@@ -552,6 +588,7 @@ final class AudioPlayer {
         isPlaying = false
         hasActivePlaybackSession = false
         currentSong = nil
+        currentSongStartedAt = nil
         currentArtwork = nil
         currentAnimatedArtwork = nil
         currentLiveArtwork = nil
@@ -564,6 +601,7 @@ final class AudioPlayer {
         queueSourcePlaylist = nil
         autoplayArtistName = nil
         autoplayArtistId = nil
+        clearSavedPlaybackSession()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
@@ -581,6 +619,7 @@ final class AudioPlayer {
             category: .playback
         )
         updateNowPlayingTime()
+        persistLastPlaybackSession()
     }
 
     func liveTime() -> TimeInterval {
@@ -611,6 +650,191 @@ final class AudioPlayer {
 
         let elapsed = total > 0 ? min(rawElapsed, total) : rawElapsed
         return PlaybackTimeSnapshot(elapsed: elapsed, duration: total)
+    }
+
+    func persistLastPlaybackSession(synchronize: Bool = false) {
+        guard let serverID = currentServerID,
+              let song = currentSong else { return }
+
+        var sessionQueue = queue
+        var sessionIndex = currentIndex
+        if sessionQueue.isEmpty {
+            sessionQueue = [song]
+            sessionIndex = 0
+        } else if !sessionQueue.indices.contains(sessionIndex)
+                    || sessionQueue[sessionIndex].id != song.id {
+            if let matchingIndex = sessionQueue.firstIndex(where: { $0.id == song.id }) {
+                sessionIndex = matchingIndex
+            } else {
+                let insertionIndex = min(max(0, sessionIndex), sessionQueue.count)
+                sessionQueue.insert(song, at: insertionIndex)
+                sessionIndex = insertionIndex
+            }
+        }
+        if sessionQueue.count > maxSavedSessionQueueCount {
+            let halfWindow = maxSavedSessionQueueCount / 2
+            let lowerBound = max(0, min(sessionIndex - halfWindow, sessionQueue.count - maxSavedSessionQueueCount))
+            let upperBound = min(sessionQueue.count, lowerBound + maxSavedSessionQueueCount)
+            sessionQueue = Array(sessionQueue[lowerBound..<upperBound])
+            sessionIndex -= lowerBound
+        }
+
+        let snapshot = playbackTimeSnapshot()
+        let metadataDuration = Double(song.duration ?? 0)
+        let total = max(snapshot.duration, metadataDuration)
+        let elapsed = total > 0
+            ? min(max(0, snapshot.elapsed), total)
+            : max(0, snapshot.elapsed)
+        let session = SavedPlaybackSession(
+            version: SavedPlaybackSessionStore.version,
+            serverID: serverID,
+            savedAt: Date(),
+            song: song,
+            queue: sessionQueue,
+            currentIndex: sessionIndex,
+            elapsed: elapsed,
+            duration: total,
+            wasPlaying: isPlaying,
+            queueSourceTitle: queueSourceTitle,
+            queueSourceAlbum: nil,
+            queueSourcePlaylist: nil
+        )
+
+        do {
+            let data = try JSONEncoder().encode(session)
+            UserDefaults.standard.set(data, forKey: SavedPlaybackSessionStore.key)
+            lastSessionAutosaveAt = Date()
+            if synchronize { UserDefaults.standard.synchronize() }
+        } catch {
+            AppLogger.shared.log(
+                "Saved playback session failed: \(error.localizedDescription)",
+                category: .playback,
+                level: .warning
+            )
+        }
+    }
+
+    func restoreLastPlaybackSessionIfNeeded() async {
+        guard !didAttemptSavedSessionRestore else { return }
+        didAttemptSavedSessionRestore = true
+        guard currentSong == nil, !hasActivePlaybackSession else { return }
+        guard let serverID = currentServerID,
+              let session = loadSavedPlaybackSession(),
+              session.serverID == serverID else { return }
+
+        var restoredQueue = session.queue.isEmpty ? [session.song] : session.queue
+        var restoredIndex = session.currentIndex
+        if !restoredQueue.indices.contains(restoredIndex)
+            || restoredQueue[restoredIndex].id != session.song.id {
+            if let matchingIndex = restoredQueue.firstIndex(where: { $0.id == session.song.id }) {
+                restoredIndex = matchingIndex
+            } else {
+                restoredQueue = [session.song]
+                restoredIndex = 0
+            }
+        }
+
+        let song = restoredQueue[restoredIndex]
+        if DownloadService.shared.localURL(for: song) == nil,
+           client?.streamMetadataReady(id: song.id) == false {
+            await client?.prepareForPlayback(id: song.id)
+        }
+
+        guard currentSong == nil, !hasActivePlaybackSession else { return }
+        guard let urlInfo = playbackURL(for: song) else {
+            AppLogger.shared.log(
+                "Saved playback session restore skipped: no stream URL for '\(song.title)'",
+                category: .playback,
+                level: .warning
+            )
+            return
+        }
+
+        cancelTransitionPlayback(keepPaused: true)
+        resetPreparedTransitionPlan()
+        artworkLoadTask?.cancel(); artworkLoadTask = nil
+        durationLoadTask?.cancel(); durationLoadTask = nil
+        warmStreamsTask?.cancel(); warmStreamsTask = nil
+        primaryPlayer.pause()
+        secondaryPlayer.pause()
+        primaryPlayer.removeAllItems()
+        secondaryPlayer.removeAllItems()
+        activePlayer = primaryPlayer
+
+        let item = makePlayerItem(url: urlInfo.url)
+        applyEqualizer(to: item)
+        primaryPlayer.insert(item, after: nil)
+        currentPlayerItem = item
+        applyReplayGain(for: song)
+
+        queue = restoredQueue
+        currentIndex = restoredIndex
+        queueSourceTitle = session.queueSourceTitle
+        queueSourceAlbum = session.queueSourceAlbum
+        queueSourcePlaylist = session.queueSourcePlaylist
+        hasActivePlaybackSession = true
+        currentSong = song
+        isPlaying = false
+        let total = max(session.duration, Double(song.duration ?? 0))
+        let elapsed = total > 0 ? min(max(0, session.elapsed), total) : max(0, session.elapsed)
+        currentSongStartedAt = Date(timeIntervalSinceNow: -elapsed)
+        currentTime = elapsed
+        duration = total
+        currentArtwork = nil
+        currentAnimatedArtwork = nil
+        currentLiveArtwork = nil
+        loggedSongIDs.remove(song.id)
+        if song.starred != nil { starredIDs.insert(song.id) }
+
+        if elapsed > 0 {
+            let target = CMTime(seconds: elapsed, preferredTimescale: 600)
+            primaryPlayer.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+                guard finished else { return }
+                Task { @MainActor in
+                    guard let self, self.currentSong?.id == song.id, !self.isPlaying else { return }
+                    self.currentTime = elapsed
+                    self.updateNowPlayingTime()
+                }
+            }
+        }
+
+        updateNowPlaying()
+        artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: song) }
+        durationLoadTask = Task { [weak self] in await self?.loadDuration(from: item) }
+        warmUpcomingStreams()
+        AppLogger.shared.log(
+            "Saved playback session restored; title='\(song.title)'; elapsed=\(String(format: "%.3f", elapsed))s; savedAt=\(session.savedAt)",
+            category: .playback
+        )
+    }
+
+    private func autosaveLastPlaybackSessionIfNeeded() {
+        guard currentSong != nil else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastSessionAutosaveAt) >= sessionAutosaveInterval else { return }
+        persistLastPlaybackSession()
+    }
+
+    private func loadSavedPlaybackSession() -> SavedPlaybackSession? {
+        guard let data = UserDefaults.standard.data(forKey: SavedPlaybackSessionStore.key) else { return nil }
+        do {
+            let session = try JSONDecoder().decode(SavedPlaybackSession.self, from: data)
+            guard session.version == SavedPlaybackSessionStore.version else { return nil }
+            return session
+        } catch {
+            AppLogger.shared.log(
+                "Saved playback session unreadable: \(error.localizedDescription)",
+                category: .playback,
+                level: .warning
+            )
+            clearSavedPlaybackSession()
+            return nil
+        }
+    }
+
+    private func clearSavedPlaybackSession() {
+        UserDefaults.standard.removeObject(forKey: SavedPlaybackSessionStore.key)
+        UserDefaults.standard.synchronize()
     }
 
     // MARK: - Queue manipulation
@@ -1125,6 +1349,7 @@ final class AudioPlayer {
         applyReplayGain(for: song)
         hasActivePlaybackSession = true
         currentSong = song
+        currentSongStartedAt = Date()
         isPlaying = true
         currentTime = 0
         duration = 0
@@ -1138,6 +1363,8 @@ final class AudioPlayer {
         }
 
         updateNowPlaying()
+        ThirdPartyScrobbler.shared.notifyNowPlaying(song: song, startedAt: currentSongStartedAt ?? Date())
+        persistLastPlaybackSession()
         artworkLoadTask?.cancel()
         artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: song) }
         durationLoadTask?.cancel()
@@ -1234,6 +1461,7 @@ final class AudioPlayer {
         applyReplayGain(for: song)
         hasActivePlaybackSession = true
         currentSong = song
+        currentSongStartedAt = Date()
         currentTime = 0
         duration = 0
         currentArtwork = nil
@@ -1247,6 +1475,8 @@ final class AudioPlayer {
             category: .playback
         )
         updateNowPlaying()
+        ThirdPartyScrobbler.shared.notifyNowPlaying(song: song, startedAt: currentSongStartedAt ?? Date())
+        persistLastPlaybackSession()
         artworkLoadTask?.cancel()
         artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: song) }
         durationLoadTask?.cancel()
@@ -1677,6 +1907,7 @@ final class AudioPlayer {
         currentIndex += 1
         hasActivePlaybackSession = true
         currentSong = nextSong
+        currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, incomingStart))
         isPlaying = true
         currentTime = incomingStart
         duration = 0
@@ -1690,6 +1921,8 @@ final class AudioPlayer {
         // Incoming stays at true tempo.
         newPlayer.play()
         updateNowPlaying()
+        ThirdPartyScrobbler.shared.notifyNowPlaying(song: nextSong, startedAt: currentSongStartedAt ?? Date())
+        persistLastPlaybackSession()
         artworkLoadTask?.cancel()
         artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: nextSong) }
         durationLoadTask?.cancel()
@@ -1922,6 +2155,7 @@ final class AudioPlayer {
                 self.currentTime = self.player.currentTime().seconds
                 self.checkLogPlay()
                 self.checkScheduledTransition()
+                self.autosaveLastPlaybackSessionIfNeeded()
             }
         }
         secondaryTimeObserverToken = secondaryPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
@@ -1931,6 +2165,7 @@ final class AudioPlayer {
                 self.currentTime = self.player.currentTime().seconds
                 self.checkLogPlay()
                 self.checkScheduledTransition()
+                self.autosaveLastPlaybackSessionIfNeeded()
             }
         }
     }
@@ -1939,11 +2174,23 @@ final class AudioPlayer {
         guard let song = currentSong,
               duration > 0,
               !loggedSongIDs.contains(song.id) else { return }
-        let threshold = min(duration * 0.5, Double(song.duration ?? Int(duration)) * 0.5)
+        let threshold = DeveloperExperiments.instantScrobbling
+            ? 1.0
+            : min(duration * 0.5, Double(song.duration ?? Int(duration)) * 0.5)
         if currentTime >= threshold {
             loggedSongIDs.insert(song.id)
             let event = PlayEvent(song: song)
             StatsStore.shared.record(event)
+            let startedAt = currentSongStartedAt ?? Date(timeIntervalSinceNow: -max(0, currentTime))
+            let listenedDuration = Int(max(0, currentTime).rounded())
+            let trackDuration = Int(max(duration, Double(song.duration ?? 0)).rounded())
+            ThirdPartyScrobbler.shared.submitScrobble(
+                song: song,
+                event: event,
+                startedAt: startedAt,
+                listenedDuration: listenedDuration,
+                trackDuration: trackDuration
+            )
             AppLogger.shared.log("Play event recorded: '\(song.title)' at \(Int(currentTime))s / \(Int(duration))s", category: .playback)
         }
     }

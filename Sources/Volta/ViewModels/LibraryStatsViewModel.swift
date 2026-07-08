@@ -304,7 +304,7 @@ final class LibraryStatsViewModel {
             let aKey = song.albumId ?? song.album ?? "—"
             var ag = albumAgg[aKey] ?? AlbumAgg()
             if ag.name.isEmpty { ag.name = song.album ?? "Unknown Album" }
-            if ag.artist.isEmpty { ag.artist = song.artist ?? "Unknown Artist" }
+            if ag.artist.isEmpty { ag.artist = song.primaryArtistName }
             if ag.cover == nil { ag.cover = song.coverArt }
             ag.tracks += 1
             ag.duration += dur
@@ -312,8 +312,8 @@ final class LibraryStatsViewModel {
             albumAgg[aKey] = ag
 
             // artist rollup (group features under the lead artist)
-            let leadName = StatsViewModel.primaryArtist(song.artist ?? "Unknown Artist")
-            let artKey = song.artistId ?? leadName
+            let leadName = song.primaryArtistName
+            let artKey = song.primaryArtistID ?? leadName
             var rg = artistAgg[artKey] ?? ArtistAgg()
             if rg.name.isEmpty { rg.name = leadName }
             if rg.cover == nil { rg.cover = song.coverArt }
