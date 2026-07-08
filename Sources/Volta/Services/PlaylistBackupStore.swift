@@ -38,11 +38,41 @@ final class PlaylistBackupStore {
     private let fileURL: URL
 
     private init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let directory = support.appendingPathComponent("Volta/PlaylistBackups", isDirectory: true)
+        let directory = Self.storageDirectoryURL
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        fileURL = directory.appendingPathComponent("playlists.json")
+        fileURL = Self.storageFileURL
         reload()
+    }
+
+    nonisolated static var storageDirectoryURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Volta/PlaylistBackups", isDirectory: true)
+    }
+
+    nonisolated static var storageFileURL: URL {
+        storageDirectoryURL.appendingPathComponent("playlists.json")
+    }
+
+    nonisolated static func snapshotsOnDisk() -> [PlaylistBackupSnapshot] {
+        guard let data = try? Data(contentsOf: storageFileURL),
+              let payload = try? JSONDecoder().decode(PlaylistBackupPayload.self, from: data) else {
+            return []
+        }
+        return payload.snapshots
+    }
+
+    nonisolated static func deletedSnapshots(from snapshots: [PlaylistBackupSnapshot]) -> [PlaylistBackupSnapshot] {
+        snapshots
+            .filter { $0.deletedAt != nil }
+            .sorted { ($0.deletedAt ?? $0.updatedAt) > ($1.deletedAt ?? $1.updatedAt) }
+    }
+
+    nonisolated static func deletedSnapshotsOnDisk() -> [PlaylistBackupSnapshot] {
+        deletedSnapshots(from: snapshotsOnDisk())
+    }
+
+    nonisolated static func estimatedSizeBytesOnDisk() -> Int {
+        (try? Data(contentsOf: storageFileURL).count) ?? 0
     }
 
     var isEnabled: Bool {
@@ -50,9 +80,7 @@ final class PlaylistBackupStore {
     }
 
     var deletedSnapshots: [PlaylistBackupSnapshot] {
-        snapshots
-            .filter { $0.deletedAt != nil }
-            .sorted { ($0.deletedAt ?? $0.updatedAt) > ($1.deletedAt ?? $1.updatedAt) }
+        Self.deletedSnapshots(from: snapshots)
     }
 
     func reload() {

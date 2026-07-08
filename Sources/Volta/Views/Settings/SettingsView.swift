@@ -132,7 +132,10 @@ struct SettingsView: View {
     @State var isImportingPlaylists = false
     @State var showPlaylistImporter = false
     @State var playlistTransferStatus: String?
-    @State var playlistBackupStore = PlaylistBackupStore.shared
+    @State var deletedPlaylistBackups: [PlaylistBackupSnapshot] = []
+    @State var hasLoadedPlaylistBackups = false
+    @State var didScheduleInitialRefresh = false
+    @State var loggedPlayEventCount: Int?
     @StateObject var lyricsDownloader = LyricsBulkDownloader.shared
     @State var hiddenAlbums = HiddenAlbumStore.shared
     @State var downloadService = DownloadService.shared
@@ -213,7 +216,7 @@ struct SettingsView: View {
             .background(SwipeBackEnabler())
             .toolbar { settingsToolbar }
             .preferredColorScheme(Theme.colorScheme)
-            .onAppear { refreshCacheSize() }
+            .onAppear { scheduleInitialRefresh() }
             .onChange(of: downloadService.bulkProgress.phase) { _, phase in
                 handleBulkDownloadPhaseChange(phase)
             }
@@ -286,6 +289,7 @@ struct SettingsView: View {
             Theme.background.ignoresSafeArea()
             List {
                 playbackSection
+                scrobblingSection
                 audioSection
                 streamingSection
                 appearanceSection
@@ -309,6 +313,47 @@ struct SettingsView: View {
             refreshCacheSize()
         case .idle, .running, .paused:
             break
+        }
+    }
+
+    func scheduleInitialRefresh() {
+        guard !didScheduleInitialRefresh else {
+            refreshCacheSize()
+            loadDeletedPlaylistBackups()
+            loadLoggedPlayEventCount()
+            return
+        }
+        didScheduleInitialRefresh = true
+        Task {
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 160_000_000)
+            refreshCacheSize()
+            loadDeletedPlaylistBackups()
+            loadLoggedPlayEventCount()
+        }
+    }
+
+    func loadDeletedPlaylistBackups(force: Bool = false) {
+        guard force || !hasLoadedPlaylistBackups else { return }
+        Task {
+            let snapshots = await DeveloperExperiments.runSync(priority: .utility) {
+                PlaylistBackupStore.deletedSnapshotsOnDisk()
+            }
+            deletedPlaylistBackups = snapshots
+            hasLoadedPlaylistBackups = true
+        }
+    }
+
+    func updateDeletedPlaylistBackupsFromStore() {
+        deletedPlaylistBackups = PlaylistBackupStore.deletedSnapshots(from: PlaylistBackupStore.shared.snapshots)
+        hasLoadedPlaylistBackups = true
+    }
+
+    func loadLoggedPlayEventCount() {
+        guard developerUnlocked else { return }
+        Task {
+            await Task.yield()
+            loggedPlayEventCount = StatsStore.shared.allEvents().count
         }
     }
 }

@@ -10,7 +10,7 @@ enum OfflineLibrary {
     }
 
     static func artistKey(for song: Song) -> String {
-        song.artistId ?? "offline-artist-\(song.artist ?? "Unknown Artist")"
+        song.offlineArtistKey
     }
 
     // Group songs into synthesized albums, each carrying its tracks in disc/track
@@ -31,8 +31,8 @@ enum OfflineLibrary {
             return Album(
                 id: id,
                 name: first.album ?? "Unknown Album",
-                artist: first.artist,
-                artistId: first.artistId,
+                artist: first.primaryArtistName,
+                artistId: first.primaryArtistID,
                 coverArt: first.coverArt,
                 songCount: sorted.count,
                 duration: sorted.reduce(0) { $0 + ($1.duration ?? 0) },
@@ -59,7 +59,7 @@ enum OfflineLibrary {
             let albumIDs = Set(artistSongs.compactMap(\.albumId))
             return Artist(
                 id: id,
-                name: first.artist ?? "Unknown Artist",
+                name: first.primaryArtistName,
                 coverArt: first.coverArt,
                 albumCount: max(1, albumIDs.count),
                 artistImageUrl: nil,

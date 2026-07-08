@@ -9,6 +9,7 @@
 ![Platform](https://img.shields.io/badge/platform-iOS%2017%2B-black)
 ![Built with](https://img.shields.io/badge/built%20with-SwiftUI-orange)
 ![Servers](https://img.shields.io/badge/servers-Subsonic%20%C2%B7%20Jellyfin%20%C2%B7%20Emby%20%C2%B7%20Plex-blue)
+[![TestFlight](https://img.shields.io/badge/TestFlight-Join%20Beta-0A84FF)](https://testflight.apple.com/join/PgX1qrJq)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 </div>
@@ -85,29 +86,13 @@ Volta aims to remain as lightweight as possible. During testing, it used approxi
 
 ## Getting started
 
-Volta needs a music server to talk to. On first launch, pick your server type, drop in the URL and your login (plain `http` is allowed), and your library loads in.
+Join the [testflight](https://testflight.apple.com/join/PgX1qrJq), or build source.
 
 ## Building from source
 
-There's no App Store build yet, so for now you build it yourself with [xtool](https://github.com/xtool-org/xtool) on **Linux, Windows (WSL), and macOS**:
+Build it yourself with [xtool](https://github.com/xtool-org/xtool) on Linux, Windows (WSL), and macOS:
 
 ```bash
 xtool devices                       # list connected iPhones and their UDIDs
 xtool dev run --udid <DEVICE_UDID>  # build, install, and launch on device
 ```
-
-## Contributing
-
-Issues, ideas, and pull requests are all welcome this is a personal project and I'm happy to have company. If you're reporting a bug, mentioning your server type (Navidrome, Jellyfin, Plex…), App version and iOS version helps a lot.
-
-## Acknowledgements
-
-- [xtool](https://github.com/xtool-org/xtool) building and deploying to iOS without a Mac
-- [LRCLIB](https://lrclib.net) community-sourced synced lyrics
-- The [Subsonic](https://www.subsonic.org/pages/api.jsp) / OpenSubsonic, [Jellyfin](https://jellyfin.org), and Plex APIs that make any of this possible
-
-## Other
-
-Volta is released under the [GNU General Public License v3.0](LICENSE). 
-
-Volta discord server can be found [here](https://discord.gg/h5Hybq9SJs)

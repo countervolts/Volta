@@ -106,6 +106,10 @@ final class AppState {
         phase = .login
     }
 
+    func persistPlaybackSession() {
+        audioPlayer.persistLastPlaybackSession(synchronize: true)
+    }
+
     func servers() -> [ServerRecord] {
         store.allServers()
     }
@@ -199,12 +203,13 @@ final class AppState {
             currentServer = activeRecord
         }
         client = service
-        audioPlayer.updateClient(service)
+        audioPlayer.updateClient(service, serverID: activeRecord.id)
         IntentBridge.shared.setup(client: service, audioPlayer: audioPlayer)
         AppLogger.shared.log(
             "Server activated; server=\(activeRecord.displayName); backend=\(activeRecord.backend.rawValue); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
             category: .networking
         )
+        Task { await audioPlayer.restoreLastPlaybackSessionIfNeeded() }
         // Probe sharing and warm Home in the background.
         Task { sharingAvailable = await service.sharingAvailable() }
         Task { await homeViewModel.load(appState: self) }

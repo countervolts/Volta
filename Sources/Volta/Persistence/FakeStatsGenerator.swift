@@ -94,7 +94,8 @@ enum FakeStatsGenerator {
                 let song = Song(
                     id: "fake-song-\(i)-\(t)",
                     title: synthTitles[(i + t) % synthTitles.count],
-                    album: albumName, artist: artist, albumId: albumID, artistId: artistID,
+                    album: albumName, artist: artist, albumArtist: artist, albumId: albumID,
+                    artistId: artistID, albumArtistId: artistID,
                     coverArt: nil, duration: Int.random(in: 140...320), track: t + 1,
                     discNumber: 1, year: Int.random(in: 1995...2024), genre: genre, size: nil,
                     contentType: nil, suffix: nil, bitRate: nil, path: nil, playCount: nil,

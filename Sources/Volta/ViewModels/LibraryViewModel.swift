@@ -126,7 +126,7 @@ final class LibraryViewModel {
 
     private var sourceArtists: [Artist] {
         guard source == .downloaded else { return collapsingComboArtists(HiddenAlbumStore.shared.visibleArtists(artists)) }
-        let ids = Set(sourceSongs.compactMap { $0.artistId })
+        let ids = Set(sourceSongs.compactMap { $0.primaryArtistID })
         let known = artists.filter { ids.contains($0.id) }
         let knownIDs = Set(known.map { $0.id })
         let synthesized = synthesizedDownloadedArtists(missing: ids.subtracting(knownIDs))
@@ -137,37 +137,11 @@ final class LibraryViewModel {
     private func collapsingComboArtists(_ list: [Artist]) -> [Artist] {
         let names = Set(list.map { $0.name.lowercased().trimmingCharacters(in: .whitespaces) })
         return list.filter { artist in
-            let parts = Self.splitArtistName(artist.name)
+            let parts = ArtistNameResolver.splitArtistName(artist.name)
+                .map { $0.lowercased().trimmingCharacters(in: .whitespaces) }
             guard parts.count >= 2 else { return true }
             return !parts.allSatisfy { names.contains($0) }
         }
-    }
-
-    private static func splitArtistName(_ name: String) -> [String] {
-        var s = name
-        for token in [" featuring ", " feat. ", " feat ", " ft. ", " ft ",
-                      " & ", " x ", " and ", ",", ";", " / ", "/"] {
-            s = s.replacingOccurrences(of: token, with: "|", options: .caseInsensitive)
-        }
-        return s.components(separatedBy: "|")
-            .map { $0.lowercased().trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-    }
-
-    private static func primaryArtistName(_ name: String?) -> String {
-        guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return "Unknown Artist"
-        }
-        var earliest = name.endIndex
-        for token in [" featuring ", " feat. ", " feat ", " ft. ", " ft ",
-                      " & ", " x ", " and ", ",", ";", " / ", "/"] {
-            if let range = name.range(of: token, options: .caseInsensitive),
-               range.lowerBound < earliest {
-                earliest = range.lowerBound
-            }
-        }
-        let primary = String(name[..<earliest]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return primary.isEmpty ? name : primary
     }
 
     private var sourceGenres: [String] {
@@ -248,8 +222,8 @@ final class LibraryViewModel {
         for song in sourceSongs {
             guard let aid = song.albumId, ids.contains(aid), byID[aid] == nil else { continue }
             byID[aid] = Album(
-                id: aid, name: song.album ?? "Unknown Album", artist: song.artist,
-                artistId: song.artistId, coverArt: song.coverArt, songCount: nil,
+                id: aid, name: song.album ?? "Unknown Album", artist: song.primaryArtistName,
+                artistId: song.primaryArtistID, coverArt: song.coverArt, songCount: nil,
                 duration: nil, playCount: nil, created: nil, year: song.year,
                 genre: song.genre, starred: nil, comment: nil, recordLabel: nil, song: nil
             )
@@ -261,9 +235,9 @@ final class LibraryViewModel {
         guard !ids.isEmpty else { return [] }
         var byID: [String: Artist] = [:]
         for song in sourceSongs {
-            guard let aid = song.artistId, ids.contains(aid), byID[aid] == nil else { continue }
+            guard let aid = song.primaryArtistID, ids.contains(aid), byID[aid] == nil else { continue }
             byID[aid] = Artist(
-                id: aid, name: Self.primaryArtistName(song.artist), coverArt: song.coverArt,
+                id: aid, name: song.primaryArtistName, coverArt: song.coverArt,
                 albumCount: nil, artistImageUrl: nil, starred: nil, album: nil
             )
         }

@@ -100,9 +100,9 @@ final class ArtistDetailViewModel {
 
     private func applyDownloadedFallbackIfNeeded() {
         let local = DownloadService.shared.downloadedSongs().filter { song in
-            if let artistId = song.artistId, artistId == seedArtist.id { return true }
-            return Self.primaryArtistName(song.artist)
-                .localizedCaseInsensitiveCompare(Self.primaryArtistName(seedArtist.name)) == .orderedSame
+            if let artistId = song.primaryArtistID, artistId == seedArtist.id { return true }
+            return song.primaryArtistName
+                .localizedCaseInsensitiveCompare(ArtistNameResolver.primaryArtistName(trackArtist: seedArtist.name)) == .orderedSame
         }
         guard !local.isEmpty else { return }
 
@@ -166,22 +166,6 @@ final class ArtistDetailViewModel {
         .sorted {
             ($0.year ?? Int.min, $0.name) > ($1.year ?? Int.min, $1.name)
         }
-    }
-
-    private static func primaryArtistName(_ name: String?) -> String {
-        guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return "Unknown Artist"
-        }
-        var earliest = name.endIndex
-        for token in [" featuring ", " feat. ", " feat ", " ft. ", " ft ",
-                      " & ", " x ", " and ", ",", ";", " / ", "/"] {
-            if let range = name.range(of: token, options: .caseInsensitive),
-               range.lowerBound < earliest {
-                earliest = range.lowerBound
-            }
-        }
-        let primary = String(name[..<earliest]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return primary.isEmpty ? name : primary
     }
 
     @discardableResult

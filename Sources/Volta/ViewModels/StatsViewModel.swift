@@ -219,17 +219,8 @@ final class StatsViewModel {
             }
     }
 
-    // Lead artist from "A, B" / "A feat. B" / "A & B".
     nonisolated static func primaryArtist(_ s: String) -> String {
-        var name = s
-        let separators = [",", " feat.", " feat ", " ft.", " ft ", " featuring ", " & ", " x ", ";", " with "]
-        for sep in separators {
-            if let r = name.range(of: sep, options: [.caseInsensitive]) {
-                name = String(name[..<r.lowerBound])
-            }
-        }
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? s : trimmed
+        ArtistNameResolver.primaryArtistName(trackArtist: s)
     }
 
     private func topEntriesAlbum(events: [PlayEvent], limit: Int = 15) -> [TopEntry] {

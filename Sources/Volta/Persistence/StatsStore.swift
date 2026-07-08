@@ -23,10 +23,10 @@ struct PlayEvent: Codable, Identifiable, Sendable {
         id = UUID()
         songID = song.id
         title = song.title
-        artist = song.artist ?? "Unknown Artist"
+        artist = song.primaryArtistName
         album = song.album ?? "Unknown Album"
         albumID = song.albumId
-        artistID = song.artistId
+        artistID = song.primaryArtistID
         coverArt = song.coverArt
         duration = song.duration ?? 0
         genre = song.genre

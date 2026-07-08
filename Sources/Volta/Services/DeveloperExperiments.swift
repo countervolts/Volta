@@ -5,6 +5,7 @@ enum DeveloperExperiments {
     static let appWorkerLimitKey = "appWorkerLimit"
     static let preciseTimestampsKey = "preciseTimestamps"
     static let fakeListeningStatsKey = "fakeListeningStats"
+    static let instantScrobblingKey = "instantScrobbling"
     private static let legacySingleThreadedModeKey = "singleThreadedMode"
 
     static var fakeListeningStats: Bool {
@@ -17,6 +18,10 @@ enum DeveloperExperiments {
 
     static var preciseTimestamps: Bool {
         UserDefaults.standard.object(forKey: preciseTimestampsKey) as? Bool ?? false
+    }
+
+    static var instantScrobbling: Bool {
+        UserDefaults.standard.object(forKey: instantScrobblingKey) as? Bool ?? false
     }
 
     static var appWorkerLimit: Int {
