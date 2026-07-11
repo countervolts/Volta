@@ -2,7 +2,7 @@ import SwiftUI
 
 // Full-screen language picker; shares state with login.
 struct LanguageSettingsView: View {
-    @State private var localization = LocalizationManager.shared
+    @StateObject private var localization = LocalizationManager.shared
 
     var body: some View {
         ZStack {

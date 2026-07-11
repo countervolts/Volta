@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MainTabView: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @AppStorage("accentColorName") private var accentColorName = "purple"
     @AppStorage("customAccentRed") private var customAccentRed = 0.55
     @AppStorage("customAccentGreen") private var customAccentGreen = 0.36

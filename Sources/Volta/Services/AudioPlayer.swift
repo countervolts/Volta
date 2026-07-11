@@ -2,8 +2,8 @@ import Foundation
 import AVFoundation
 import Accelerate
 import MediaPlayer
-import Observation
 import UIKit
+import Combine
 
 enum RepeatMode: Sendable { case off, one, all }
 enum AutoplayMode: Sendable { case off, random, algorithm }
@@ -249,28 +249,27 @@ enum AutoMixTempo {
 }
 
 @MainActor
-@Observable
-final class AudioPlayer {
-    private(set) var currentSong: Song?
-    private(set) var hasActivePlaybackSession = false
-    private(set) var isPlaying = false
-    private(set) var currentTime: TimeInterval = 0
-    private(set) var duration: TimeInterval = 0
-    private(set) var currentArtwork: UIImage?
-    private(set) var currentAnimatedArtwork: UIImage?
-    private(set) var currentLiveArtwork: LiveArtworkAsset?
+final class AudioPlayer: ObservableObject {
+    @Published private(set) var currentSong: Song?
+    @Published private(set) var hasActivePlaybackSession = false
+    @Published private(set) var isPlaying = false
+    @Published private(set) var currentTime: TimeInterval = 0
+    @Published private(set) var duration: TimeInterval = 0
+    @Published private(set) var currentArtwork: UIImage?
+    @Published private(set) var currentAnimatedArtwork: UIImage?
+    @Published private(set) var currentLiveArtwork: LiveArtworkAsset?
 
-    private(set) var queue: [Song] = []
-    private(set) var currentIndex: Int = 0
-    private(set) var queueSourceTitle: String = ""
-    private(set) var queueSourceAlbum: Album?
-    private(set) var queueSourcePlaylist: Playlist?
-    private(set) var playbackHistory: [Song] = []
+    @Published private(set) var queue: [Song] = []
+    @Published private(set) var currentIndex: Int = 0
+    @Published private(set) var queueSourceTitle: String = ""
+    @Published private(set) var queueSourceAlbum: Album?
+    @Published private(set) var queueSourcePlaylist: Playlist?
+    @Published private(set) var playbackHistory: [Song] = []
 
-    private(set) var isShuffle = false
-    private(set) var repeatMode: RepeatMode = .off
-    private(set) var autoplayMode: AutoplayMode = .off
-    private(set) var transitionMode: PlaybackTransitionMode = .off
+    @Published private(set) var isShuffle = false
+    @Published private(set) var repeatMode: RepeatMode = .off
+    @Published private(set) var autoplayMode: AutoplayMode = .off
+    @Published private(set) var transitionMode: PlaybackTransitionMode = .off
     var isCrossfade: Bool { transitionMode != .off }
 
     var isAutoplay: Bool {
@@ -282,7 +281,7 @@ final class AudioPlayer {
         }
     }
 
-    private(set) var starredIDs: Set<String> = []
+    @Published private(set) var starredIDs: Set<String> = []
 
     private let primaryPlayer = AVQueuePlayer()
     private let secondaryPlayer = AVQueuePlayer()
@@ -302,7 +301,7 @@ final class AudioPlayer {
     private var preparedTransitionPlan: PlaybackTransitionPlan?
     private var isTransitioning = false
     // Drives the "Mixing" indicator.
-    private(set) var isMixing = false
+    @Published private(set) var isMixing = false
     private var transitionSuppressedUntil = Date.distantPast
     // Muted pre-buffer on the inactive player.
     private var primedSongID: String?
@@ -316,6 +315,8 @@ final class AudioPlayer {
     private var gaplessNextItem: AVPlayerItem? = nil
     private var gaplessNextSongID: String? = nil
     private var currentPlayerItem: AVPlayerItem? = nil
+    // A paused restored session keeps metadata only until playback resumes.
+    private var deferredRestoredTime: TimeInterval? = nil
     // Lets deferred play requests detect newer track changes.
     private var playRequestID: UInt64 = 0
     private var autoplayAppendTask: Task<Void, Never>?
@@ -331,15 +332,15 @@ final class AudioPlayer {
     private let maxSavedSessionQueueCount = 100
     private var currentSongStartedAt: Date?
 
-    private(set) var autoplayArtistName: String?
-    private(set) var autoplayArtistId: String?
+    @Published private(set) var autoplayArtistName: String?
+    @Published private(set) var autoplayArtistId: String?
 
     // Seed songs for Similar Songs infinite play.
     private var infinitePlaySeed: [Song] = []
 
-    private(set) var sleepTimerActive = false
-    private(set) var sleepEndsAtTrackEnd = false
-    private(set) var sleepRemaining: TimeInterval = 0
+    @Published private(set) var sleepTimerActive = false
+    @Published private(set) var sleepEndsAtTrackEnd = false
+    @Published private(set) var sleepRemaining: TimeInterval = 0
     private var sleepTimer: Timer?
 
     static var canUseAutoMix: Bool {
@@ -601,6 +602,8 @@ final class AudioPlayer {
         if isPlaying {
             pauseAllPlayers()
             cancelTransitionPlayback(keepPaused: true)
+        } else if resumeDeferredSessionIfNeeded() {
+            return
         } else {
             player.play()
         }
@@ -646,6 +649,7 @@ final class AudioPlayer {
         primaryPlayer.replaceCurrentItem(with: nil)
         secondaryPlayer.replaceCurrentItem(with: nil)
         currentPlayerItem = nil
+        deferredRestoredTime = nil
         gaplessNextItem = nil
         gaplessNextSongID = nil
         isPlaying = false
@@ -674,6 +678,13 @@ final class AudioPlayer {
         let total = playbackTimeSnapshot().duration
         let clamped = total > 0 ? min(max(0, time), total) : max(0, time)
         cancelTransitionPlayback(keepPaused: !isPlaying)
+        if deferredRestoredTime != nil, currentPlayerItem == nil {
+            deferredRestoredTime = clamped
+            currentTime = clamped
+            updateNowPlayingTime()
+            persistLastPlaybackSession()
+            return
+        }
         let target = CMTime(seconds: clamped, preferredTimescale: 600)
         player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
         currentTime = clamped
@@ -694,7 +705,7 @@ final class AudioPlayer {
     }
 
     func setVisualizerActive(_ active: Bool) {
-        AudioVisualizerEngine.shared.setActive(active)
+        AudioVisualizerEngine.shared.setActive(active && !RuntimeCompatibility.usesPassiveVisualizer)
         if let item = player.currentItem {
             applyEqualizer(to: item)
         }
@@ -756,7 +767,9 @@ final class AudioPlayer {
             : Double(currentSong?.duration ?? 0)
 
         let playerTime = player.currentTime().seconds
-        let rawElapsed = max(0, playerTime.isFinite ? playerTime : currentTime)
+        let sampledTime = deferredRestoredTime
+            ?? (currentPlayerItem != nil && playerTime.isFinite ? playerTime : currentTime)
+        let rawElapsed = max(0, sampledTime)
 
         // Duration cannot fall behind live playback.
         var total = max(itemDuration.isFinite ? itemDuration : 0, max(0, metadataDuration))
@@ -855,7 +868,7 @@ final class AudioPlayer {
         }
 
         guard currentSong == nil, !hasActivePlaybackSession else { return }
-        guard let urlInfo = playbackURL(for: song) else {
+        guard playbackURL(for: song) != nil else {
             AppLogger.shared.log(
                 "Saved playback session restore skipped: no stream URL for '\(song.title)'",
                 category: .playback,
@@ -875,12 +888,6 @@ final class AudioPlayer {
         secondaryPlayer.removeAllItems()
         activePlayer = primaryPlayer
 
-        let item = makePlayerItem(url: urlInfo.url)
-        applyEqualizer(to: item)
-        primaryPlayer.insert(item, after: nil)
-        currentPlayerItem = item
-        applyReplayGain(for: song)
-
         queue = restoredQueue
         currentIndex = restoredIndex
         queueSourceTitle = session.queueSourceTitle
@@ -894,32 +901,81 @@ final class AudioPlayer {
         currentSongStartedAt = Date(timeIntervalSinceNow: -elapsed)
         currentTime = elapsed
         duration = total
+        deferredRestoredTime = elapsed
+        currentPlayerItem = nil
         currentArtwork = nil
         currentAnimatedArtwork = nil
         currentLiveArtwork = nil
         loggedSongIDs.remove(song.id)
         if song.starred != nil { starredIDs.insert(song.id) }
 
-        if elapsed > 0 {
-            let target = CMTime(seconds: elapsed, preferredTimescale: 600)
-            primaryPlayer.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
-                guard finished else { return }
-                Task { @MainActor in
-                    guard let self, self.currentSong?.id == song.id, !self.isPlaying else { return }
-                    self.currentTime = elapsed
-                    self.updateNowPlayingTime()
-                }
-            }
-        }
-
         updateNowPlaying()
         artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: song) }
-        durationLoadTask = Task { [weak self] in await self?.loadDuration(from: item) }
-        warmUpcomingStreams()
         AppLogger.shared.log(
-            "Saved playback session restored; title='\(song.title)'; elapsed=\(String(format: "%.3f", elapsed))s; savedAt=\(session.savedAt)",
+            "Saved playback session restored without player allocation; title='\(song.title)'; elapsed=\(String(format: "%.3f", elapsed))s; savedAt=\(session.savedAt)",
             category: .playback
         )
+    }
+
+    private func resumeDeferredSessionIfNeeded() -> Bool {
+        guard currentPlayerItem == nil,
+              let elapsed = deferredRestoredTime,
+              let song = currentSong else { return false }
+        guard let urlInfo = playbackURL(for: song) else {
+            AppLogger.shared.log(
+                "Restored playback resume failed: no stream URL for '\(song.title)'",
+                category: .playback,
+                level: .warning
+            )
+            return false
+        }
+
+        let item = makePlayerItem(url: urlInfo.url)
+        applyEqualizer(to: item)
+        player.removeAllItems()
+        player.insert(item, after: nil)
+        currentPlayerItem = item
+        applyReplayGain(for: song)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        isPlaying = true
+        currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, elapsed))
+
+        let beginPlayback = { [weak self, weak item] in
+            guard let self, let item,
+                  self.currentPlayerItem === item,
+                  self.currentSong?.id == song.id else { return }
+            self.deferredRestoredTime = nil
+            self.currentTime = elapsed
+            if self.isPlaying {
+                self.player.playImmediately(atRate: 1)
+            }
+        }
+        if elapsed > 0 {
+            let target = CMTime(seconds: elapsed, preferredTimescale: 600)
+            player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { finished in
+                guard finished else { return }
+                Task { @MainActor in beginPlayback() }
+            }
+        } else {
+            beginPlayback()
+        }
+
+        notifyNowPlaying(for: song)
+        updateNowPlaying()
+        persistLastPlaybackSession()
+        durationLoadTask?.cancel()
+        durationLoadTask = Task { [weak self] in await self?.loadDuration(from: item) }
+        scheduleGaplessPreload()
+        ensureAutoplayPreloadedIfNeeded()
+        warmUpcomingStreams()
+        if Date() >= transitionSuppressedUntil {
+            prepareTransitionPlanIfNeeded()
+        }
+        AppLogger.shared.log(
+            "Restored playback materialized; title='\(song.title)'; elapsed=\(String(format: "%.3f", elapsed))s",
+            category: .playback
+        )
+        return true
     }
 
     private func autosaveLastPlaybackSessionIfNeeded() {
@@ -1500,6 +1556,7 @@ final class AudioPlayer {
     private func startPlaying(song: Song) {
         cancelTransitionPlayback()
         resetPreparedTransitionPlan()
+        deferredRestoredTime = nil
         inactivePlayer.pause()
         inactivePlayer.removeAllItems()
         guard let urlInfo = playbackURL(for: song) else {

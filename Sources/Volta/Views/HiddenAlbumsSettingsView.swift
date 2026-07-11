@@ -17,7 +17,7 @@ private enum HiddenAlbumListSort: String, CaseIterable, Identifiable {
 struct HiddenAlbumsSettingsView: View {
     let client: (any MusicService)?
 
-    @State private var hiddenAlbums = HiddenAlbumStore.shared
+    @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
     @State private var albums: [Album] = []
     @State private var isLoading = false
     @State private var searchText = ""

@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 // MARK: - Metric value types
 
@@ -99,15 +99,14 @@ struct LibraryStatsData: Hashable {
 }
 
 @MainActor
-@Observable
-final class LibraryStatsViewModel {
+final class LibraryStatsViewModel: ObservableObject {
     enum Phase: Equatable { case idle, loading, ready, failed }
 
-    private(set) var phase: Phase = .idle
-    private(set) var progress: Double = 0       // 0...1 while scanning
-    private(set) var stats: LibraryStatsData?
-    private(set) var errorMessage: String?
-    private(set) var isOfflineData = false
+    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var progress: Double = 0       // 0...1 while scanning
+    @Published private(set) var stats: LibraryStatsData?
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var isOfflineData = false
 
     // Computed snapshots are expensive (a full library walk), so keep the last
     // result per server alive across tab switches.

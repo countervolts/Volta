@@ -9,11 +9,11 @@ enum StatsTab: String, CaseIterable, Identifiable {
 }
 
 struct StatsView: View {
-    @State private var vm = StatsViewModel()
-    @State private var libraryVM = LibraryStatsViewModel()
+    @StateObject private var vm = StatsViewModel()
+    @StateObject private var libraryVM = LibraryStatsViewModel()
     @State private var tab: StatsTab = .listening
     @State private var path = NavigationPath()
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -50,8 +50,8 @@ struct StatsView: View {
         }
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
-        .onChange(of: vm.period) { _, _ in vm.offset = 0; vm.recompute() }
-        .onChange(of: vm.offset) { _, _ in vm.recompute() }
+        .onChangeCompat(of: vm.period) { _, _ in vm.offset = 0; vm.recompute() }
+        .onChangeCompat(of: vm.offset) { _, _ in vm.recompute() }
         .task { vm.recompute() }
         .onAppear { vm.recompute() }
         .onReceive(NotificationCenter.default.publisher(for: .playEventRecorded)) { _ in
@@ -222,12 +222,41 @@ func formatDuration(_ seconds: Int) -> String {
     return String(format: "%d:%02d", m, s)
 }
 
+struct GenreBreakdownChart: View {
+    let data: [GenreBucket]
+
+    var body: some View {
+        if #available(iOS 17.0, *) {
+            sectorChart
+        } else {
+            barChart
+        }
+    }
+
+    @available(iOS 17.0, *)
+    private var sectorChart: some View {
+        Chart(data) { bucket in
+            SectorMark(angle: .value("Count", bucket.count), angularInset: 2)
+                .foregroundStyle(by: .value("Genre", bucket.genre))
+                .cornerRadius(4)
+        }
+        .chartLegend(position: .bottom, alignment: .leading)
+    }
+
+    private var barChart: some View {
+        Chart(data) { bucket in
+            BarMark(x: .value("Count", bucket.count), y: .value("Genre", bucket.genre))
+                .foregroundStyle(Theme.accent.gradient)
+        }
+    }
+}
+
 // MARK: - Top entry row
 
 struct TopEntryRow: View {
     let rank: Int
     let entry: TopEntry
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
 
     var body: some View {
         HStack(spacing: 12) {
@@ -274,7 +303,7 @@ struct ChartCard<C: View>: View {
 
 struct AllTimeStatsSection: View {
     var vm: StatsViewModel
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -317,12 +346,7 @@ struct AllTimeStatsSection: View {
 
             if !vm.genreData.isEmpty {
                 ChartCard(title: "Genre Breakdown") {
-                    Chart(vm.genreData) { b in
-                        SectorMark(angle: .value("Count", b.count), angularInset: 2)
-                            .foregroundStyle(by: .value("Genre", b.genre))
-                            .cornerRadius(4)
-                    }
-                    .chartLegend(position: .bottom, alignment: .leading)
+                    GenreBreakdownChart(data: vm.genreData)
                 }
             }
 
@@ -373,12 +397,7 @@ struct DailyStatsSection: View {
 
             if !vm.genreData.isEmpty {
                 ChartCard(title: "Genre Breakdown") {
-                    Chart(vm.genreData) { b in
-                        SectorMark(angle: .value("Count", b.count), angularInset: 2)
-                            .foregroundStyle(by: .value("Genre", b.genre))
-                            .cornerRadius(4)
-                    }
-                    .chartLegend(position: .bottom, alignment: .leading)
+                    GenreBreakdownChart(data: vm.genreData)
                 }
             }
 
@@ -428,11 +447,7 @@ struct WeeklyStatsSection: View {
 
             if !vm.genreData.isEmpty {
                 ChartCard(title: "Genre Breakdown") {
-                    Chart(vm.genreData) { b in
-                        SectorMark(angle: .value("Count", b.count), angularInset: 2)
-                            .foregroundStyle(by: .value("Genre", b.genre)).cornerRadius(4)
-                    }
-                    .chartLegend(position: .bottom, alignment: .leading)
+                    GenreBreakdownChart(data: vm.genreData)
                 }
             }
 
@@ -504,11 +519,7 @@ struct MonthlyStatsSection: View {
 
             if !vm.genreData.isEmpty {
                 ChartCard(title: "Genre Breakdown") {
-                    Chart(vm.genreData) { b in
-                        SectorMark(angle: .value("Count", b.count), angularInset: 2)
-                            .foregroundStyle(by: .value("Genre", b.genre)).cornerRadius(4)
-                    }
-                    .chartLegend(position: .bottom, alignment: .leading)
+                    GenreBreakdownChart(data: vm.genreData)
                 }
             }
 
@@ -596,11 +607,7 @@ struct YearlyStatsSection: View {
 
             if !vm.genreData.isEmpty {
                 ChartCard(title: "Genre Breakdown") {
-                    Chart(vm.genreData) { b in
-                        SectorMark(angle: .value("Count", b.count), angularInset: 2)
-                            .foregroundStyle(by: .value("Genre", b.genre)).cornerRadius(4)
-                    }
-                    .chartLegend(position: .bottom, alignment: .leading)
+                    GenreBreakdownChart(data: vm.genreData)
                 }
 
                 ChartCard(title: "Genre Play Count") {

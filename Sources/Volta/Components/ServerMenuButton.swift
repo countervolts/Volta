@@ -4,7 +4,7 @@ import SwiftUI
 struct ServerMenuButton: View {
     var onOpenSettings: () -> Void
 
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @Environment(\.openURL) private var openURL
     @State private var showSwitcher = false
 

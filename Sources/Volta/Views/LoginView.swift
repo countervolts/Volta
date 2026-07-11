@@ -6,9 +6,9 @@ struct LoginView: View {
     var onLoginComplete: () -> Void = {}
     var isEmbeddedInSheet = false
 
-    @Environment(AppState.self) private var appState
-    @State private var vm = LoginViewModel()
-    @State private var localization = LocalizationManager.shared
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var vm = LoginViewModel()
+    @StateObject private var localization = LocalizationManager.shared
     @State private var appeared = false
     @State private var showHTTPWarning = false
     @State private var pendingHTTPWarningAction: HTTPWarningAction = .credentials
@@ -20,9 +20,7 @@ struct LoginView: View {
     private enum HTTPWarningAction { case credentials, plexHosted }
 
     var body: some View {
-        @Bindable var vm = vm
-
-        return ZStack {
+        ZStack {
             Theme.background.ignoresSafeArea()
             backdrop
 
@@ -60,8 +58,8 @@ struct LoginView: View {
                 }
             }
         }
-        .onChange(of: vm.serverAddress) { vm.serverAddressChanged() }
-        .onChange(of: vm.selectedBackend) { _, kind in
+        .onChangeCompat(of: vm.serverAddress) { vm.serverAddressChanged() }
+        .onChangeCompat(of: vm.selectedBackend) { _, kind in
             guard kind != nil else { return }
             // Focus the server field once the credentials form has transitioned in.
             Task {
@@ -178,7 +176,7 @@ struct LoginView: View {
                 Image(systemName: "waveform")
                     .font(.system(size: 46, weight: .medium))
                     .foregroundStyle(Theme.accent)
-                    .symbolEffect(.pulse, options: .repeating)
+                    .symbolPulseRepeatingCompat()
             }
             Text("Volta")
                 .font(.system(size: 38, weight: .bold, design: .rounded))

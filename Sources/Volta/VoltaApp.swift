@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct VoltaApp: App {
     @UIApplicationDelegateAdaptor(VoltaAppDelegate.self) private var appDelegate
-    @State private var appState = AppState.shared
+    @StateObject private var appState = AppState.shared
 
     init() {
         VoltaShortcuts.updateAppShortcutParameters()
@@ -13,7 +13,7 @@ struct VoltaApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environment(appState)
+                .environmentObject(appState)
         }
     }
 }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct QueueView: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     private var audio: AudioPlayer { appState.audioPlayer }
 
     var body: some View {

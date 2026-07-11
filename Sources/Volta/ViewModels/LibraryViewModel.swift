@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 enum LibraryFilter: String, CaseIterable, Identifiable {
     case artists = "Artists"
@@ -50,26 +50,25 @@ enum LibrarySortOrder: String, CaseIterable, Identifiable {
 }
 
 @MainActor
-@Observable
-final class LibraryViewModel {
-    private(set) var filter: LibraryFilter = .albums
-    private(set) var source: LibrarySource = .server
-    private(set) var artists: [Artist] = []
-    private(set) var albums: [Album] = []
-    private(set) var songs: [Song] = []
-    private(set) var genres: [String] = []
-    private(set) var musicFolders: [MusicFolder] = []
-    private(set) var isLoading = false
-    private(set) var hasLoaded = false
+final class LibraryViewModel: ObservableObject {
+    @Published private(set) var filter: LibraryFilter = .albums
+    @Published private(set) var source: LibrarySource = .server
+    @Published private(set) var artists: [Artist] = []
+    @Published private(set) var albums: [Album] = []
+    @Published private(set) var songs: [Song] = []
+    @Published private(set) var genres: [String] = []
+    @Published private(set) var musicFolders: [MusicFolder] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var hasLoaded = false
 
-    var searchText: String = ""
+    @Published var searchText: String = ""
 
-    var selectedFolderID: String? = nil
+    @Published var selectedFolderID: String? = nil
     var rootFolderSource: FolderSource { .indexes(musicFolderID: selectedFolderID) }
 
-    var sortOrder: LibrarySortOrder = .name
-    var genreFilter: String? = nil
-    var neverPlayedOnly = false
+    @Published var sortOrder: LibrarySortOrder = .name
+    @Published var genreFilter: String? = nil
+    @Published var neverPlayedOnly = false
 
     var hasActiveFilters: Bool { genreFilter != nil || neverPlayedOnly || sortOrder != .name }
 
@@ -321,7 +320,7 @@ final class LibraryViewModel {
     // Album count per genre, computed in a single pass and memoized. The genres
     // list reads this once per row, so calling albumsForGenre (which rescans all
     // albums) per row used to be O(genres × albums) on every render and scroll.
-    @ObservationIgnored private var genreCountCache: (key: String, counts: [String: Int])?
+    private var genreCountCache: (key: String, counts: [String: Int])?
 
     func genreAlbumCounts() -> [String: Int] {
         let key = "\(source.rawValue)-\(HiddenAlbumStore.shared.revision)-\(DownloadService.shared.downloadedRevision)-\(albums.count)"

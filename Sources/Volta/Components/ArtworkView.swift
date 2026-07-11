@@ -6,8 +6,6 @@ struct ArtworkView: View {
     var cornerRadius: CGFloat = Theme.Layout.cardCorner
     var onImageLoaded: ((UIImage) -> Void)? = nil
 
-    // Context-menu previews live outside the app environment.
-    @Environment(AppState.self) private var appState: AppState?
     @State private var image: UIImage?
     @State private var isLoading = true
 
@@ -36,9 +34,10 @@ struct ArtworkView: View {
 
     private func load() async {
         isLoading = true
-        let url = appState?.client?.coverArtURL(id: coverArtID, size: size)
+        let requestedSize = RuntimeCompatibility.cappedArtworkSize(size)
+        let url = AppState.shared.client?.coverArtURL(id: coverArtID, size: requestedSize)
         // Some servers ignore the size param; cap decode size here too.
-        let loaded = await ArtworkLoader.shared.image(for: url, maxPixelSize: size)
+        let loaded = await ArtworkLoader.shared.image(for: url, maxPixelSize: requestedSize)
         withAnimation(.easeOut(duration: 0.35)) {
             image = loaded
             isLoading = false

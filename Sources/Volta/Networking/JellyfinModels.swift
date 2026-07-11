@@ -95,6 +95,10 @@ struct JFItem: Decodable {
     let IsFolder: Bool?
     let Container: String?
     let PlaylistItemId: String?
+    let ImageTags: [String: String]?
+    let PrimaryImageTag: String?
+    let PrimaryImageItemId: String?
+    let AlbumPrimaryImageTag: String?
 
     enum CodingKeys: String, CodingKey {
         case Id, Name
@@ -104,6 +108,7 @@ struct JFItem: Decodable {
         case ProductionYear, Genres, RunTimeTicks, IndexNumber, ParentIndexNumber, ChildCount
         case UserData, MediaSources, DateCreated, Path, Overview
         case CollectionType, IsFolder, Container, PlaylistItemId
+        case ImageTags, PrimaryImageTag, PrimaryImageItemId, AlbumPrimaryImageTag
     }
 }
 
@@ -131,6 +136,30 @@ extension JFItem {
         (UserData?.IsFavorite == true) ? "starred" : nil
     }
 
+    private var primaryImageTag: String? {
+        ImageTags?["Primary"] ?? PrimaryImageTag
+    }
+
+    private var albumCoverArtID: String? {
+        if let AlbumPrimaryImageTag, !AlbumPrimaryImageTag.isEmpty {
+            return Self.imageID(id: AlbumId ?? PrimaryImageItemId ?? Id, tag: AlbumPrimaryImageTag)
+        }
+        if let PrimaryImageItemId, !PrimaryImageItemId.isEmpty {
+            return Self.imageID(id: PrimaryImageItemId, tag: primaryImageTag)
+        }
+        return ownCoverArtID ?? AlbumId
+    }
+
+    private var ownCoverArtID: String? {
+        Self.imageID(id: PrimaryImageItemId ?? Id, tag: primaryImageTag)
+    }
+
+    static func imageID(id: String?, tag: String?) -> String? {
+        guard let id, !id.isEmpty else { return nil }
+        guard let tag, !tag.isEmpty else { return id }
+        return "\(id)::\(tag)"
+    }
+
     var asAlbum: Album { asAlbum(withSongs: nil) }
 
     func asAlbum(withSongs songs: [Song]?) -> Album {
@@ -139,7 +168,7 @@ extension JFItem {
             name: Name ?? "Unknown Album",
             artist: albumArtistName,
             artistId: albumArtistId,
-            coverArt: Id,
+            coverArt: ownCoverArtID,
             songCount: ChildCount ?? songs?.count,
             duration: durationSeconds,
             playCount: UserData?.PlayCount,
@@ -159,7 +188,7 @@ extension JFItem {
         Artist(
             id: Id,
             name: Name ?? "Unknown Artist",
-            coverArt: Id,
+            coverArt: ownCoverArtID,
             albumCount: albums?.count ?? ChildCount,
             artistImageUrl: nil,
             starred: starredMarker,
@@ -181,7 +210,7 @@ extension JFItem {
             albumId: AlbumId,
             artistId: ArtistItems?.first?.Id ?? albumArtistId,
             albumArtistId: albumArtistId,
-            coverArt: AlbumId ?? Id,
+            coverArt: albumCoverArtID,
             duration: durationSeconds,
             track: IndexNumber,
             discNumber: ParentIndexNumber,
@@ -218,7 +247,7 @@ extension JFItem {
             created: DateCreated,
             changed: nil,
             played: nil,
-            coverArt: Id,
+            coverArt: ownCoverArtID,
             entry: entries
         )
     }
@@ -230,7 +259,7 @@ extension JFItem {
             id: Id,
             name: Name ?? "Unknown",
             isDirectory: isDir,
-            coverArt: Id,
+            coverArt: ownCoverArtID,
             song: isDir ? nil : asSong
         )
     }

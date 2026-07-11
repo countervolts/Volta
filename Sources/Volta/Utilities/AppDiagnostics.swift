@@ -30,6 +30,7 @@ enum AppDiagnostics {
             "model=\(device.model)",
             "localizedModel=\(device.localizedModel)",
             "machine=\(machineIdentifier())",
+            "maxFPS=\(UIScreen.main.maximumFramesPerSecond)",
             "uideviceOS=\(device.systemName) \(device.systemVersion)",
             "processOS=\(ProcessInfo.processInfo.operatingSystemVersionString)",
             "ios26=\(availability26())",
@@ -49,6 +50,7 @@ enum AppDiagnostics {
             "ios261=\(availability261())",
             "systemVersion=\(UIDevice.current.systemVersion)",
             "machine=\(machineIdentifier())",
+            "maxFPS=\(UIScreen.main.maximumFramesPerSecond)",
             "reduceTransparency=\(UIAccessibility.isReduceTransparencyEnabled)"
         ].joined(separator: "; ")
     }

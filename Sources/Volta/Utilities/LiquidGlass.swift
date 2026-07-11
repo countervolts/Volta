@@ -5,8 +5,10 @@ extension View {
     func glassCard(cornerRadius: CGFloat = 16) -> some View {
         if #available(iOS 26.0, *) {
             self.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+        } else if RuntimeCompatibility.prefersSolidGlassFallback {
+            self.background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         } else {
-            self.background(.ultraThinMaterial, in: .rect(cornerRadius: cornerRadius))
+            self.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         }
     }
 
@@ -14,8 +16,10 @@ extension View {
     func glassCircle() -> some View {
         if #available(iOS 26.0, *) {
             self.glassEffect(.regular.interactive(), in: .circle)
+        } else if RuntimeCompatibility.prefersSolidGlassFallback {
+            self.background(Color.white.opacity(0.12), in: Circle())
         } else {
-            self.background(.ultraThinMaterial, in: .circle)
+            self.background(.ultraThinMaterial, in: Circle())
         }
     }
 
@@ -27,6 +31,11 @@ extension View {
             } else {
                 self.glassEffect(.regular.interactive(), in: .capsule)
             }
+        } else if RuntimeCompatibility.prefersSolidGlassFallback {
+            self.background(
+                tinted ? AnyShapeStyle(Theme.accent.opacity(0.35)) : AnyShapeStyle(Color.white.opacity(0.12)),
+                in: Capsule()
+            )
         } else {
             self.background(
                 (tinted ? AnyShapeStyle(Theme.accent.opacity(0.35)) : AnyShapeStyle(.ultraThinMaterial)),

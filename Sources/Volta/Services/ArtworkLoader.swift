@@ -45,37 +45,35 @@ actor ArtworkLoader {
         let config = URLSessionConfiguration.default
         config.requestCachePolicy = .returnCacheDataElseLoad
         config.timeoutIntervalForRequest = 20
-        config.httpMaximumConnectionsPerHost = imageMode == "fast" ? 8 : (imageMode == "conservative" ? 2 : 6)
+        config.httpMaximumConnectionsPerHost = RuntimeCompatibility.artworkConnectionLimit(imageMode: imageMode)
         session = URLSession(configuration: config)
         prepareImages = imageMode != "conservative"
 
         // Decode cache is RAM-tiered; disk re-decode is cheap.
-        let tierMB: Int
-        switch DeviceMemoryTier.current {
-        case .gb3OrLess: tierMB = 48
-        case .gb4: tierMB = 64
-        case .gb6: tierMB = 96
-        case .gb8Plus: tierMB = 128
-        }
-        let megabytes = cacheMode == "aggressive" ? tierMB * 2 : (cacheMode == "light" ? min(tierMB, 32) : tierMB)
-        normalMemoryCountLimit = cacheMode == "aggressive" ? 600 : (cacheMode == "light" ? 150 : 300)
+        let megabytes = RuntimeCompatibility.artworkCacheMegabytes(for: DeviceMemoryTier.current, cacheMode: cacheMode)
+        normalMemoryCountLimit = RuntimeCompatibility.artworkCacheCountLimit(cacheMode: cacheMode)
         normalMemoryCostLimit = megabytes * 1024 * 1024
         memory.countLimit = normalMemoryCountLimit
         memory.totalCostLimit = normalMemoryCostLimit
-        liveMemory.countLimit = normalLiveMemoryCountLimit // player + one album header
-        liveMemory.totalCostLimit = normalLiveMemoryCostLimit
+        liveMemory.countLimit = LiveArtworkSettings.supportsAnimatedArtwork ? normalLiveMemoryCountLimit : 0
+        liveMemory.totalCostLimit = LiveArtworkSettings.supportsAnimatedArtwork ? normalLiveMemoryCostLimit : 0
 
         let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         directory = caches.appendingPathComponent("artwork", isDirectory: true)
         liveArtworkDirectory = caches.appendingPathComponent("live-artwork", isDirectory: true)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? fileManager.createDirectory(at: liveArtworkDirectory, withIntermediateDirectories: true)
 
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         pinnedDirectory = appSupport.appendingPathComponent("Volta/OfflineArtwork", isDirectory: true)
         try? fileManager.createDirectory(at: pinnedDirectory, withIntermediateDirectories: true)
         pinnedLiveDirectory = pinnedDirectory.appendingPathComponent("live", isDirectory: true)
-        try? fileManager.createDirectory(at: pinnedLiveDirectory, withIntermediateDirectories: true)
+        if LiveArtworkSettings.supportsAnimatedArtwork {
+            try? fileManager.createDirectory(at: liveArtworkDirectory, withIntermediateDirectories: true)
+            try? fileManager.createDirectory(at: pinnedLiveDirectory, withIntermediateDirectories: true)
+        } else {
+            try? fileManager.removeItem(at: liveArtworkDirectory)
+            try? fileManager.removeItem(at: pinnedLiveDirectory)
+        }
 
         // NSCache is not aggressive enough under memory pressure.
         NotificationCenter.default.addObserver(
@@ -124,7 +122,8 @@ actor ArtworkLoader {
         applyMemoryPolicy(rawMode: LiveArtworkSettings.rawAnimatedArtworkEnabled)
         let disableRAMOptimizations = DeveloperExperiments.disableRAMOptimizations
         let rawKey = Self.cacheKey(for: url)
-        let decodeMaxPixelSize = disableRAMOptimizations ? nil : maxPixelSize
+        let cappedMaxPixelSize = RuntimeCompatibility.cappedArtworkSize(maxPixelSize)
+        let decodeMaxPixelSize = disableRAMOptimizations ? nil : cappedMaxPixelSize
         let key = disableRAMOptimizations
             ? "\(rawKey)-ramraw"
             : (decodeMaxPixelSize.map { "\(rawKey)-max\($0)" } ?? rawKey)
@@ -137,7 +136,7 @@ actor ArtworkLoader {
         }
 
         let identityKey = Self.cacheKey(for: url, sizeAgnostic: true)
-        let fallbackPixelCap = disableRAMOptimizations ? nil : await Self.currentScreenPixelCap()
+        let fallbackPixelCap = disableRAMOptimizations ? nil : RuntimeCompatibility.cappedArtworkSize(await Self.currentScreenPixelCap())
         let task = Task<UIImage?, Never> { [directory, pinnedDirectory, session, prepareImages] in
             let fileURL = directory.appendingPathComponent(rawKey)
             let pinnedURL = pinnedDirectory.appendingPathComponent(rawKey)
@@ -157,7 +156,8 @@ actor ArtworkLoader {
             if let data = try? Data(contentsOf: fileURL), let image = await finish(data) {
                 return image
             }
-            guard let (data, _) = try? await session.data(from: url),
+            guard let (data, response) = try? await session.data(from: url),
+                  Self.isImageResponse(response, data: data),
                   let image = await finish(data) else {
                 return nil
             }
@@ -185,18 +185,22 @@ actor ArtworkLoader {
         let fileURL = directory.appendingPathComponent(key)
         guard !fileManager.fileExists(atPath: fileURL.path),
               !fileManager.fileExists(atPath: pinnedDirectory.appendingPathComponent(key).path),
-              let (data, _) = try? await session.data(from: url), !data.isEmpty else { return }
+              let (data, response) = try? await session.data(from: url),
+              Self.isImageResponse(response, data: data) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }
 
     // MARK: - Live (animated) artwork
 
     func animatedImage(for url: URL?) async -> UIImage? {
+        guard LiveArtworkSettings.supportsAnimatedArtwork else { return nil }
         // Album headers do not need lock-screen video.
-        await liveArtwork(for: url, includeVideo: false)?.animatedImage
+        return await liveArtwork(for: url, includeVideo: false)?.animatedImage
     }
 
     func liveArtwork(for url: URL?, includeVideo: Bool = true) async -> LiveArtworkAsset? {
+        guard LiveArtworkSettings.supportsAnimatedArtwork,
+              LiveArtworkSettings.shouldShowAnimatedArtwork else { return nil }
         guard let url else { return nil }
         let requestKey = "\(Self.cacheKey(for: url))-video\(includeVideo)"
         if let existing = liveInFlight[requestKey] {
@@ -275,7 +279,8 @@ actor ArtworkLoader {
             } else if let d = try? Data(contentsOf: fileURL) {
                 AppLogger.shared.log("Live artwork bytes loaded from disk cache; bytes=\(d.count)", category: .other)
                 data = d
-            } else if let (d, _) = try? await session.data(from: url) {
+            } else if let (d, response) = try? await session.data(from: url),
+                      Self.isImageResponse(response, data: d) {
                 try? d.write(to: fileURL, options: .atomic)
                 AppLogger.shared.log("Live artwork downloaded; bytes=\(d.count)", category: .other)
                 data = d
@@ -309,6 +314,13 @@ actor ArtworkLoader {
         liveMemoryRawPolicy = rawMode
         memory.countLimit = disableRAMOptimizations ? 0 : normalMemoryCountLimit
         memory.totalCostLimit = disableRAMOptimizations ? 0 : normalMemoryCostLimit
+
+        guard LiveArtworkSettings.supportsAnimatedArtwork else {
+            liveMemory.countLimit = 0
+            liveMemory.totalCostLimit = 0
+            liveMemory.removeAllObjects()
+            return
+        }
 
         let unlimitedLiveMemory = disableRAMOptimizations || rawMode
         liveMemory.countLimit = unlimitedLiveMemory ? 0 : normalLiveMemoryCountLimit
@@ -351,6 +363,17 @@ actor ArtworkLoader {
         await DeveloperExperiments.runBlocking(qos: .userInitiated) {
             decodeImage(from: data, maxPixelSize: maxPixelSize, prepare: prepare)
         }
+    }
+
+    private nonisolated static func isImageResponse(_ response: URLResponse, data: Data) -> Bool {
+        guard !data.isEmpty else { return false }
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            return false
+        }
+        if let mimeType = response.mimeType?.lowercased(), !mimeType.hasPrefix("image/") {
+            return false
+        }
+        return true
     }
 
     private nonisolated static func decodeImage(from data: Data, maxPixelSize: Int?, prepare: Bool) -> UIImage? {
@@ -715,7 +738,9 @@ actor ArtworkLoader {
         try? fileManager.removeItem(at: directory)
         try? fileManager.removeItem(at: liveArtworkDirectory)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? fileManager.createDirectory(at: liveArtworkDirectory, withIntermediateDirectories: true)
+        if LiveArtworkSettings.supportsAnimatedArtwork {
+            try? fileManager.createDirectory(at: liveArtworkDirectory, withIntermediateDirectories: true)
+        }
     }
 
     // MARK: - Offline (pinned) artwork
@@ -734,7 +759,8 @@ actor ArtworkLoader {
             try? data.write(to: pinnedURL, options: .atomic)
             return fileManager.fileExists(atPath: pinnedURL.path)
         }
-        guard let (data, _) = try? await session.data(from: url),
+        guard let (data, response) = try? await session.data(from: url),
+              Self.isImageResponse(response, data: data),
               UIImage(data: data) != nil else { return false }
         try? data.write(to: cacheURL, options: .atomic)
         try? data.write(to: pinnedURL, options: .atomic)
@@ -747,7 +773,8 @@ actor ArtworkLoader {
         let idKey = Crypto.md5Hex("artist:" + id)
         let pinnedIDURL = pinnedDirectory.appendingPathComponent(idKey)
         guard !fileManager.fileExists(atPath: pinnedIDURL.path) else { return true }
-        guard let (data, _) = try? await session.data(from: url),
+        guard let (data, response) = try? await session.data(from: url),
+              Self.isImageResponse(response, data: data),
               UIImage(data: data) != nil else { return false }
         try? data.write(to: pinnedIDURL, options: .atomic)
         let urlKey = Self.cacheKey(for: url)
@@ -784,7 +811,9 @@ actor ArtworkLoader {
         liveMemory.removeAllObjects()
         try? fileManager.removeItem(at: pinnedDirectory)
         try? fileManager.createDirectory(at: pinnedDirectory, withIntermediateDirectories: true)
-        try? fileManager.createDirectory(at: pinnedLiveDirectory, withIntermediateDirectories: true)
+        if LiveArtworkSettings.supportsAnimatedArtwork {
+            try? fileManager.createDirectory(at: pinnedLiveDirectory, withIntermediateDirectories: true)
+        }
     }
 
     private nonisolated static func directorySize(at url: URL) -> Int {

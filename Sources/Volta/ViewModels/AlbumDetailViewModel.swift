@@ -1,17 +1,16 @@
 import Foundation
-import Observation
 import UIKit
+import Combine
 
 @MainActor
-@Observable
-final class AlbumDetailViewModel {
-    private(set) var album: Album
-    private(set) var songs: [Song] = []
-    private(set) var moreBySameArtist: [Album] = []
-    private(set) var isLoading = false
-    private(set) var dominantColor: UIColor = .black
+final class AlbumDetailViewModel: ObservableObject {
+    @Published private(set) var album: Album
+    @Published private(set) var songs: [Song] = []
+    @Published private(set) var moreBySameArtist: [Album] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var dominantColor: UIColor = .black
 
-    private(set) var isDescriptionExpanded = false
+    @Published private(set) var isDescriptionExpanded = false
 
     var discNumbers: [Int] {
         let set = Set(songs.compactMap { $0.discNumber })
@@ -57,7 +56,7 @@ final class AlbumDetailViewModel {
             return artist?.album ?? []
         }
 
-        if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
+        if client.backendKind == .emby || DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
             loadedAlbum = try? await client.album(id: albumID)
             relatedAlbums = await loadArtistAlbums()
         } else {

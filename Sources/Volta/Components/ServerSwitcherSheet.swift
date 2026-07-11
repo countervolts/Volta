@@ -2,7 +2,7 @@ import SwiftUI
 
 // Native server picker with saved automatic connection roles.
 struct ServerSwitcherSheet: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
     @State private var servers: [ServerRecord] = []

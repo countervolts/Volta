@@ -65,7 +65,7 @@ extension SettingsView {
                         Label(L(.settings_gapless), systemImage: "music.note")
                     }
                     .tint(Theme.accent)
-                    .onChange(of: gaplessPlayback) { _, mode in
+                    .onChangeCompat(of: gaplessPlayback) { _, mode in
                         if mode == "off", audio.transitionMode == .automix {
                             audio.setTransitionMode(.crossfade)
                         }
@@ -77,7 +77,7 @@ extension SettingsView {
                         Label("Enhanced Caching", systemImage: "bolt.horizontal.circle")
                     }
                     .tint(Theme.accent)
-                    .onChange(of: enhancedPlaybackCaching) { _, enabled in
+                    .onChangeCompat(of: enhancedPlaybackCaching) { _, enabled in
                         if enabled {
                             audio.refreshPlaybackCache()
                         } else {
@@ -125,7 +125,7 @@ extension SettingsView {
                     .foregroundStyle(Theme.primaryText)
                 Slider(value: $crossfadeDurationSeconds, in: 1...12, step: 1)
                     .tint(Theme.accent)
-                    .onChange(of: crossfadeDurationSeconds) { _, _ in
+                    .onChangeCompat(of: crossfadeDurationSeconds) { _, _ in
                         audio.setTransitionMode(audio.transitionMode)
                     }
             }
@@ -154,7 +154,7 @@ extension SettingsView {
                         Text("Track").tag("track")
                         Text("Album").tag("album")
                     } label: {
-                        Label(L(.settings_volume_normalization), systemImage: "speaker.wave.2.bubble")
+                        Label(L(.settings_volume_normalization), systemImage: "speaker.wave.2.fill")
                     }
                     .tint(Theme.accent)
                 }
@@ -164,7 +164,7 @@ extension SettingsView {
                         Label(L(.settings_mono_audio), systemImage: "ear")
                     }
                     .tint(Theme.accent)
-                    .onChange(of: monoAudio) { _, _ in applyAudioEffectChange() }
+                    .onChangeCompat(of: monoAudio) { _, _ in applyAudioEffectChange() }
                 }
 
                 if rowVisible(s, ["spatial widener", "spatial", "3d", "stereo", "widener", "spatialize", "width"]) {
@@ -173,7 +173,7 @@ extension SettingsView {
                     }
                     .tint(Theme.accent)
                     .disabled(monoAudio)
-                    .onChange(of: spatialWidener) { _, _ in applyAudioEffectChange() }
+                    .onChangeCompat(of: spatialWidener) { _, _ in applyAudioEffectChange() }
 
                     if spatialWidener && !monoAudio {
                         Picker(selection: $spatialWidenerMode) {
@@ -183,7 +183,7 @@ extension SettingsView {
                             Label("Widening Mode", systemImage: "waveform")
                         }
                         .tint(Theme.accent)
-                        .onChange(of: spatialWidenerMode) { _, _ in
+                        .onChangeCompat(of: spatialWidenerMode) { _, _ in
                             EqualizerEngine.shared.refreshEffectFlags()
                         }
 
@@ -192,7 +192,7 @@ extension SettingsView {
                                 .foregroundStyle(Theme.primaryText)
                             Slider(value: $spatialWidenerAmount, in: 0...1.5, step: 0.05)
                                 .tint(Theme.accent)
-                                .onChange(of: spatialWidenerAmount) { _, _ in
+                                .onChangeCompat(of: spatialWidenerAmount) { _, _ in
                                     EqualizerEngine.shared.refreshEffectFlags()
                                 }
                         }

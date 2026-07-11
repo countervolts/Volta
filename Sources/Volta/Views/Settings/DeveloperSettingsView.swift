@@ -221,10 +221,19 @@ struct DeveloperExperimentsView: View {
             Theme.background.ignoresSafeArea()
             List {
                 Section {
-                    Toggle(isOn: $rawAnimatedArtwork) {
-                        Label("Raw Animated Artwork", systemImage: "livephoto")
+                    if LiveArtworkSettings.supportsAnimatedArtwork {
+                        Toggle(isOn: $rawAnimatedArtwork) {
+                            Label("Raw Animated Artwork", systemImage: "livephoto")
+                        }
+                        .tint(Theme.accent)
+                    } else {
+                        LabeledContent {
+                            Text("Unavailable on iOS 16")
+                                .foregroundStyle(Theme.secondaryText)
+                        } label: {
+                            Label("Raw Animated Artwork", systemImage: "livephoto")
+                        }
                     }
-                    .tint(Theme.accent)
 
                     Toggle(isOn: $disableRAMOptimizations) {
                         Label("Disable RAM Optimizations", systemImage: "memorychip")
@@ -279,24 +288,24 @@ struct DeveloperExperimentsView: View {
             ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
         }
         .preferredColorScheme(Theme.colorScheme)
-        .onChange(of: rawAnimatedArtwork) { _, enabled in
+        .onChangeCompat(of: rawAnimatedArtwork) { _, enabled in
             AppLogger.shared.logAlways("Developer experiment: raw animated artwork \(enabled ? "enabled" : "disabled")", category: .other)
         }
-        .onChange(of: disableRAMOptimizations) { _, enabled in
+        .onChangeCompat(of: disableRAMOptimizations) { _, enabled in
             AppLogger.shared.logAlways("Developer experiment: RAM optimizations \(enabled ? "disabled" : "enabled")", category: .other)
         }
-        .onChange(of: appWorkerLimit) { _, limit in
+        .onChangeCompat(of: appWorkerLimit) { _, limit in
             let label = limit > 0 ? "\(limit)" : "off"
             AppLogger.shared.logAlways("Developer experiment: app worker limit \(label)", category: .other)
             VoltaNotificationCenter.shared.post(L(.notif_restart_to_apply), tone: .info)
         }
-        .onChange(of: preciseTimestamps) { _, enabled in
+        .onChangeCompat(of: preciseTimestamps) { _, enabled in
             AppLogger.shared.logAlways("Developer experiment: precise timestamps \(enabled ? "enabled" : "disabled")", category: .other)
         }
-        .onChange(of: instantScrobbling) { _, enabled in
+        .onChangeCompat(of: instantScrobbling) { _, enabled in
             AppLogger.shared.logAlways("Developer experiment: instant scrobbling \(enabled ? "enabled" : "disabled")", category: .other)
         }
-        .onChange(of: fakeListeningStats) { _, enabled in
+        .onChangeCompat(of: fakeListeningStats) { _, enabled in
             AppLogger.shared.logAlways("Developer experiment: fake listening stats \(enabled ? "enabled" : "disabled")", category: .other)
             StatsStore.shared.setFakeStats(enabled, songPool: DownloadService.shared.downloadedSongs())
             VoltaNotificationCenter.shared.post(
@@ -419,7 +428,7 @@ struct LogsView: View {
                                 Color.clear.frame(height: 40).id("bottom")
                             }
                         }
-                        .onChange(of: entries.count) { _, _ in
+                        .onChangeCompat(of: entries.count) { _, _ in
                             withAnimation { proxy.scrollTo("bottom") }
                         }
                     }
@@ -434,9 +443,9 @@ struct LogsView: View {
         }
         .preferredColorScheme(Theme.colorScheme)
         .onAppear { reload() }
-        .onChange(of: selected) { _, _ in reload() }
-        .onChange(of: levelFilter) { _, _ in reload() }
-        .onChange(of: sortMode) { _, _ in reload() }
+        .onChangeCompat(of: selected) { _, _ in reload() }
+        .onChangeCompat(of: levelFilter) { _, _ in reload() }
+        .onChangeCompat(of: sortMode) { _, _ in reload() }
         .onReceive(NotificationCenter.default.publisher(for: .logEntryAdded)) { _ in reload() }
     }
 

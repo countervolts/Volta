@@ -1,10 +1,13 @@
 .build/
+build/
+.sim*/
+.derivedData/
 .swiftpm/
 xtool/
 .devcontainer/
 .vscode/
 discordbot/
-changelog/
+fixme.md
 # full res sources
 img/*.png
 # xcode files

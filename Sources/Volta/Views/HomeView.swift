@@ -9,13 +9,13 @@ enum HomeRoute: Hashable {
 }
 
 struct HomeView: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @Binding var path: NavigationPath
 
     private var vm: HomeViewModel { appState.homeViewModel }
     @State private var toastMessage: String?
     @State private var savingMixIDs = Set<String>()
-    @State private var networkMonitor = NetworkMonitor.shared
+    @StateObject private var networkMonitor = NetworkMonitor.shared
     @Namespace private var heroNamespace
 
     private let pad = Theme.Layout.screenPadding
@@ -325,62 +325,16 @@ struct HomeView: View {
         }
     }
 
+    @ViewBuilder
     private func homeSections(_ data: HomeSectionSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
-            homeHeader
-
-            if !data.picksFeed.isEmpty {
-                section(title: L(.home_picks_for_you)) {
-                    HorizontalPickRow(items: data.picksFeed,
-                        onSelectAlbum: { path.append(HomeRoute.album($0)) },
-                        onSelectMix: { path.append(HomeRoute.mix($0)) },
-                        onSaveMix: { saveMixAsPlaylist($0) },
-                        isSavingMix: { savingMixIDs.contains($0.id) })
+        Group {
+            if RuntimeCompatibility.isIOS16 {
+                LazyVStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
+                    homeSectionContent(data)
                 }
-            }
-
-            if !data.recentlyPlayed.isEmpty {
-                VStack(alignment: .leading, spacing: 14) {
-                    SectionHeaderView(L(.home_recently_played)) {
-                        path.append(HomeRoute.mediaGrid(title: L(.home_recently_played), items: data.recentlyPlayed))
-                    }
-                    .padding(.horizontal, pad)
-                    HorizontalMediaRow(items: data.recentlyPlayed) { item in
-                        navigate(to: item)
-                    }
-                }
-            }
-
-            if !data.topArtists.isEmpty {
-                section(title: L(.home_artists)) {
-                    ArtistScrollRow(artists: data.topArtists) { artist in
-                        path.append(HomeRoute.artist(artist))
-                    }
-                }
-            }
-
-            ForEach(data.moreLike) { item in
-                section(title: L(.home_more_like, item.artistName)) {
-                    HorizontalMediaRow(items: item.albums.map(MediaItem.init(album:))) { mediaItem in
-                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
-                    }
-                }
-            }
-
-            if !data.discover.isEmpty {
-                section(title: L(.home_discover)) {
-                    HorizontalMediaRow(items: data.discover.map(MediaItem.init(album:))) { mediaItem in
-                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
-                    }
-                }
-            }
-
-            if !data.newReleases.isEmpty {
-                let items = data.newReleases.map(MediaItem.init(album:))
-                section(title: L(.home_recently_added), seeAll: { path.append(HomeRoute.mediaGrid(title: L(.home_recently_added), items: items)) }) {
-                    HorizontalMediaRow(items: items) { mediaItem in
-                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
-                    }
+            } else {
+                VStack(alignment: .leading, spacing: Theme.Layout.sectionSpacing) {
+                    homeSectionContent(data)
                 }
             }
         }
@@ -394,6 +348,66 @@ struct HomeView: View {
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: toastMessage)
+    }
+
+    @ViewBuilder
+    private func homeSectionContent(_ data: HomeSectionSnapshot) -> some View {
+        homeHeader
+
+        if !data.picksFeed.isEmpty {
+            section(title: L(.home_picks_for_you)) {
+                HorizontalPickRow(items: data.picksFeed,
+                    onSelectAlbum: { path.append(HomeRoute.album($0)) },
+                    onSelectMix: { path.append(HomeRoute.mix($0)) },
+                    onSaveMix: { saveMixAsPlaylist($0) },
+                    isSavingMix: { savingMixIDs.contains($0.id) })
+            }
+        }
+
+        if !data.recentlyPlayed.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionHeaderView(L(.home_recently_played)) {
+                    path.append(HomeRoute.mediaGrid(title: L(.home_recently_played), items: data.recentlyPlayed))
+                }
+                .padding(.horizontal, pad)
+                HorizontalMediaRow(items: data.recentlyPlayed) { item in
+                    navigate(to: item)
+                }
+            }
+        }
+
+        if !data.topArtists.isEmpty {
+            section(title: L(.home_artists)) {
+                ArtistScrollRow(artists: data.topArtists) { artist in
+                    path.append(HomeRoute.artist(artist))
+                }
+            }
+        }
+
+        ForEach(data.moreLike) { item in
+            section(title: L(.home_more_like, item.artistName)) {
+                HorizontalMediaRow(items: item.albums.map(MediaItem.init(album:))) { mediaItem in
+                    if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+                }
+            }
+        }
+
+        if !data.discover.isEmpty {
+            section(title: L(.home_discover)) {
+                HorizontalMediaRow(items: data.discover.map(MediaItem.init(album:))) { mediaItem in
+                    if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+                }
+            }
+        }
+
+        if !data.newReleases.isEmpty {
+            let items = data.newReleases.map(MediaItem.init(album:))
+            section(title: L(.home_recently_added), seeAll: { path.append(HomeRoute.mediaGrid(title: L(.home_recently_added), items: items)) }) {
+                HorizontalMediaRow(items: items) { mediaItem in
+                    if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+                }
+            }
+        }
     }
 
     private var homeHeader: some View {

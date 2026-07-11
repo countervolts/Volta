@@ -1,14 +1,13 @@
 import Foundation
-import Observation
+import Combine
 
 @MainActor
-@Observable
-final class HiddenAlbumStore {
+final class HiddenAlbumStore: ObservableObject {
     static let shared = HiddenAlbumStore()
     nonisolated static let storageKey = "hiddenAlbumIDs"
 
-    private(set) var hiddenAlbumIDs: Set<String>
-    private(set) var revision = 0
+    @Published private(set) var hiddenAlbumIDs: Set<String>
+    @Published private(set) var revision = 0
     private var knownAlbumsByArtistID: [String: [Album]] = [:]
 
     private init() {

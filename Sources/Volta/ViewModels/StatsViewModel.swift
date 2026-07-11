@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 enum StatsPeriod: String, CaseIterable, Identifiable {
     case allTime = "All Time"
@@ -51,43 +51,42 @@ struct MonthBucket: Identifiable {
 }
 
 @MainActor
-@Observable
-final class StatsViewModel {
-    var period: StatsPeriod = .allTime
-    var offset: Int = 0   // navigate backwards (0 = current)
+final class StatsViewModel: ObservableObject {
+    @Published var period: StatsPeriod = .allTime
+    @Published var offset: Int = 0   // navigate backwards (0 = current)
 
     // refreshed when period/offset changes
-    private(set) var totalPlays: Int = 0
-    private(set) var totalSeconds: Int = 0
-    private(set) var uniqueSongs: Int = 0
-    private(set) var uniqueAlbums: Int = 0
-    private(set) var uniqueArtists: Int = 0
-    private(set) var sessions: Int = 0
-    private(set) var avgPlaysPerDay: Double = 0
-    private(set) var avgTracksPerDay: Double = 0
-    private(set) var avgListenPerDay: Double = 0  // minutes
-    private(set) var avgTrackLength: Double = 0   // seconds
-    private(set) var longestSession: Int = 0       // seconds
-    private(set) var topGenre: String = "-"
-    private(set) var streak: Int = 0
-    private(set) var longestStreak: Int = 0
-    private(set) var bestMonth: String = "-"
-    private(set) var bestMonthCount: Int = 0
-    private(set) var activeDays: Int = 0
-    private(set) var periodDays: Int = 1
-    private(set) var avgTracksPerMonth: Double = 0
+    @Published private(set) var totalPlays: Int = 0
+    @Published private(set) var totalSeconds: Int = 0
+    @Published private(set) var uniqueSongs: Int = 0
+    @Published private(set) var uniqueAlbums: Int = 0
+    @Published private(set) var uniqueArtists: Int = 0
+    @Published private(set) var sessions: Int = 0
+    @Published private(set) var avgPlaysPerDay: Double = 0
+    @Published private(set) var avgTracksPerDay: Double = 0
+    @Published private(set) var avgListenPerDay: Double = 0  // minutes
+    @Published private(set) var avgTrackLength: Double = 0   // seconds
+    @Published private(set) var longestSession: Int = 0       // seconds
+    @Published private(set) var topGenre: String = "-"
+    @Published private(set) var streak: Int = 0
+    @Published private(set) var longestStreak: Int = 0
+    @Published private(set) var bestMonth: String = "-"
+    @Published private(set) var bestMonthCount: Int = 0
+    @Published private(set) var activeDays: Int = 0
+    @Published private(set) var periodDays: Int = 1
+    @Published private(set) var avgTracksPerMonth: Double = 0
 
-    private(set) var topSongs: [TopEntry] = []
-    private(set) var topArtists: [TopEntry] = []
-    private(set) var topAlbums: [TopEntry] = []
+    @Published private(set) var topSongs: [TopEntry] = []
+    @Published private(set) var topArtists: [TopEntry] = []
+    @Published private(set) var topAlbums: [TopEntry] = []
 
-    private(set) var hourlyData: [HourlyBucket] = []
-    private(set) var dayOfWeekData: [DayBucket] = []
-    private(set) var genreData: [GenreBucket] = []
-    private(set) var dailyData: [DateBucket] = []
-    private(set) var monthlyData: [MonthBucket] = []
+    @Published private(set) var hourlyData: [HourlyBucket] = []
+    @Published private(set) var dayOfWeekData: [DayBucket] = []
+    @Published private(set) var genreData: [GenreBucket] = []
+    @Published private(set) var dailyData: [DateBucket] = []
+    @Published private(set) var monthlyData: [MonthBucket] = []
 
-    private(set) var periodLabel: String = ""
+    @Published private(set) var periodLabel: String = ""
 
     private let store = StatsStore.shared
     private let cal = Calendar.current

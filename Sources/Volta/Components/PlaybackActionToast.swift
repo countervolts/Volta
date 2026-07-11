@@ -1,5 +1,5 @@
 import SwiftUI
-import Observation
+import Combine
 
 enum VoltaNotificationTone: String, CaseIterable, Identifiable {
     case queue
@@ -68,16 +68,15 @@ struct VoltaNotificationItem: Identifiable, Equatable {
 }
 
 @MainActor
-@Observable
-final class VoltaNotificationCenter {
+final class VoltaNotificationCenter: ObservableObject {
     static let shared = VoltaNotificationCenter()
 
-    private(set) var current: VoltaNotificationItem?
+    @Published private(set) var current: VoltaNotificationItem?
 
-    @ObservationIgnored private var dismissTask: Task<Void, Never>?
-    @ObservationIgnored private var sequenceTask: Task<Void, Never>?
-    @ObservationIgnored private var lastMessage = ""
-    @ObservationIgnored private var lastPostedAt = Date.distantPast
+    private var dismissTask: Task<Void, Never>?
+    private var sequenceTask: Task<Void, Never>?
+    private var lastMessage = ""
+    private var lastPostedAt = Date.distantPast
 
     func post(_ message: String, tone: VoltaNotificationTone? = nil, duration: TimeInterval = 2.6, force: Bool = false) {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -152,7 +151,7 @@ final class VoltaNotificationCenter {
 }
 
 struct VoltaNotificationHost: View {
-    @State private var center = VoltaNotificationCenter.shared
+    @StateObject private var center = VoltaNotificationCenter.shared
 
     var body: some View {
         VStack {
@@ -191,7 +190,7 @@ struct VoltaNotificationToast: View {
                     .foregroundStyle(tone.tint)
             }
             .frame(width: 30, height: 30)
-            .symbolEffect(.bounce, value: appeared)
+            .symbolBounceCompat(value: appeared)
 
             Text(message)
                 .font(.subheadline.weight(.semibold))

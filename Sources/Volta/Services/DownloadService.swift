@@ -1,6 +1,6 @@
 import Foundation
-import Observation
 import UIKit
+import Combine
 
 enum DownloadState: Equatable, Sendable {
     case notDownloaded
@@ -51,8 +51,7 @@ struct DownloadBulkProgress: Equatable, Sendable {
 }
 
 @MainActor
-@Observable
-private final class DownloadItemState {
+private final class DownloadItemState: ObservableObject {
     var state: DownloadState
 
     init(_ state: DownloadState) {
@@ -169,39 +168,38 @@ private struct PendingDownloadResume {
 }
 
 @MainActor
-@Observable
-final class DownloadService {
+final class DownloadService: ObservableObject {
     static let shared = DownloadService()
 
-    private(set) var bulkProgress = DownloadBulkProgress()
-    private(set) var downloadedRevision = 0
+    @Published private(set) var bulkProgress = DownloadBulkProgress()
+    @Published private(set) var downloadedRevision = 0
 
-    @ObservationIgnored private var stateItems: [String: DownloadItemState] = [:]
-    @ObservationIgnored private var activeTasks: [String: URLSessionDownloadTask] = [:]
-    @ObservationIgnored private var observations: [String: NSKeyValueObservation] = [:]
-    @ObservationIgnored private var segmentTasks: [String: Task<Void, Never>] = [:]
-    @ObservationIgnored private var startTimes: [String: Date] = [:]
-    @ObservationIgnored private var pendingResumes: [String: PendingDownloadResume] = [:]
-    @ObservationIgnored private var mutedCompletionNotifications: Set<String> = []
-    @ObservationIgnored private var downloadTokens: [String: UUID] = [:]
-    @ObservationIgnored private var client: (any MusicService)?
+    private var stateItems: [String: DownloadItemState] = [:]
+    private var activeTasks: [String: URLSessionDownloadTask] = [:]
+    private var observations: [String: NSKeyValueObservation] = [:]
+    private var segmentTasks: [String: Task<Void, Never>] = [:]
+    private var startTimes: [String: Date] = [:]
+    private var pendingResumes: [String: PendingDownloadResume] = [:]
+    private var mutedCompletionNotifications: Set<String> = []
+    private var downloadTokens: [String: UUID] = [:]
+    private var client: (any MusicService)?
 
-    @ObservationIgnored private var pinnedCovers: Set<String> = []
-    @ObservationIgnored private var pinnedArtists: Set<String> = []
+    private var pinnedCovers: Set<String> = []
+    private var pinnedArtists: Set<String> = []
 
-    @ObservationIgnored private var bulkQueue: [Song] = []
-    @ObservationIgnored private var bulkSongsByID: [String: Song] = [:]
-    @ObservationIgnored private var bulkActiveIDs: Set<String> = []
-    @ObservationIgnored private var bulkCompletedCount = 0
-    @ObservationIgnored private var bulkFailedCount = 0
-    @ObservationIgnored private var bulkSkippedCount = 0
-    @ObservationIgnored private var bulkBytesFinished = 0
-    @ObservationIgnored private var bulkBytesTotal = 0
-    @ObservationIgnored private var bulkTotalCount = 0
-    @ObservationIgnored private var bulkStartedAt: Date?
-    @ObservationIgnored private var lastBulkSnapshotAt = Date.distantPast
-    @ObservationIgnored private var manifestWriter = DownloadManifestWriter()
-    @ObservationIgnored private var manifestSaveSequence = 0
+    private var bulkQueue: [Song] = []
+    private var bulkSongsByID: [String: Song] = [:]
+    private var bulkActiveIDs: Set<String> = []
+    private var bulkCompletedCount = 0
+    private var bulkFailedCount = 0
+    private var bulkSkippedCount = 0
+    private var bulkBytesFinished = 0
+    private var bulkBytesTotal = 0
+    private var bulkTotalCount = 0
+    private var bulkStartedAt: Date?
+    private var lastBulkSnapshotAt = Date.distantPast
+    private var manifestWriter = DownloadManifestWriter()
+    private var manifestSaveSequence = 0
 
     private nonisolated static let progressThrottler = DownloadProgressThrottler()
     private nonisolated static let bulkMaxConcurrent = 2
@@ -240,7 +238,10 @@ final class DownloadService {
     }
 
     private func setState(_ state: DownloadState, forID id: String) {
-        stateItem(for: id).state = state
+        let item = stateItem(for: id)
+        guard item.state != state else { return }
+        objectWillChange.send()
+        item.state = state
     }
 
     private func stateItem(for id: String) -> DownloadItemState {
@@ -974,15 +975,15 @@ final class DownloadService {
         var lastPlayed: Date?
     }
 
-    @ObservationIgnored private var manifest: [String: Record] = [:]
-    @ObservationIgnored private var isReconcilingMetadata = false
+    private var manifest: [String: Record] = [:]
+    private var isReconcilingMetadata = false
 
     // Derived song lists are rebuilt from the manifest (which means a fileExists
     // syscall per record). Views read these from computed properties many times
     // per render, so memoize per downloadedRevision to keep that work off the
     // main thread's hot path — a stale entry can only exist for one revision.
-    @ObservationIgnored private var downloadedSongsCache: (revision: Int, songs: [Song])?
-    @ObservationIgnored private var downloadedRecentCache: (revision: Int, songs: [Song])?
+    private var downloadedSongsCache: (revision: Int, songs: [Song])?
+    private var downloadedRecentCache: (revision: Int, songs: [Song])?
 
     // MARK: - Storage cap / LRU eviction
 

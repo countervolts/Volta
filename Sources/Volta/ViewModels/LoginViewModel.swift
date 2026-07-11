@@ -1,10 +1,9 @@
 import Foundation
-import Observation
 import UIKit
+import Combine
 
 @MainActor
-@Observable
-final class LoginViewModel {
+final class LoginViewModel: ObservableObject {
     // Server-address preflight state.
     enum ServerReachability: Equatable {
         case idle
@@ -19,25 +18,25 @@ final class LoginViewModel {
     }
 
     // nil while choosing a service.
-    var selectedBackend: MusicBackendKind?
+    @Published var selectedBackend: MusicBackendKind?
 
-    var serverAddress = ""
-    var username = ""
-    var password = ""
+    @Published var serverAddress = ""
+    @Published var username = ""
+    @Published var password = ""
 
-    private(set) var isConnecting = false
-    private(set) var isPlexHostedSigningIn = false
-    private(set) var serverError: String?
-    private(set) var credentialsError: String?
-    private(set) var didCompleteLogin = false
+    @Published private(set) var isConnecting = false
+    @Published private(set) var isPlexHostedSigningIn = false
+    @Published private(set) var serverError: String?
+    @Published private(set) var credentialsError: String?
+    @Published private(set) var didCompleteLogin = false
 
-    private(set) var reachability: ServerReachability = .idle
-    @ObservationIgnored private var reachabilityTask: Task<Void, Never>?
-    @ObservationIgnored private var pendingPlexHostedToken: String?
+    @Published private(set) var reachability: ServerReachability = .idle
+    private var reachabilityTask: Task<Void, Never>?
+    private var pendingPlexHostedToken: String?
 
     // incremented to retrigger the shake animation on the relevant fields.
-    private(set) var serverShake = 0
-    private(set) var credentialsShake = 0
+    @Published private(set) var serverShake = 0
+    @Published private(set) var credentialsShake = 0
 
     // Short, uncached session for login probes.
     private static let probeSession: URLSession = {
@@ -107,7 +106,7 @@ final class LoginViewModel {
         reachabilityTask?.cancel()
         pendingPlexHostedToken = nil
         let address = serverAddress
-        let candidates = SubsonicConfig.candidateURLs(from: address)
+        let candidates = SubsonicConfig.candidateURLs(from: address, kind: selectedBackend)
         guard !candidates.isEmpty else {
             reachability = .idle
             return
@@ -155,7 +154,7 @@ final class LoginViewModel {
         credentialsError = nil
 
         let address = serverAddress
-        let candidates = SubsonicConfig.candidateURLs(from: serverAddress)
+        let candidates = SubsonicConfig.candidateURLs(from: serverAddress, kind: kind)
         guard !candidates.isEmpty else {
             failServer()
             return .completed
@@ -267,7 +266,7 @@ final class LoginViewModel {
         credentialsError = nil
 
         let address = serverAddress
-        let candidates = SubsonicConfig.candidateURLs(from: serverAddress)
+        let candidates = SubsonicConfig.candidateURLs(from: serverAddress, kind: .plex)
         guard !candidates.isEmpty else {
             failServer()
             return .completed

@@ -103,10 +103,19 @@ extension SettingsView {
                 }
 
                 if rowVisible(s, ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"]) {
-                    Toggle(isOn: $liveArtwork) {
-                        Label(L(.appearance_live_artwork), systemImage: "sparkles.rectangle.stack")
+                    if LiveArtworkSettings.supportsAnimatedArtwork {
+                        Toggle(isOn: $liveArtwork) {
+                            Label(L(.appearance_live_artwork), systemImage: "sparkles.rectangle.stack")
+                        }
+                        .tint(Theme.accent)
+                    } else {
+                        LabeledContent {
+                            Text("Unavailable on iOS 16")
+                                .foregroundStyle(Theme.secondaryText)
+                        } label: {
+                            Label(L(.appearance_live_artwork), systemImage: "sparkles.rectangle.stack")
+                        }
                     }
-                    .tint(Theme.accent)
                 }
 
                 if rowVisible(s, ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"]) {

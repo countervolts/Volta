@@ -26,7 +26,7 @@ private struct ShakeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .modifier(ShakeEffect(animatableData: animatable))
-            .onChange(of: trigger) { _, _ in
+            .onChangeCompat(of: trigger) { _, _ in
                 animatable = 0
                 withAnimation(.linear(duration: 0.5)) {
                     animatable = 1

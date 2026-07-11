@@ -37,7 +37,7 @@ private struct AccentIconLabelStyle: LabelStyle {
 }
 
 struct SettingsView: View {
-    @Environment(AppState.self) var appState
+    @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
     @Environment(\.openURL) var openURL
 
@@ -139,8 +139,8 @@ struct SettingsView: View {
     @State var didScheduleInitialRefresh = false
     @State var loggedPlayEventCount: Int?
     @StateObject var lyricsDownloader = LyricsBulkDownloader.shared
-    @State var hiddenAlbums = HiddenAlbumStore.shared
-    @State var downloadService = DownloadService.shared
+    @StateObject var hiddenAlbums = HiddenAlbumStore.shared
+    @StateObject var downloadService = DownloadService.shared
     @State var playlistBackupStatus: String?
     @State var isRefreshingPlaylistBackups = false
     @State var restoringPlaylistBackupID: String?
@@ -219,7 +219,7 @@ struct SettingsView: View {
             .toolbar { settingsToolbar }
             .preferredColorScheme(Theme.colorScheme)
             .onAppear { scheduleInitialRefresh() }
-            .onChange(of: downloadService.bulkProgress.phase) { _, phase in
+            .onChangeCompat(of: downloadService.bulkProgress.phase) { _, phase in
                 handleBulkDownloadPhaseChange(phase)
             }
     }

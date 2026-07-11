@@ -1,21 +1,20 @@
 import Foundation
-import Observation
+import Combine
 
 @MainActor
-@Observable
-final class PlaylistsViewModel {
-    private(set) var playlists: [Playlist] = []
-    private(set) var smartSourceSongs: [Song] = []
-    private(set) var isLoading = false
-    private(set) var hasLoaded = false
-    private(set) var isCreating = false
+final class PlaylistsViewModel: ObservableObject {
+    @Published private(set) var playlists: [Playlist] = []
+    @Published private(set) var smartSourceSongs: [Song] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var hasLoaded = false
+    @Published private(set) var isCreating = false
 
-    var searchText: String = ""
-    var showCreateSheet = false
-    var newPlaylistName = ""
+    @Published var searchText: String = ""
+    @Published var showCreateSheet = false
+    @Published var newPlaylistName = ""
 
     private static let pinnedKey = "pinnedPlaylistIDs"
-    private(set) var pinnedIDs: Set<String> = Set(
+    @Published private(set) var pinnedIDs: Set<String> = Set(
         UserDefaults.standard.stringArray(forKey: PlaylistsViewModel.pinnedKey) ?? []
     )
 

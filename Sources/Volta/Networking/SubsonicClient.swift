@@ -6,11 +6,15 @@ struct SubsonicConfig: Sendable, Hashable, Codable {
     var password: String
 
     // Normalize user-entered server roots. Defaults to https when no scheme is given.
-    static func normalizedURL(from raw: String) -> URL? {
+    static func normalizedURL(from raw: String, kind: MusicBackendKind? = nil) -> URL? {
+        candidateURLs(from: raw, kind: kind).first
+    }
+
+    private static func normalizedURLCandidate(_ raw: String) -> URL? {
         let cleaned = sanitizedInput(raw)
         guard !cleaned.isEmpty else { return nil }
         let text = hasExplicitScheme(cleaned) ? cleaned : "https://" + cleaned
-        return URL(string: text)
+        return URLComponents(string: text)?.url
     }
 
     // Whether the user explicitly typed an http:// or https:// scheme.
@@ -21,13 +25,16 @@ struct SubsonicConfig: Sendable, Hashable, Codable {
 
     // Server roots to try when logging in, in priority order. If the user typed
     // a scheme we honour it exactly; otherwise we probe https first then http.
-    static func candidateURLs(from raw: String) -> [URL] {
+    static func candidateURLs(from raw: String, kind: MusicBackendKind? = nil) -> [URL] {
         let cleaned = sanitizedInput(raw)
         guard !cleaned.isEmpty else { return [] }
+        let rawCandidates: [String]
         if hasExplicitScheme(cleaned) {
-            return URL(string: cleaned).map { [$0] } ?? []
+            rawCandidates = [cleaned]
+        } else {
+            rawCandidates = ["https://" + cleaned, "http://" + cleaned]
         }
-        return ["https://" + cleaned, "http://" + cleaned].compactMap { URL(string: $0) }
+        return uniqueURLs(rawCandidates.flatMap { urlCandidates(from: $0, kind: kind) })
     }
 
     // Normalize pasted server roots.
@@ -48,6 +55,43 @@ struct SubsonicConfig: Sendable, Hashable, Codable {
         }
         while text.hasSuffix("/") { text.removeLast() }
         return text
+    }
+
+    private static func urlCandidates(from raw: String, kind: MusicBackendKind?) -> [URL] {
+        guard let url = normalizedURLCandidate(raw) else { return [] }
+        guard let kind,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.port == nil,
+              components.host != nil else {
+            return [url]
+        }
+        let portCandidates = defaultPorts(for: kind, scheme: components.scheme)
+        guard !portCandidates.isEmpty else { return [url] }
+        return [url] + portCandidates.compactMap { port in
+            components.port = port
+            return components.url
+        }
+    }
+
+    private static func defaultPorts(for kind: MusicBackendKind, scheme: String?) -> [Int] {
+        switch kind {
+        case .subsonic:
+            return [4533, 4040]
+        case .jellyfin, .emby:
+            return (scheme?.lowercased() == "https") ? [8920] : [8096]
+        case .plex:
+            return [32400]
+        }
+    }
+
+    private static func uniqueURLs(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        return urls.filter { url in
+            let key = url.absoluteString
+            guard !seen.contains(key) else { return false }
+            seen.insert(key)
+            return true
+        }
     }
 }
 

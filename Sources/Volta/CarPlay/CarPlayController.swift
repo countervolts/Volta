@@ -1,14 +1,8 @@
 #if canImport(CarPlay)
 import CarPlay
 import UIKit
-import Observation
+import Combine
 
-// Drives the CarPlay UI: a tab bar of browsable lists (Recently Played,
-// Playlists, Albums, Artists) that drill down into songs and hand the queue to
-// the shared AudioPlayer. Playback transport, artwork and metadata are already
-// published to MPNowPlayingInfoCenter / MPRemoteCommandCenter by AudioPlayer, so
-// CPNowPlayingTemplate reflects everything for free; we add the shuffle/repeat/
-// favorite buttons and an Up Next queue list on top.
 @MainActor
 final class CarPlayController: NSObject {
     static let shared = CarPlayController()
@@ -21,8 +15,7 @@ final class CarPlayController: NSObject {
 
     private var interfaceController: CPInterfaceController?
     private var clientObserver: NSObjectProtocol?
-    // Bumped to retire stale player-state observation chains (see armObservation).
-    private var observationGeneration = 0
+    private var playerStateCancellable: AnyCancellable?
 
     // Root tab templates, kept so we can repopulate them in place when the
     // client connects/disconnects without rebuilding the whole tab bar.
@@ -57,7 +50,8 @@ final class CarPlayController: NSObject {
         }
         clientObserver = nil
         CPNowPlayingTemplate.shared.remove(self)
-        observationGeneration += 1   // retire the live state-observation chain
+        playerStateCancellable?.cancel()
+        playerStateCancellable = nil
         interfaceController = nil
         recentlyPlayedTemplate = nil
         playlistsTemplate = nil
@@ -148,8 +142,7 @@ final class CarPlayController: NSObject {
 
     // MARK: - Async list population
 
-    // Generic: run a loader, then swap the template's single section for the
-    // result (or an empty-state row).
+    // Generic: run a loader, then swap the template's single section for the result (or an empty-state row).
     private func load(into template: CPListTemplate?, _ loader: @escaping () async -> [CPListItem]) {
         guard let template else { return }
         Task { @MainActor in
@@ -329,27 +322,16 @@ final class CarPlayController: NSObject {
     // Start a fresh observation chain that refreshes the buttons whenever the
     // relevant player state changes (from CarPlay, the phone, or autoplay).
     private func startObservingPlayerState() {
-        observationGeneration += 1
-        armObservation(generation: observationGeneration)
-    }
-
-    // withObservationTracking fires once per change, so we re-arm each time. The
-    // generation guard ensures only the newest chain survives — older chains
-    // (e.g. from a previous sign-in) fire once more and then stop re-arming,
-    // which prevents the trackers from multiplying.
-    private func armObservation(generation: Int) {
-        guard generation == observationGeneration, interfaceController != nil else { return }
+        playerStateCancellable?.cancel()
+        playerStateCancellable = nil
+        guard interfaceController != nil else { return }
         refreshNowPlayingConfig()
-        let player = audioPlayer
-        withObservationTracking {
-            _ = player?.isShuffle
-            _ = player?.repeatMode
-            _ = player?.currentSong?.id
-            _ = player?.starredIDs
-            _ = player?.queue.count
-        } onChange: { [weak self] in
-            Task { @MainActor in self?.armObservation(generation: generation) }
-        }
+        playerStateCancellable = audioPlayer?.objectWillChange
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    Task { @MainActor in self?.refreshNowPlayingConfig() }
+                }
+            }
     }
 
     // MARK: - Helpers

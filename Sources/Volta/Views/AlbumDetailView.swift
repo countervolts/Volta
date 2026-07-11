@@ -8,8 +8,8 @@ enum iPadDetailPanel: String, CaseIterable {
 }
 
 struct AlbumDetailView: View {
-    @Environment(AppState.self) private var appState
-    @State private var vm: AlbumDetailViewModel
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var vm: AlbumDetailViewModel
     @State private var showAddToPlaylist: Song? = nil
     @State private var toastMessage: String? = nil
     @State private var drillAlbum: Album? = nil
@@ -26,7 +26,7 @@ struct AlbumDetailView: View {
     @State private var iPadPanel: iPadDetailPanel = .songs
 
     init(album: Album, fromArtist: Bool = false) {
-        _vm = State(wrappedValue: AlbumDetailViewModel(album: album))
+        _vm = StateObject(wrappedValue: AlbumDetailViewModel(album: album))
         self.fromArtist = fromArtist
     }
 
@@ -61,7 +61,7 @@ struct AlbumDetailView: View {
         .navigationBarHidden(true)
         .preferredColorScheme(Theme.colorScheme)
         .background(SwipeBackEnabler())
-        .navigationDestination(item: $drillArtist) { artist in
+        .navigationDestinationItemCompat(item: $drillArtist) { artist in
             ArtistDetailView(artist: artist)
         }
         .sheet(item: $showAddToPlaylist) { song in
@@ -303,7 +303,7 @@ struct AlbumDetailView: View {
                     .buttonStyle(.plain)
                     .popover(isPresented: $showAlbumLosslessInfo) {
                         AlbumQualityInsightPopover(songs: vm.songs)
-                            .presentationCompactAdaptation(.popover)
+                            .popoverPresentationCompactAdaptationCompat()
                     }
                 }
             }
@@ -489,7 +489,7 @@ struct AlbumDetailView: View {
                 }
             }
             .padding(.bottom, 24)
-            .navigationDestination(item: $drillAlbum) { album in
+            .navigationDestinationItemCompat(item: $drillAlbum) { album in
                 AlbumDetailView(album: album)
             }
         }
@@ -601,7 +601,7 @@ struct DownloadAlbumButton: View {
 struct AddToPlaylistSheet: View {
     let song: Song
     var onAdded: (String) -> Void
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var playlists: [Playlist] = []
     @State private var confirming: Playlist? = nil

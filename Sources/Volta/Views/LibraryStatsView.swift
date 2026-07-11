@@ -4,8 +4,8 @@ import Charts
 // MARK: - Library stats tab content
 
 struct LibraryStatsContentView: View {
-    @Bindable var vm: LibraryStatsViewModel
-    @Environment(AppState.self) private var appState
+    @ObservedObject var vm: LibraryStatsViewModel
+    @EnvironmentObject private var appState: AppState
 
     var body: some View {
         Group {
@@ -340,13 +340,26 @@ struct LibDonutCard: View {
     let data: [LibCountMetric]
     var body: some View {
         LibCardContainer(title: title) {
+            chart
+                .frame(height: 200)
+        }
+    }
+
+    @ViewBuilder
+    private var chart: some View {
+        if #available(iOS 17.0, *) {
             Chart(data) { m in
                 SectorMark(angle: .value("Count", m.count), innerRadius: .ratio(0.55), angularInset: 2)
                     .foregroundStyle(by: .value("Format", m.label))
                     .cornerRadius(4)
             }
             .chartLegend(position: .bottom, alignment: .leading, spacing: 8)
-            .frame(height: 200)
+        } else {
+            Chart(data) { m in
+                BarMark(x: .value("Count", m.count), y: .value("Format", m.label))
+                    .foregroundStyle(Theme.accent.gradient)
+                    .cornerRadius(4)
+            }
         }
     }
 }

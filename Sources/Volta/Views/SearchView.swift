@@ -4,10 +4,10 @@ struct SearchView: View {
     @State private var searchText = ""
     @State private var isSearchActive = false
 
-    @Environment(AppState.self) private var appState
-    @State private var vm = SearchViewModel()
-    @State private var hiddenAlbums = HiddenAlbumStore.shared
-    @State private var networkMonitor = NetworkMonitor.shared
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var vm = SearchViewModel()
+    @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
+    @StateObject private var networkMonitor = NetworkMonitor.shared
     @Binding var path: NavigationPath
     @Namespace private var heroNamespace
 
@@ -53,13 +53,13 @@ struct SearchView: View {
             vm.setOffline(isOffline)
             if let client = appState.client { vm.bind(client: client) }
         }
-        .onChange(of: searchText) { _, new in
+        .onChangeCompat(of: searchText) { _, new in
             vm.query = new
         }
-        .onChange(of: networkMonitor.connection) { _, _ in
+        .onChangeCompat(of: networkMonitor.connection) { _, _ in
             vm.setOffline(isOffline)
         }
-        .onChange(of: hiddenAlbums.revision) { _, _ in
+        .onChangeCompat(of: hiddenAlbums.revision) { _, _ in
             vm.refreshForVisibilityChange()
         }
     }
@@ -610,7 +610,7 @@ private struct SearchActiveReader: View {
         Color.clear
             .frame(width: 0, height: 0)
             .onAppear { isActive = isSearching }
-            .onChange(of: isSearching) { _, newValue in
+            .onChangeCompat(of: isSearching) { _, newValue in
                 isActive = newValue
             }
     }
@@ -641,15 +641,15 @@ private struct GenreHomeView: View {
     var onArtist: (Artist) -> Void
     var onMix: (MusicMix) -> Void
 
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @State private var genreData = GenreHomeData()
     @State private var isLoadingGenre = false
     @State private var genreMix: MusicMix?
     @State private var isLoadingMix = false
     @State private var savingMixIDs = Set<String>()
     @State private var toastMessage: String?
-    @State private var hiddenAlbums = HiddenAlbumStore.shared
-    @State private var networkMonitor = NetworkMonitor.shared
+    @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
+    @StateObject private var networkMonitor = NetworkMonitor.shared
 
     private var isOffline: Bool { networkMonitor.connection == .none }
 

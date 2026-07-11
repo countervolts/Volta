@@ -15,7 +15,7 @@ enum MixSheet: Identifiable {
 }
 
 struct MixDetailView: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     let mix: MusicMix
 
     @State private var dominantColor: UIColor = .black

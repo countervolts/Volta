@@ -1,22 +1,21 @@
 import UIKit
-import Observation
+import Combine
 
 @MainActor
-@Observable
-final class ArtistDetailViewModel {
+final class ArtistDetailViewModel: ObservableObject {
     let seedArtist: Artist
 
-    var fullArtist: Artist?
-    var albums: [Album] = []
-    var topSongs: [Song] = []
-    var allSongs: [Song] = []
-    var info: ArtistInfo?
+    @Published var fullArtist: Artist?
+    @Published var albums: [Album] = []
+    @Published var topSongs: [Song] = []
+    @Published var allSongs: [Song] = []
+    @Published var info: ArtistInfo?
     // Keep HTML parsing out of the render path.
-    var biography: String?
-    var dominantColor: UIColor = .black
-    var isLoading = false
-    var isDescriptionExpanded = false
-    var topSongsExpanded = false
+    @Published var biography: String?
+    @Published var dominantColor: UIColor = .black
+    @Published var isLoading = false
+    @Published var isDescriptionExpanded = false
+    @Published var topSongsExpanded = false
 
     init(artist: Artist) {
         self.seedArtist = artist
@@ -25,13 +24,13 @@ final class ArtistDetailViewModel {
     var displayArtist: Artist { fullArtist ?? seedArtist }
     var similarArtists: [Artist] { info?.similarArtist ?? [] }
 
-    var appearsOn: [Album] = []
+    @Published var appearsOn: [Album] = []
     var albumReleases: [Album] { albums.filter { !Self.isSingle($0) } }
     var singles: [Album] { albums.filter { Self.isSingle($0) } }
     var likedSongs: [Song] { allSongs.filter { $0.starred != nil } }
 
-    var artistImage: UIImage?
-    var artworkResolved = false
+    @Published var artistImage: UIImage?
+    @Published var artworkResolved = false
 
     func load(client: any MusicService) async {
         isLoading = true
@@ -44,7 +43,7 @@ final class ArtistDetailViewModel {
             await applyImage(from: seedArtist.artistImageUrl)
         }
 
-        if DeveloperExperiments.constrainedConcurrency(default: 4) < 4 {
+        if client.backendKind == .emby || DeveloperExperiments.constrainedConcurrency(default: 4) < 4 {
             let loadedArtist = try? await client.artist(id: seedArtist.id)
             fullArtist = loadedArtist
             albums = Self.sortedAlbums(loadedArtist?.album ?? [])

@@ -48,10 +48,10 @@ struct DownloadedFolderView: View {
     let prefix: [String]
     var filterText: String = ""
 
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @AppStorage("showTrackArtwork") private var showTrackArtwork = true
-    @State private var downloadService = DownloadService.shared
-    @State private var hiddenAlbums = HiddenAlbumStore.shared
+    @StateObject private var downloadService = DownloadService.shared
+    @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
     @State private var addToPlaylistSong: Song? = nil
     @State private var albumToShow: Album? = nil
     @State private var artistToShow: Artist? = nil
