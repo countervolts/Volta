@@ -1,10 +1,11 @@
 import SwiftUI
 import AVFoundation
+import Combine
 
 // Settings AutoMix preview.
 struct AutoMixPreviewView: View {
-    @Environment(AppState.self) private var appState
-    @State private var engine = AutoMixPreviewEngine()
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var engine = AutoMixPreviewEngine()
 
     var body: some View {
         ZStack {
@@ -252,28 +253,27 @@ struct AutoMixPreviewView: View {
 
 // Audible + visual AutoMix preview, separate from the main queue.
 @MainActor
-@Observable
-final class AutoMixPreviewEngine {
-    private(set) var songA: Song?
-    private(set) var songB: Song?
-    private(set) var keyA: MusicalKey?
-    private(set) var keyB: MusicalKey?
+final class AutoMixPreviewEngine: ObservableObject {
+    @Published private(set) var songA: Song?
+    @Published private(set) var songB: Song?
+    @Published private(set) var keyA: MusicalKey?
+    @Published private(set) var keyB: MusicalKey?
     private var gridA: AutoMixBeatGrid?
     private var gridB: AutoMixBeatGrid?
     private var analysisA: AutoMixTrackAnalysis?
     private var analysisB: AutoMixTrackAnalysis?
     // Incoming preview duck; preview path has no ReplayGain.
     private var volumeMatchB: Float = 1
-    private(set) var isLoading = false
-    private(set) var isPlaying = false
-    private(set) var isBlending = false
-    private(set) var progress: Double = 0
-    private(set) var errorMessage: String?
+    @Published private(set) var isLoading = false
+    @Published private(set) var isPlaying = false
+    @Published private(set) var isBlending = false
+    @Published private(set) var progress: Double = 0
+    @Published private(set) var errorMessage: String?
 
     // Timeline seconds with fixed context on each side.
-    private(set) var leadIn: TimeInterval = 5
-    private(set) var leadOut: TimeInterval = 5
-    private(set) var blend: TimeInterval = 8
+    @Published private(set) var leadIn: TimeInterval = 5
+    @Published private(set) var leadOut: TimeInterval = 5
+    @Published private(set) var blend: TimeInterval = 8
     var totalDuration: TimeInterval { leadIn + blend + leadOut }
 
     private weak var appState: AppState?

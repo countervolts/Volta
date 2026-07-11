@@ -124,7 +124,7 @@ enum PerformanceOverlayConfiguration {
 }
 
 struct PerformanceOverlay: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @AppStorage("performanceModeEnabled") private var performanceModeEnabled = false
     @AppStorage("pmHalfFrameRate") private var halfFrameRate = true
     @AppStorage(PerformanceOverlayConfiguration.itemsKey) private var overlayItemsRaw = PerformanceOverlayConfiguration.defaultRaw
@@ -163,15 +163,23 @@ struct PerformanceOverlay: View {
         }
         .padding(10)
         .frame(width: 222, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background {
+            if RuntimeCompatibility.prefersSolidGlassFallback {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(white: 0.12).opacity(0.98))
+            } else {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            }
+        }
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 16, x: 0, y: 8)
         .onAppear { monitor.start() }
         .onDisappear { monitor.stop() }
-        .onChange(of: performanceModeEnabled) { _, _ in
+        .onChangeCompat(of: performanceModeEnabled) { _, _ in
             monitor.refreshFrameRate(resetSamples: true)
         }
-        .onChange(of: halfFrameRate) { _, _ in
+        .onChangeCompat(of: halfFrameRate) { _, _ in
             monitor.refreshFrameRate(resetSamples: true)
         }
     }
@@ -310,7 +318,14 @@ private final class PerformanceOverlayMonitor: NSObject, ObservableObject {
     }
 
     var frameRateLabel: String {
-        isHalfRate ? "Half VSync \(Int(targetFPS.rounded()))" : "Native VSync"
+        if isHalfRate {
+            return "Half VSync \(Int(targetFPS.rounded()))"
+        }
+#if targetEnvironment(simulator)
+        return "Simulator VSync \(Int(targetFPS.rounded()))"
+#else
+        return "Native VSync"
+#endif
     }
 
     func start() {

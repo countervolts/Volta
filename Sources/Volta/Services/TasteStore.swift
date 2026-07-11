@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 enum TasteState: String, Codable, Sendable {
     case neutral
@@ -8,15 +8,14 @@ enum TasteState: String, Codable, Sendable {
 }
 
 @MainActor
-@Observable
-final class TasteStore {
+final class TasteStore: ObservableObject {
     static let shared = TasteStore()
 
     private static let lovedKey = "lovedSongIDs"
     private static let dislikedKey = "dislikedSongIDs"
 
-    private(set) var lovedIDs: Set<String>
-    private(set) var dislikedIDs: Set<String>
+    @Published private(set) var lovedIDs: Set<String>
+    @Published private(set) var dislikedIDs: Set<String>
 
     private init() {
         lovedIDs = Set(UserDefaults.standard.stringArray(forKey: Self.lovedKey) ?? [])

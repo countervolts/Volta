@@ -1,15 +1,14 @@
 import Foundation
-import Observation
 import UIKit
+import Combine
 
 @MainActor
-@Observable
-final class PlaylistDetailViewModel {
-    private(set) var playlist: Playlist
-    private(set) var songs: [Song] = []
-    private(set) var isLoading = false
-    private(set) var dominantColor: UIColor = .black
-    private(set) var isDescriptionExpanded = false
+final class PlaylistDetailViewModel: ObservableObject {
+    @Published private(set) var playlist: Playlist
+    @Published private(set) var songs: [Song] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var dominantColor: UIColor = .black
+    @Published private(set) var isDescriptionExpanded = false
 
     init(playlist: Playlist) {
         self.playlist = playlist

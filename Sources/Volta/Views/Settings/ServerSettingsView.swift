@@ -80,7 +80,7 @@ extension SettingsView {
 // MARK: - Edit Connection View
 
 struct EditConnectionView: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
     @State private var serverURL: String = ""
@@ -178,7 +178,9 @@ struct EditConnectionView: View {
 
     private func saveConnection() {
         guard let currentServer = appState.currentServer else { return }
-        guard let url = SubsonicConfig.normalizedURL(from: serverURL) else {
+        let backend = currentServer.backend
+        let candidateURLs = SubsonicConfig.candidateURLs(from: serverURL, kind: backend)
+        guard !candidateURLs.isEmpty else {
             errorMessage = "Invalid server URL"
             VoltaNotificationCenter.shared.post(L(.notif_invalid_server_url), tone: .error)
             return
@@ -187,7 +189,7 @@ struct EditConnectionView: View {
         let trimmedCell = cellularURL.trimmingCharacters(in: .whitespacesAndNewlines)
         var normalizedCell: String? = nil
         if !trimmedCell.isEmpty {
-            guard let cellURL = SubsonicConfig.normalizedURL(from: trimmedCell) else {
+            guard let cellURL = SubsonicConfig.normalizedURL(from: trimmedCell, kind: backend) else {
                 errorMessage = "Invalid cellular URL"
                 VoltaNotificationCenter.shared.post(L(.notif_invalid_cellular_url), tone: .error)
                 return
@@ -207,21 +209,29 @@ struct EditConnectionView: View {
         errorMessage = nil
         Task {
             defer { isSaving = false }
-            let config = SubsonicConfig(baseURL: url, username: username, password: pwd)
-            let backend = currentServer.backend
+            var lastError: Error?
             do {
-                let testClient = try await MusicServiceFactory.make(config: config, kind: backend)
-                try await testClient.ping()
-                await MainActor.run {
-                    appState.completeLogin(config: testClient.config, kind: backend)
-                    appState.updateCellularConnection(
-                        urlString: normalizedCell,
-                        username: cellUsername,
-                        password: cellPassword
-                    )
-                    VoltaNotificationCenter.shared.post(L(.notif_connection_saved), tone: .success)
-                    dismiss()
+                for url in candidateURLs {
+                    let config = SubsonicConfig(baseURL: url, username: username, password: pwd)
+                    do {
+                        let testClient = try await MusicServiceFactory.make(config: config, kind: backend)
+                        try await testClient.ping()
+                        await MainActor.run {
+                            appState.completeLogin(config: testClient.config, kind: backend)
+                            appState.updateCellularConnection(
+                                urlString: normalizedCell,
+                                username: cellUsername,
+                                password: cellPassword
+                            )
+                            VoltaNotificationCenter.shared.post(L(.notif_connection_saved), tone: .success)
+                            dismiss()
+                        }
+                        return
+                    } catch {
+                        lastError = error
+                    }
                 }
+                throw lastError ?? SubsonicError.serverUnreachable
             } catch {
                 errorMessage = "Could not connect: \(error.localizedDescription)"
                 VoltaNotificationCenter.shared.post(L(.notif_could_not_connect), tone: .error)
@@ -233,7 +243,7 @@ struct EditConnectionView: View {
 // MARK: - Server Info View
 
 struct ServerInfoView: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @State private var speedTestResult: String? = nil
     @State private var isTesting = false
     @State private var speedGrade: String? = nil

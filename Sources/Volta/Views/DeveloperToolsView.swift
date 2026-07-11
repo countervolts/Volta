@@ -9,7 +9,7 @@ private struct DeveloperMetric: Identifiable {
 }
 
 struct DeveloperToolsView: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
 
     @AppStorage(DeveloperSimulation.Keys.slowServerEnabled) private var slowServerEnabled = false
     @AppStorage(DeveloperSimulation.Keys.slowServerDelayMS) private var slowServerDelayMS = 1200
@@ -45,10 +45,10 @@ struct DeveloperToolsView: View {
             refreshedAt = .now
             logSimulationState()
         }
-        .onChange(of: slowServerEnabled) { _, _ in logSimulationState() }
-        .onChange(of: slowServerDelayMS) { _, _ in logSimulationState() }
-        .onChange(of: expiredSession) { _, _ in logSimulationState() }
-        .onChange(of: noNetwork) { _, _ in logSimulationState() }
+        .onChangeCompat(of: slowServerEnabled) { _, _ in logSimulationState() }
+        .onChangeCompat(of: slowServerDelayMS) { _, _ in logSimulationState() }
+        .onChangeCompat(of: expiredSession) { _, _ in logSimulationState() }
+        .onChangeCompat(of: noNetwork) { _, _ in logSimulationState() }
     }
 
     private var networkSimulationSection: some View {

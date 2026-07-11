@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 enum PlayerTab { case nowPlaying, queue, lyrics }
 
 struct NowPlayingScreen: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @Binding var isPresented: Bool
     @State private var activeTab: PlayerTab = .nowPlaying
     @State private var dragOffset: CGFloat = 0
@@ -30,7 +30,7 @@ struct NowPlayingScreen: View {
     @State private var showArtistAlbumPicker = false
     @State private var isFetchingArtist = false
     @State private var isFetchingAlbum = false
-    @State private var tasteStore = TasteStore.shared
+    @StateObject private var tasteStore = TasteStore.shared
     @State private var showQueueHistory = false
     @State private var didPositionQueueScroll = false
     @State private var queueScrollRequest = 0
@@ -196,16 +196,16 @@ struct NowPlayingScreen: View {
             dragThrottler?.invalidate()
             dragThrottler = nil
         }
-        .onChange(of: audio.currentSong?.id) { _, _ in
+        .onChangeCompat(of: audio.currentSong?.id) { _, _ in
             refreshPlayerBackground(animated: true)
         }
-        .onChange(of: audio.currentArtwork == nil) { _, _ in
+        .onChangeCompat(of: audio.currentArtwork == nil) { _, _ in
             refreshPlayerBackground(animated: true)
         }
-        .onChange(of: dynamicBackground) { _, _ in
+        .onChangeCompat(of: dynamicBackground) { _, _ in
             refreshPlayerBackground(animated: true)
         }
-        .onChange(of: activeTab) { _, tab in
+        .onChangeCompat(of: activeTab) { _, tab in
             if tab != .queue {
                 showQueueHistory = false
                 didPositionQueueScroll = false
@@ -573,7 +573,7 @@ struct NowPlayingScreen: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.54))
             SystemVolumeSlider(isInteracting: $isAdjustingVolume)
-                .frame(height: 22)
+                .frame(height: RuntimeCompatibility.isIOS16 ? 28 : 22)
                 .scaleEffect(x: 1, y: isAdjustingVolume ? 1.55 : 1, anchor: .center)
                 .animation(.spring(response: 0.24, dampingFraction: 0.72), value: isAdjustingVolume)
             Image(systemName: Symbols.volumeHigh)
@@ -949,7 +949,7 @@ struct NowPlayingScreen: View {
                         try? await Task.sleep(nanoseconds: 50_000_000)
                         proxy.scrollTo(queueContentAnchor, anchor: .top)
                     }
-                    .onChange(of: queueScrollRequest) { _, _ in
+                    .onChangeCompat(of: queueScrollRequest) { _, _ in
                         withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
                             proxy.scrollTo(queueContentAnchor, anchor: .top)
                         }
@@ -1383,7 +1383,7 @@ struct NowPlayingScreen: View {
                 if audio.isMixing && audio.transitionMode == .automix {
                     HStack(spacing: 5) {
                         Image(systemName: "waveform.path")
-                            .symbolEffect(.variableColor.iterative, options: .repeating)
+                            .symbolVariableColorRepeatingCompat()
                         Text(L(.player_mixing))
                     }
                     .font(.caption2.weight(.bold))
@@ -1525,7 +1525,7 @@ struct NowPlayingScreen: View {
                             showAudioSignalPath = true
                         }
                     }
-                        .presentationCompactAdaptation(.popover)
+                        .popoverPresentationCompactAdaptationCompat()
                 }
             }
             Spacer()
@@ -1600,7 +1600,7 @@ struct NowPlayingScreen: View {
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.5))
                 SystemVolumeSlider(isInteracting: $isAdjustingVolume)
-                    .frame(height: 20)
+                    .frame(height: RuntimeCompatibility.isIOS16 ? 28 : 20)
                     .scaleEffect(x: 1, y: isAdjustingVolume ? 1.7 : 1, anchor: .center)
                     .animation(.spring(response: 0.24, dampingFraction: 0.72), value: isAdjustingVolume)
                 Image(systemName: Symbols.volumeHigh)
@@ -1747,7 +1747,7 @@ private struct QueueReorderDropDelegate: DropDelegate {
 }
 
 private struct LandscapeLyricsPreview: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @State private var lines: [LyricLine] = []
     @State private var isLoading = false
     @State private var activeIndex = 0
@@ -1777,7 +1777,7 @@ private struct LandscapeLyricsPreview: View {
         .task(id: audio.currentSong?.id) {
             await loadLyrics()
         }
-        .onChange(of: audio.currentTime) { _, time in
+        .onChangeCompat(of: audio.currentTime) { _, time in
             updateActiveLine(for: time)
         }
     }
@@ -1855,12 +1855,16 @@ private struct AudioVisualizerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !audio.isPlaying)) { timeline in
-                Canvas { context, size in
-                    drawVoltaVisual(context: &context, size: size, date: timeline.date)
+            if RuntimeCompatibility.usesPassiveVisualizer {
+                PassiveAudioVisualizerView(isPlaying: audio.isPlaying)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !audio.isPlaying)) { timeline in
+                    Canvas { context, size in
+                        drawVoltaVisual(context: &context, size: size, date: timeline.date)
+                    }
                 }
+                .ignoresSafeArea()
             }
-            .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 HStack {
@@ -1924,8 +1928,16 @@ private struct AudioVisualizerScreen: View {
             }
         }
         .preferredColorScheme(Theme.colorScheme)
-        .onAppear { audio.setVisualizerActive(true) }
-        .onDisappear { audio.setVisualizerActive(false) }
+        .onAppear {
+            if !RuntimeCompatibility.usesPassiveVisualizer {
+                audio.setVisualizerActive(true)
+            }
+        }
+        .onDisappear {
+            if !RuntimeCompatibility.usesPassiveVisualizer {
+                audio.setVisualizerActive(false)
+            }
+        }
     }
 
     private func drawVoltaVisual(context: inout GraphicsContext, size: CGSize, date: Date) {
@@ -2060,6 +2072,76 @@ private struct AudioVisualizerScreen: View {
     }
 }
 
+private struct PassiveAudioVisualizerView: View {
+    let isPlaying: Bool
+    @State private var pulse = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height)
+            let centerY = geo.size.height * 0.43
+            let baseRadius = side * 0.17
+
+            ZStack {
+                ForEach(0..<4, id: \.self) { index in
+                    Circle()
+                        .stroke(
+                            Theme.accent.opacity(0.16 - Double(index) * 0.02),
+                            lineWidth: max(1, side * 0.004)
+                        )
+                        .frame(width: baseRadius * CGFloat(2.2 + Double(index) * 0.58),
+                               height: baseRadius * CGFloat(2.2 + Double(index) * 0.58))
+                        .scaleEffect(isPlaying && pulse ? 1.12 + CGFloat(index) * 0.04 : 0.94)
+                        .opacity(isPlaying ? 1 : 0.45)
+                        .animation(
+                            .easeInOut(duration: 1.4 + Double(index) * 0.22)
+                                .repeatForever(autoreverses: true),
+                            value: pulse
+                        )
+                }
+
+                ForEach(0..<32, id: \.self) { index in
+                    let fraction = Double(index) / 32.0
+                    let height = side * CGFloat(0.08 + (index % 5 == 0 ? 0.08 : 0.035))
+                    Capsule()
+                        .fill(Color(hue: 0.56 + fraction * 0.18, saturation: 0.72, brightness: 0.96).opacity(0.62))
+                        .frame(width: max(2, side * 0.005), height: height)
+                        .offset(y: -baseRadius * 1.58)
+                        .rotationEffect(.degrees(fraction * 360))
+                        .scaleEffect(y: isPlaying && pulse ? 1.24 : 0.72, anchor: .center)
+                        .animation(
+                            .easeInOut(duration: 0.9 + Double(index % 7) * 0.08)
+                                .repeatForever(autoreverses: true),
+                            value: pulse
+                        )
+                }
+
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [.white.opacity(0.95), Theme.accent.opacity(0.78), .cyan.opacity(0.25), .clear],
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: baseRadius
+                        )
+                    )
+                    .frame(width: baseRadius * 1.5, height: baseRadius * 1.5)
+                    .scaleEffect(isPlaying && pulse ? 1.08 : 0.96)
+                    .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .position(x: geo.size.width / 2, y: centerY)
+            .onAppear { pulse = true }
+            .onChangeCompat(of: isPlaying) { _, playing in
+                guard playing else { return }
+                pulse = false
+                DispatchQueue.main.async { pulse = true }
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
 // MARK: - Scrub bar
 
 private struct ScrubBar: View {
@@ -2106,18 +2188,71 @@ private struct SystemVolumeSlider: UIViewRepresentable {
     @Binding var isInteracting: Bool
 
     final class SliderOnlyVolumeView: MPVolumeView {
+        var usesNativeSliderInteraction = false
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            showsVolumeSlider = true
+            backgroundColor = .clear
+            clipsToBounds = false
+        }
+
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+            showsVolumeSlider = true
+            backgroundColor = .clear
+            clipsToBounds = false
+        }
+
         override func layoutSubviews() {
             super.layoutSubviews()
-            guard let slider = subviews.compactMap({ $0 as? UISlider }).first else { return }
-            for subview in subviews where subview !== slider {
-                subview.isHidden = true
-                subview.frame = .zero
+            let slider = RuntimeCompatibility.isIOS16
+                ? Self.firstVolumeSlider(in: self)
+                : subviews.compactMap { $0 as? UISlider }.first
+            guard let slider else { return }
+
+            if RuntimeCompatibility.isIOS16 {
+                for subview in subviews where subview !== slider && !slider.isDescendant(of: subview) {
+                    subview.isHidden = true
+                    subview.frame = .zero
+                }
+                slider.superview?.isHidden = false
+                slider.superview?.alpha = 1
+                slider.isHidden = false
+                slider.alpha = 1
+                slider.isEnabled = true
+                slider.isUserInteractionEnabled = usesNativeSliderInteraction
+                if slider.superview === self {
+                    slider.frame = bounds
+                } else {
+                    slider.superview?.frame = bounds
+                    slider.frame = slider.superview?.bounds ?? bounds
+                }
+            } else {
+                for subview in subviews where subview !== slider {
+                    subview.isHidden = true
+                    subview.frame = .zero
+                }
+                slider.isHidden = false
+                slider.alpha = 1
+                slider.isEnabled = true
+                // MPVolumeView's slider jumps to a tapped track location. Route touch
+                // changes through our pan gesture so press/release does not change volume.
+                slider.isUserInteractionEnabled = false
+                slider.frame = bounds
             }
-            slider.isHidden = false
-            // MPVolumeView's slider jumps to a tapped track location. Route touch
-            // changes through our pan gesture so press/release does not change volume.
-            slider.isUserInteractionEnabled = false
-            slider.frame = bounds
+        }
+
+        fileprivate static func firstVolumeSlider(in view: UIView) -> UISlider? {
+            if let slider = view as? UISlider {
+                return slider
+            }
+            for subview in view.subviews {
+                if let slider = firstVolumeSlider(in: subview) {
+                    return slider
+                }
+            }
+            return nil
         }
     }
 
@@ -2125,17 +2260,50 @@ private struct SystemVolumeSlider: UIViewRepresentable {
 
     func makeUIView(context: Context) -> SliderOnlyVolumeView {
         let v = SliderOnlyVolumeView()
+        v.usesNativeSliderInteraction = RuntimeCompatibility.isIOS16
+        v.showsVolumeSlider = true
         v.tintColor = .white
-        let blank = UIImage()
-        v.setVolumeThumbImage(blank, for: .normal)
-        v.setVolumeThumbImage(blank, for: .highlighted)
+        v.setMinimumVolumeSliderImage(Self.trackImage(color: UIColor.white.withAlphaComponent(0.92)), for: .normal)
+        v.setMaximumVolumeSliderImage(Self.trackImage(color: UIColor.white.withAlphaComponent(0.24)), for: .normal)
+        v.setVolumeThumbImage(Self.thumbImage(highlighted: false), for: .normal)
+        v.setVolumeThumbImage(Self.thumbImage(highlighted: true), for: .highlighted)
         context.coordinator.volumeView = v
-        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
-        pan.cancelsTouchesInView = true
-        v.addGestureRecognizer(pan)
+        DispatchQueue.main.async {
+            v.setNeedsLayout()
+            v.layoutIfNeeded()
+        }
+        if !RuntimeCompatibility.isIOS16 {
+            let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+            pan.cancelsTouchesInView = true
+            v.addGestureRecognizer(pan)
+        }
         return v
     }
-    func updateUIView(_ uiView: SliderOnlyVolumeView, context: Context) {}
+    func updateUIView(_ uiView: SliderOnlyVolumeView, context: Context) {
+        uiView.usesNativeSliderInteraction = RuntimeCompatibility.isIOS16
+        uiView.showsVolumeSlider = true
+        uiView.setNeedsLayout()
+    }
+
+    private static func trackImage(color: UIColor) -> UIImage {
+        let size = CGSize(width: 4, height: 4)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { _ in
+            color.setFill()
+            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 2).fill()
+        }
+        return image.resizableImage(withCapInsets: UIEdgeInsets(top: 2, left: 2, bottom: 2, right: 2))
+    }
+
+    private static func thumbImage(highlighted: Bool) -> UIImage {
+        let diameter: CGFloat = highlighted ? 16 : 14
+        let size = CGSize(width: diameter, height: diameter)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { _ in
+            UIColor.white.withAlphaComponent(highlighted ? 1 : 0.96).setFill()
+            UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).fill()
+        }
+    }
 
     final class Coordinator: NSObject {
         weak var volumeView: MPVolumeView?
@@ -2148,7 +2316,11 @@ private struct SystemVolumeSlider: UIViewRepresentable {
         }
 
         private var slider: UISlider? {
-            volumeView?.subviews.compactMap { $0 as? UISlider }.first
+            guard let volumeView else { return nil }
+            if RuntimeCompatibility.isIOS16 {
+                return SliderOnlyVolumeView.firstVolumeSlider(in: volumeView)
+            }
+            return volumeView.subviews.compactMap { $0 as? UISlider }.first
         }
 
         // Only gestures that start on the real slider track should affect volume.

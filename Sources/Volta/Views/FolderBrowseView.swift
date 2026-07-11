@@ -14,9 +14,9 @@ struct FolderBrowseView: View {
     // Optional root-level search filter.
     var filterText: String = ""
 
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @AppStorage("showTrackArtwork") private var showTrackArtwork = true
-    @State private var hiddenAlbums = HiddenAlbumStore.shared
+    @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
     @State private var entries: [BrowseEntry] = []
     @State private var isLoading = true
     @State private var addToPlaylistSong: Song? = nil

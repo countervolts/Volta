@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 struct PlaylistBackupSnapshot: Identifiable, Hashable, Codable, Sendable {
     var id: String
@@ -29,11 +29,10 @@ private struct PlaylistBackupPayload: Codable {
 }
 
 @MainActor
-@Observable
-final class PlaylistBackupStore {
+final class PlaylistBackupStore: ObservableObject {
     static let shared = PlaylistBackupStore()
 
-    private(set) var snapshots: [PlaylistBackupSnapshot] = []
+    @Published private(set) var snapshots: [PlaylistBackupSnapshot] = []
 
     private let fileURL: URL
 

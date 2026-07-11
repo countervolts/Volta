@@ -1,15 +1,14 @@
 import Foundation
 import Network
-import Observation
+import Combine
 
 @MainActor
-@Observable
-final class NetworkMonitor {
+final class NetworkMonitor: ObservableObject {
     static let shared = NetworkMonitor()
 
     enum Connection: String, Sendable { case wifi, cellular, other, none }
 
-    private(set) var connection: Connection = .wifi
+    @Published private(set) var connection: Connection = .wifi
     var isCellular: Bool { connection == .cellular }
 
     private let monitor = NWPathMonitor()

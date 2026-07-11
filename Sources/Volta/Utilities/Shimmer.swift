@@ -26,7 +26,12 @@ struct Shimmer: ViewModifier {
 }
 
 extension View {
+    @ViewBuilder
     func shimmering() -> some View {
-        modifier(Shimmer())
+        if RuntimeCompatibility.allowsArtworkShimmer {
+            modifier(Shimmer())
+        } else {
+            self
+        }
     }
 }

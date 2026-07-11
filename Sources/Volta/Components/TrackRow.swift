@@ -108,7 +108,7 @@ struct TrackRow<Trailing: View>: View {
                     Image(systemName: "waveform")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Theme.accent)
-                        .symbolEffect(.variableColor.iterative.reversing, isActive: true)
+                        .symbolVariableColorCompat(isActive: true)
                 }
             }
         } else {
@@ -117,7 +117,7 @@ struct TrackRow<Trailing: View>: View {
                     Image(systemName: "waveform")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.accent)
-                        .symbolEffect(.variableColor.iterative.reversing, isActive: true)
+                        .symbolVariableColorCompat(isActive: true)
                 } else {
                     Text("\(index)")
                         .font(.system(size: 14, weight: .regular).monospacedDigit())
@@ -152,7 +152,7 @@ struct TrackRow<Trailing: View>: View {
                 .font(.system(size: 26, weight: .semibold))
                 .foregroundStyle(.white)
                 .opacity(revealIconOpacity)
-                .symbolEffect(.bounce, value: armed)
+                .symbolBounceCompat(value: armed)
         }
         .frame(width: revealWidth, height: 64)
         .scaleEffect(0.96 + (0.04 * swipeProgress), anchor: .leading)

@@ -10,8 +10,7 @@ struct HorizontalMediaRow: View {
             LazyHStack(spacing: Theme.Layout.gridSpacing) {
                 ForEach(items) { item in
                     let card = MediaCard(item: item)
-                        .containerRelativeFrame(
-                            .horizontal,
+                        .containerRelativeFrameCompat(
                             count: 5,
                             span: 2,
                             spacing: Theme.Layout.gridSpacing
@@ -24,10 +23,10 @@ struct HorizontalMediaRow: View {
                     }
                 }
             }
-            .scrollTargetLayout()
+            .scrollTargetLayoutCompat()
             .padding(.horizontal, Theme.Layout.screenPadding)
         }
-        .scrollTargetBehavior(.viewAligned)
+        .scrollTargetBehaviorCompat()
     }
 }
 
@@ -64,18 +63,17 @@ struct HorizontalPickRow: View {
                                 }
                         }
                     }
-                    .containerRelativeFrame(
-                        .horizontal,
+                    .containerRelativeFrameCompat(
                         count: sizeClass == .regular ? 10 : 5,
                         span: sizeClass == .regular ? 2 : 3,
                         spacing: Theme.Layout.gridSpacing
                     )
                 }
             }
-            .scrollTargetLayout()
+            .scrollTargetLayoutCompat()
             .padding(.horizontal, Theme.Layout.screenPadding)
         }
-        .scrollTargetBehavior(.viewAligned)
+        .scrollTargetBehaviorCompat()
     }
 }
 

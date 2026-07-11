@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 // App UI languages. English is the default and fallback.
 //
@@ -51,13 +51,12 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
 
 // Selected language + string lookup.
 @MainActor
-@Observable
-final class LocalizationManager {
+final class LocalizationManager: ObservableObject {
     static let shared = LocalizationManager()
 
     static let storageKey = "appLanguage"
 
-    var language: AppLanguage {
+    @Published var language: AppLanguage {
         didSet {
             guard language != oldValue else { return }
             UserDefaults.standard.set(language.rawValue, forKey: Self.storageKey)

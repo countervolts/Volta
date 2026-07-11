@@ -2,9 +2,9 @@ import SwiftUI
 import UIKit
 
 struct LibraryView: View {
-    @Environment(AppState.self) private var appState
-    @State private var vm = LibraryViewModel()
-    @State private var hiddenAlbums = HiddenAlbumStore.shared
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var vm = LibraryViewModel()
+    @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
     @Binding var path: NavigationPath
     @Namespace private var heroNamespace
     @AppStorage("albumSortOrder") private var albumSortOrder = "alphabetical"
@@ -55,12 +55,12 @@ struct LibraryView: View {
                     showToast(L(.toast_added_to, name))
                 }
             }
-            .onChange(of: vm.filter) { _, _ in exitSelection() }
-            .onChange(of: vm.source) { _, _ in exitSelection() }
-            .onChange(of: albumSortOrder) { _, value in
+            .onChangeCompat(of: vm.filter) { _, _ in exitSelection() }
+            .onChangeCompat(of: vm.source) { _, _ in exitSelection() }
+            .onChangeCompat(of: albumSortOrder) { _, value in
                 vm.setSort(LibraryViewModel.sortOrder(from: value))
             }
-            .onChange(of: hiddenAlbums.revision) { _, _ in
+            .onChangeCompat(of: hiddenAlbums.revision) { _, _ in
                 exitSelection()
             }
         }
@@ -623,7 +623,7 @@ enum LibraryRoute: Hashable {
 struct AddSongsToPlaylistSheet: View {
     let songs: [Song]
     var onAdded: (String, Int) -> Void
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var playlists: [Playlist] = []
     @State private var isLoading = true

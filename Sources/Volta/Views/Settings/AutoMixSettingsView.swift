@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AutoMixSettingsView: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
 
     @AppStorage("gaplessPlayback") private var gaplessPlayback = "on"
     @AppStorage("automixStyle") private var automixStyle = "balanced"
@@ -50,14 +50,14 @@ struct AutoMixSettingsView: View {
                         Label("Style", systemImage: "slider.horizontal.3")
                     }
                     .tint(Theme.accent)
-                    .onChange(of: automixStyle) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+                    .onChangeCompat(of: automixStyle) { _, _ in audio.setTransitionMode(audio.transitionMode) }
 
                     VStack(alignment: .leading, spacing: 8) {
                         LabeledContent("Max Blend", value: "\(Int(automixMaxBlendSeconds))s")
                             .foregroundStyle(Theme.primaryText)
                         Slider(value: $automixMaxBlendSeconds, in: 4...18, step: 1)
                             .tint(Theme.accent)
-                            .onChange(of: automixMaxBlendSeconds) { _, _ in
+                            .onChangeCompat(of: automixMaxBlendSeconds) { _, _ in
                                 audio.setTransitionMode(audio.transitionMode)
                             }
                     }
@@ -66,44 +66,44 @@ struct AutoMixSettingsView: View {
                         Label("Silence Trim", systemImage: "scissors")
                     }
                     .tint(Theme.accent)
-                    .onChange(of: automixSilenceTrim) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+                    .onChangeCompat(of: automixSilenceTrim) { _, _ in audio.setTransitionMode(audio.transitionMode) }
 
                     Toggle(isOn: $automixTempoMatch) {
                         Label("BPM Match", systemImage: "metronome")
                     }
                     .tint(Theme.accent)
-                    .onChange(of: automixTempoMatch) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+                    .onChangeCompat(of: automixTempoMatch) { _, _ in audio.setTransitionMode(audio.transitionMode) }
 
                     Toggle(isOn: $automixBeatAlign) {
                         Label("Beat Lock", systemImage: "waveform.path.ecg")
                     }
                     .tint(Theme.accent)
                     .disabled(!automixTempoMatch)
-                    .onChange(of: automixBeatAlign) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+                    .onChangeCompat(of: automixBeatAlign) { _, _ in audio.setTransitionMode(audio.transitionMode) }
 
                     Toggle(isOn: $automixHarmonic) {
                         Label("Harmonic Mixing", systemImage: "pianokeys")
                     }
                     .tint(Theme.accent)
-                    .onChange(of: automixHarmonic) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+                    .onChangeCompat(of: automixHarmonic) { _, _ in audio.setTransitionMode(audio.transitionMode) }
 
                     Toggle(isOn: $automixBassSwap) {
                         Label("Bass Swap", systemImage: "dial.low")
                     }
                     .tint(Theme.accent)
-                    .onChange(of: automixBassSwap) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+                    .onChangeCompat(of: automixBassSwap) { _, _ in audio.setTransitionMode(audio.transitionMode) }
 
                     Toggle(isOn: $automixSweetSpot) {
                         Label("Sweet Spot", systemImage: "scope")
                     }
                     .tint(Theme.accent)
-                    .onChange(of: automixSweetSpot) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+                    .onChangeCompat(of: automixSweetSpot) { _, _ in audio.setTransitionMode(audio.transitionMode) }
 
                     Toggle(isOn: $automixLoudnessMatch) {
                         Label("Loudness Match", systemImage: "speaker.wave.2")
                     }
                     .tint(Theme.accent)
-                    .onChange(of: automixLoudnessMatch) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+                    .onChangeCompat(of: automixLoudnessMatch) { _, _ in audio.setTransitionMode(audio.transitionMode) }
                 } header: {
                     Text("Mixing")
                 } footer: {

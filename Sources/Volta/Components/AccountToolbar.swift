@@ -50,7 +50,7 @@ extension View {
 }
 
 private struct SettingsDestinations: ViewModifier {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
 
     func body(content: Content) -> some View {
         content.navigationDestination(for: SettingsRoute.self) { route in

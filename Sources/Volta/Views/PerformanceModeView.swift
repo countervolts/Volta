@@ -57,11 +57,11 @@ struct PerformanceModeView: View {
             ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
         }
         .preferredColorScheme(Theme.colorScheme)
-        .onChange(of: bypassAudioEffects) { _, _ in
+        .onChangeCompat(of: bypassAudioEffects) { _, _ in
             EqualizerEngine.shared.refreshEffectFlags()
             NotificationCenter.default.post(name: .equalizerToggled, object: nil)
         }
-        .onChange(of: enabled) { _, _ in
+        .onChangeCompat(of: enabled) { _, _ in
             EqualizerEngine.shared.refreshEffectFlags()
             NotificationCenter.default.post(name: .equalizerToggled, object: nil)
         }

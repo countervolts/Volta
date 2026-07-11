@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 struct PlaylistFolder: Identifiable, Hashable, Codable, Sendable {
     var id: String = UUID().uuidString
@@ -10,12 +10,11 @@ struct PlaylistFolder: Identifiable, Hashable, Codable, Sendable {
 }
 
 @MainActor
-@Observable
-final class PlaylistFolderStore {
+final class PlaylistFolderStore: ObservableObject {
     static let shared = PlaylistFolderStore()
 
     private static let key = "playlistFolders"
-    private(set) var folders: [PlaylistFolder] = []
+    @Published private(set) var folders: [PlaylistFolder] = []
 
     private init() {
         reload()

@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 struct GenreSearchResult: Identifiable, Hashable, Sendable {
     let name: String
@@ -58,25 +58,24 @@ struct SearchHistoryItem: Identifiable, Codable, Hashable, Sendable {
 }
 
 @MainActor
-@Observable
-final class SearchViewModel {
-    private(set) var artists: [Artist] = []
-    private(set) var albums: [Album] = []
-    private(set) var songs: [Song] = []
-    private(set) var genres: [GenreSearchResult] = []
-    private(set) var lyricHits: [LyricSearchHit] = []
-    private(set) var lyricSongsByID: [String: Song] = [:]
-    private(set) var installedGenres: [GenreSearchResult] = []
-    private(set) var isLoadingBrowseGenres = false
-    private(set) var isSearching = false
-    private(set) var hasSearched = false
-    private(set) var isOffline = false
+final class SearchViewModel: ObservableObject {
+    @Published private(set) var artists: [Artist] = []
+    @Published private(set) var albums: [Album] = []
+    @Published private(set) var songs: [Song] = []
+    @Published private(set) var genres: [GenreSearchResult] = []
+    @Published private(set) var lyricHits: [LyricSearchHit] = []
+    @Published private(set) var lyricSongsByID: [String: Song] = [:]
+    @Published private(set) var installedGenres: [GenreSearchResult] = []
+    @Published private(set) var isLoadingBrowseGenres = false
+    @Published private(set) var isSearching = false
+    @Published private(set) var hasSearched = false
+    @Published private(set) var isOffline = false
 
-    var query: String = "" {
+    @Published var query: String = "" {
         didSet { scheduleSearch() }
     }
 
-    private(set) var recentSearches: [SearchHistoryItem] = SearchViewModel.loadRecentSearches()
+    @Published private(set) var recentSearches: [SearchHistoryItem] = SearchViewModel.loadRecentSearches()
 
     private var debounceTask: Task<Void, Never>?
     private var client: (any MusicService)?

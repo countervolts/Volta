@@ -5,7 +5,7 @@ struct AlbumContextMenu: ViewModifier {
     let album: Album
     var onAddToPlaylist: ((Song) -> Void)? = nil
 
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @State private var showStats = false
     private var audio: AudioPlayer { appState.audioPlayer }
 

@@ -20,8 +20,8 @@ enum PlaylistSheet: Identifiable {
 }
 
 struct PlaylistDetailView: View {
-    @Environment(AppState.self) private var appState
-    @State private var vm: PlaylistDetailViewModel
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var vm: PlaylistDetailViewModel
     @State private var activeSheet: PlaylistSheet? = nil
     @State private var toastMessage: String? = nil
     @State private var editText = ""
@@ -33,7 +33,7 @@ struct PlaylistDetailView: View {
     @State private var iPadPanel: iPadDetailPanel = .songs
 
     init(playlist: Playlist) {
-        _vm = State(wrappedValue: PlaylistDetailViewModel(playlist: playlist))
+        _vm = StateObject(wrappedValue: PlaylistDetailViewModel(playlist: playlist))
     }
 
     private var bg: Color {
@@ -224,7 +224,7 @@ struct PlaylistDetailView: View {
                         .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
-            .onChange(of: pickerItem) { _, item in
+            .onChangeCompat(of: pickerItem) { _, item in
                 guard let item else { return }
                 Task {
                     if let data = try? await item.loadTransferable(type: Data.self),

@@ -1,20 +1,20 @@
 import SwiftUI
-import Observation
+import Combine
 
 struct ArtistDetailView: View {
-    @Environment(AppState.self) private var appState
-    @State private var vm: ArtistDetailViewModel
-    @State private var hiddenAlbums = HiddenAlbumStore.shared
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var vm: ArtistDetailViewModel
+    @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
     @State private var drillAlbum: Album?
     @State private var addToPlaylistSong: Song? = nil
     @State private var toastMessage: String? = nil
     @State private var showBioSheet = false
     // Local profile-photo mirror.
     @State private var profileImage: UIImage? = nil
-    @State private var scrollState = ArtistProfileScrollState()
+    @StateObject private var scrollState = ArtistProfileScrollState()
 
     init(artist: Artist) {
-        _vm = State(wrappedValue: ArtistDetailViewModel(artist: artist))
+        _vm = StateObject(wrappedValue: ArtistDetailViewModel(artist: artist))
     }
 
     private var bg: Color {
@@ -32,19 +32,21 @@ struct ArtistDetailView: View {
             ZStack(alignment: .top) {
                 bg.ignoresSafeArea()
 
-                ArtistProfileHeader(
-                    width: width,
-                    baseHeight: headerHeight,
-                    bg: bg,
-                    artistName: vm.displayArtist.name,
-                    profileImage: profileImage ?? vm.artistImage,
-                    fallbackAlbum: vm.artworkResolved ? vm.albums.first : nil,
-                    dominantColor: vm.dominantColor,
-                    scrollState: scrollState,
-                    onFallbackImageLoaded: { vm.setDominantColor(ColorExtractor.dominantColor(from: $0)) }
-                )
+                if !RuntimeCompatibility.isIOS16 {
+                    ArtistProfileHeader(
+                        width: width,
+                        baseHeight: headerHeight,
+                        bg: bg,
+                        artistName: vm.displayArtist.name,
+                        profileImage: profileImage ?? vm.artistImage,
+                        fallbackAlbum: vm.artworkResolved ? vm.albums.first : nil,
+                        dominantColor: vm.dominantColor,
+                        scrollState: scrollState,
+                        onFallbackImageLoaded: { vm.setDominantColor(ColorExtractor.dominantColor(from: $0)) }
+                    )
+                }
 
-                artistScroll(headerHeight: headerHeight)
+                artistScroll(width: width, headerHeight: headerHeight)
 
                 if vm.isLoading && vm.albums.isEmpty {
                     ProgressView()
@@ -69,13 +71,17 @@ struct ArtistDetailView: View {
         .preferredColorScheme(Theme.colorScheme)
         .background(SwipeBackEnabler())
         .onAppear {
-            scrollState.start()
+            if !RuntimeCompatibility.isIOS16 {
+                scrollState.start()
+            }
         }
         .onDisappear {
-            scrollState.stop()
+            if !RuntimeCompatibility.isIOS16 {
+                scrollState.stop()
+            }
         }
-        .onChange(of: vm.artistImage) { _, img in profileImage = img }
-        .navigationDestination(item: $drillAlbum) { album in
+        .onChangeCompat(of: vm.artistImage) { _, img in profileImage = img }
+        .navigationDestinationItemCompat(item: $drillAlbum) { album in
             AlbumDetailView(album: album, fromArtist: true)
         }
         .sheet(item: $addToPlaylistSong) { song in
@@ -94,14 +100,16 @@ struct ArtistDetailView: View {
             )
         }
         .task { if let c = appState.client { await vm.load(client: c) } }
-        .onChange(of: hiddenAlbums.revision) { _, _ in
+        .onChangeCompat(of: hiddenAlbums.revision) { _, _ in
             Task { if let c = appState.client { await vm.load(client: c) } }
         }
     }
 
     @ViewBuilder
-    private func artistScroll(headerHeight: CGFloat) -> some View {
-        if #available(iOS 18.0, *) {
+    private func artistScroll(width: CGFloat, headerHeight: CGFloat) -> some View {
+        if RuntimeCompatibility.isIOS16 {
+            ios16ScrollContent(width: width, headerHeight: headerHeight)
+        } else if #available(iOS 18.0, *) {
             scrollContent(headerHeight: headerHeight, includeLegacyOffsetProbe: false)
                 .onScrollGeometryChange(for: CGFloat.self) { geo in
                     geo.contentOffset.y + geo.contentInsets.top
@@ -126,24 +134,51 @@ struct ArtistDetailView: View {
                         value: -geo.frame(in: .named(Self.legacyScrollSpace)).minY
                     )
                 }
-                .frame(height: 0)
+                .frame(height: 1)
+                .allowsHitTesting(false)
             }
 
             VStack(spacing: 0) {
-                Color.clear.frame(height: headerHeight)   // sits over the header
-                artistActionRow
-                topSongsSection
-                likedSongsSection
-                albumsSection
-                singlesSection
-                appearedOnSection
-                similarArtistsSection
-                aboutSection
-                artistStatsSection
-                Color.clear.frame(height: 120)
+                Color.clear.frame(height: max(0, headerHeight - (includeLegacyOffsetProbe ? 1 : 0)))   // sits over the header
+                artistBodySections
             }
         }
         .scrollIndicators(.hidden)
+    }
+
+    private func ios16ScrollContent(width: CGFloat, headerHeight: CGFloat) -> some View {
+        ScrollView {
+            IOS16ArtistProfileHeader(
+                width: width,
+                baseHeight: headerHeight,
+                scrollSpaceName: Self.legacyScrollSpace,
+                bg: bg,
+                artistName: vm.displayArtist.name,
+                profileImage: profileImage ?? vm.artistImage,
+                fallbackAlbum: vm.artworkResolved ? vm.albums.first : nil,
+                dominantColor: vm.dominantColor,
+                onFallbackImageLoaded: { vm.setDominantColor(ColorExtractor.dominantColor(from: $0)) }
+            )
+            .frame(height: headerHeight)
+
+            artistBodySections
+        }
+        .coordinateSpace(name: Self.legacyScrollSpace)
+        .scrollIndicators(.hidden)
+    }
+
+    @ViewBuilder
+    private var artistBodySections: some View {
+        artistActionRow
+        topSongsSection
+        likedSongsSection
+        albumsSection
+        singlesSection
+        appearedOnSection
+        similarArtistsSection
+        aboutSection
+        artistStatsSection
+        Color.clear.frame(height: 120)
     }
 
     private func updateScrollOffset(_ newValue: CGFloat) {
@@ -225,18 +260,17 @@ struct ArtistDetailView: View {
                                 }
                             }
                             .frame(height: pageH, alignment: .top)
-                            .containerRelativeFrame(
-                                .horizontal,
+                            .containerRelativeFrameCompat(
                                 count: multi ? 8 : 1,
                                 span: multi ? 7 : 1,
                                 spacing: 12
                             )
                         }
                     }
-                    .scrollTargetLayout()
+                    .scrollTargetLayoutCompat()
                     .padding(.horizontal, 20)
                 }
-                .scrollTargetBehavior(.viewAligned)
+                .scrollTargetBehaviorCompat()
                 .frame(height: pageH)
             }
             .padding(.bottom, 8)
@@ -587,12 +621,11 @@ struct ArtistDetailView: View {
 }
 
 @MainActor
-@Observable
-private final class ArtistProfileScrollState {
-    var offsetY: CGFloat = 0
+private final class ArtistProfileScrollState: ObservableObject {
+    @Published var offsetY: CGFloat = 0
 
-    @ObservationIgnored private var pendingOffsetY: CGFloat = 0
-    @ObservationIgnored private var throttler: VSyncThrottler?
+    private var pendingOffsetY: CGFloat = 0
+    private var throttler: VSyncThrottler?
 
     func start() {
         guard throttler == nil else { return }
@@ -631,7 +664,7 @@ private struct ArtistProfileHeader: View {
     let profileImage: UIImage?
     let fallbackAlbum: Album?
     let dominantColor: UIColor
-    let scrollState: ArtistProfileScrollState
+    @ObservedObject var scrollState: ArtistProfileScrollState
     let onFallbackImageLoaded: (UIImage) -> Void
 
     var body: some View {
@@ -663,6 +696,74 @@ private struct ArtistProfileHeader: View {
         .offset(y: -shift)
         .transaction { $0.animation = nil }
         .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var headerImage: some View {
+        if let profileImage {
+            Image(uiImage: profileImage)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else if let fallbackAlbum {
+            ArtworkView(
+                coverArtID: fallbackAlbum.coverArt,
+                size: 800,
+                cornerRadius: 0,
+                onImageLoaded: onFallbackImageLoaded
+            )
+            .aspectRatio(1, contentMode: .fill)
+        } else {
+            Rectangle()
+                .fill(Color(dominantColor).opacity(0.3))
+                .overlay {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 80, weight: .light))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+        }
+    }
+}
+
+private struct IOS16ArtistProfileHeader: View {
+    let width: CGFloat
+    let baseHeight: CGFloat
+    let scrollSpaceName: String
+    let bg: Color
+    let artistName: String
+    let profileImage: UIImage?
+    let fallbackAlbum: Album?
+    let dominantColor: UIColor
+    let onFallbackImageLoaded: (UIImage) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            let pullDistance = max(0, geo.frame(in: .named(scrollSpaceName)).minY)
+            let headerHeight = baseHeight + pullDistance
+
+            ZStack(alignment: .bottomLeading) {
+                headerImage
+                    .frame(width: width, height: headerHeight)
+                    .clipped()
+                    .overlay {
+                        LinearGradient(
+                            colors: [.clear, bg.opacity(0.6), bg],
+                            startPoint: .init(x: 0.5, y: 0.35),
+                            endPoint: .bottom
+                        )
+                    }
+
+                Text(artistName)
+                    .font(.system(size: 36, weight: .bold))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.4), radius: 4, x: 0, y: 2)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+            }
+            .frame(width: width, height: headerHeight, alignment: .bottom)
+            .offset(y: pullDistance > 0 ? -pullDistance : 0)
+            .transaction { $0.animation = nil }
+            .allowsHitTesting(false)
+        }
     }
 
     @ViewBuilder

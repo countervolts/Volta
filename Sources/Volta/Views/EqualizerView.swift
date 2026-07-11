@@ -18,7 +18,7 @@ struct EqualizerView: View {
                             .foregroundStyle(Theme.primaryText)
                     }
                     .tint(Theme.accent)
-                    .onChange(of: enabled) { _, _ in
+                    .onChangeCompat(of: enabled) { _, _ in
                         NotificationCenter.default.post(name: .equalizerToggled, object: nil)
                     }
                     .padding(.horizontal, 20)

@@ -1,13 +1,12 @@
 import Foundation
-import Observation
+import Combine
 
 @MainActor
-@Observable
-final class SmartPlaylistStore {
+final class SmartPlaylistStore: ObservableObject {
     static let shared = SmartPlaylistStore()
 
     private static let key = "smartPlaylists"
-    private(set) var playlists: [SmartPlaylist] = []
+    @Published private(set) var playlists: [SmartPlaylist] = []
 
     private init() {
         reload()

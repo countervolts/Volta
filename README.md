@@ -6,7 +6,7 @@
 
 **A native iOS player for your own music server Subsonic, Jellyfin, Emby, or Plex.**
 
-![Platform](https://img.shields.io/badge/platform-iOS%2017%2B-black)
+![Platform](https://img.shields.io/badge/platform-iOS%2016%2B-black)
 ![Built with](https://img.shields.io/badge/built%20with-SwiftUI-orange)
 ![Servers](https://img.shields.io/badge/servers-Subsonic%20%C2%B7%20Jellyfin%20%C2%B7%20Emby%20%C2%B7%20Plex-blue)
 [![TestFlight](https://img.shields.io/badge/TestFlight-Join%20Beta-0A84FF)](https://testflight.apple.com/join/PgX1qrJq)
@@ -39,7 +39,7 @@
  
 - **Audio** A 10-band graphic EQ, mono downmix, a 3D spatial widener, and an Audio Signal Path sheet so you can see exactly what's happening to the sound. Lossless / Hi-Res / True Hi-Res badges come from real data.
 
-- **Now Playing** Backgrounds that take their colour from the artwork, animated cover art (GIF, APNG, WebP) on screen *and* the lock screen.
+- **Now Playing** Backgrounds that take their colour from the artwork, with animated cover art (GIF, APNG, WebP) on supported iOS versions.
 
 - **Lyrics** Time-synced lyrics (via [LRCLIB](https://lrclib.net)) with tap-to-seek, on-device translation, bulk download for offline use, and search across the lyrics you've saved.
 
@@ -67,14 +67,15 @@ Volta aims to remain as lightweight as possible. During testing, it used approxi
 
 | Scenario                                                    | ram usage |
 | ----------------------------------------------------------- | --------: |
-| Idle on the Home tab                                        |    ~30 MB |
-| Viewing an album with static artwork                        |    ~40 MB |
-| Viewing an album with static artwork while playing music    |    ~50 MB |
-| Viewing an artist with 15+ albums                           |    ~60 MB |
-| Viewing an artist with 15+ albums while playing music       |    ~70 MB |
-| Viewing an album with animated artwork                      |   ~170 MB |
-| Viewing an album with animated artwork before optimizations |   ~2.3 GB |
+| Idle on the Home tab                                        |    ~30 MB* |
+| Viewing an album with static artwork                        |    ~40 MB* |
+| Viewing an album with static artwork while playing music    |    ~50 MB* |
+| Viewing an artist with 15+ albums                           |    ~60 MB* |
+| Viewing an artist with 15+ albums while playing music       |    ~70 MB* |
+| Viewing an album with animated artwork                      |   ~170 MB* |
+| Viewing an album with animated artwork before optimizations |   ~2.3 GB* |
 
+* tested on iOS 26+, on iOS 16, 17 and 18 results will vary 
 
 ## Supported servers
 

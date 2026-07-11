@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct RootView: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("accentColorName") private var accentColorName = "purple"
     @AppStorage("customAccentRed") private var customAccentRed = 0.55
@@ -45,7 +45,7 @@ struct RootView: View {
             }
             appState.restoreSession()
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onChangeCompat(of: scenePhase) { _, phase in
             guard phase == .background else { return }
             appState.persistPlaybackSession()
         }

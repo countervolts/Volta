@@ -1,9 +1,8 @@
 import Foundation
-import Observation
+import Combine
 
 @MainActor
-@Observable
-final class AppState {
+final class AppState: ObservableObject {
     // Shared instance so non-SwiftUI scenes (CarPlay) can drive session restore
     // and reach the live client/player even when the iPhone window never opens.
     static let shared = AppState()
@@ -18,11 +17,11 @@ final class AppState {
     // launched in the background, then the phone scene appears and tries again).
     private var didStartRestore = false
 
-    private(set) var phase: Phase = .loading
-    private(set) var client: (any MusicService)?
-    private(set) var currentServer: ServerRecord?
+    @Published private(set) var phase: Phase = .loading
+    @Published private(set) var client: (any MusicService)?
+    @Published private(set) var currentServer: ServerRecord?
     // probed once on activate
-    private(set) var sharingAvailable = false
+    @Published private(set) var sharingAvailable = false
     // current effective URL is the cellular override
     private var activeIsCellular = false
     // lets newer activations beat slow auth handshakes
@@ -31,6 +30,22 @@ final class AppState {
     let audioPlayer = AudioPlayer()
     let store = ServerStore()
     let homeViewModel = HomeViewModel()
+
+    private var cancellables: Set<AnyCancellable> = []
+
+    private init() {
+        audioPlayer.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.objectWillChange.send() }
+            }
+            .store(in: &cancellables)
+
+        homeViewModel.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.objectWillChange.send() }
+            }
+            .store(in: &cancellables)
+    }
 
     func restoreSession() {
         guard !didStartRestore else { return }

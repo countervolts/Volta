@@ -19,21 +19,28 @@ enum DeviceMemoryTier: Equatable {
 enum LiveArtworkSettings {
     static let rawAnimatedArtworkKey = "rawAnimatedArtwork"
 
+    static var supportsAnimatedArtwork: Bool {
+        RuntimeCompatibility.supportsAnimatedArtwork
+    }
+
     static var isEnabled: Bool {
         UserDefaults.standard.object(forKey: "liveArtwork") as? Bool ?? true
     }
 
     static var rawAnimatedArtworkEnabled: Bool {
-        UserDefaults.standard.object(forKey: rawAnimatedArtworkKey) as? Bool ?? false
+        guard supportsAnimatedArtwork else { return false }
+        return UserDefaults.standard.object(forKey: rawAnimatedArtworkKey) as? Bool ?? false
     }
 
     static var shouldShowAnimatedArtwork: Bool {
-        rawAnimatedArtworkEnabled
+        guard supportsAnimatedArtwork else { return false }
+        return rawAnimatedArtworkEnabled
             || (isEnabled && (DeveloperExperiments.disableRAMOptimizations || !PerformanceMode.disableLiveArtwork))
     }
 
     // Keep frames small so memory can go toward frame count instead of resolution.
     static var maxPixelSize: Int {
+        guard supportsAnimatedArtwork else { return 0 }
         guard !rawAnimatedArtworkEnabled,
               !DeveloperExperiments.disableRAMOptimizations else { return 0 }
         switch DeviceMemoryTier.current {
@@ -46,6 +53,7 @@ enum LiveArtworkSettings {
 
     // Keep enough frames for native-rate playback; maxPixelSize keeps the RAM cost in check.
     static var maxFrameCount: Int {
+        guard supportsAnimatedArtwork else { return 0 }
         guard !rawAnimatedArtworkEnabled,
               !DeveloperExperiments.disableRAMOptimizations else { return 0 }
         switch DeviceMemoryTier.current {
@@ -69,7 +77,8 @@ enum LiveArtworkSettings {
     // Album animation is enabled on 6 GB devices, so retain the most recent
     // decoded sequence there too. NSCache's cost limit still evicts large loops.
     static var keepDecodedFramesInRAM: Bool {
-        rawAnimatedArtworkEnabled
+        guard supportsAnimatedArtwork else { return false }
+        return rawAnimatedArtworkEnabled
             || DeveloperExperiments.disableRAMOptimizations
             || DeviceMemoryTier.current == .gb6
             || DeviceMemoryTier.current == .gb8Plus
@@ -77,6 +86,7 @@ enum LiveArtworkSettings {
 
     // Album headers decode their own copy; small devices skip them.
     static var animateAlbumHeaders: Bool {
+        guard supportsAnimatedArtwork else { return false }
         if rawAnimatedArtworkEnabled || DeveloperExperiments.disableRAMOptimizations { return true }
         switch DeviceMemoryTier.current {
         case .gb3OrLess, .gb4: return false

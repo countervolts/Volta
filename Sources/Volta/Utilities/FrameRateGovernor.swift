@@ -9,7 +9,7 @@ import QuartzCore
 enum FrameRateGovernor {
     static var isHalfRate: Bool { PerformanceMode.halfFrameRate }
 
-    private static var nativeMaxFPS: Float {
+    static var nativeMaxFPS: Float {
         let fps = Float(UIScreen.main.maximumFramesPerSecond)
         return fps > 0 ? fps : 60
     }
@@ -21,7 +21,8 @@ enum FrameRateGovernor {
 
     static var range: CAFrameRateRange {
         let cap = maxFPS
-        return CAFrameRateRange(minimum: max(1, cap / 2), maximum: cap, preferred: cap)
+        let minimum = isHalfRate ? max(1, cap / 2) : cap
+        return CAFrameRateRange(minimum: minimum, maximum: cap, preferred: cap)
     }
 
     // minimum redraw interval for TimelineView(.animation); nil = uncapped

@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 struct PlaybackCacheDiagnosticsView: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
 
     @AppStorage(PlaybackCacheSettings.enabledKey) private var enhancedPlaybackCaching = true
     @AppStorage(PlaybackCacheSettings.developerModeKey) private var developerModeRaw = PlaybackCacheDeveloperMode.followSettings.rawValue
@@ -39,7 +39,7 @@ struct PlaybackCacheDiagnosticsView: View {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
-        .onChange(of: enhancedPlaybackCaching) { _, enabled in
+        .onChangeCompat(of: enhancedPlaybackCaching) { _, enabled in
             if enabled {
                 appState.audioPlayer.refreshPlaybackCache()
                 report = "Enhanced caching enabled. Upcoming tracks will be prefetched when playback is active."
@@ -49,7 +49,7 @@ struct PlaybackCacheDiagnosticsView: View {
             }
             refresh()
         }
-        .onChange(of: developerModeRaw) { _, rawValue in
+        .onChangeCompat(of: developerModeRaw) { _, rawValue in
             let mode = PlaybackCacheDeveloperMode(rawValue: rawValue) ?? .followSettings
             if mode == .disabled {
                 PlaybackCacheService.shared.cancelPrefetches()

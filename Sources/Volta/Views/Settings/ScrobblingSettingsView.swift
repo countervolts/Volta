@@ -78,10 +78,10 @@ struct ScrobblingSettingsView: View {
         .preferredColorScheme(Theme.colorScheme)
         .onAppear(perform: loadSecrets)
         .onDisappear(perform: saveSecrets)
-        .onChange(of: lastFMSecret) { _, _ in saveLastFMSecrets() }
-        .onChange(of: lastFMSessionKey) { _, _ in saveLastFMSecrets() }
-        .onChange(of: koitoToken) { _, _ in saveKoitoSecret() }
-        .onChange(of: malojaKey) { _, _ in saveMalojaSecret() }
+        .onChangeCompat(of: lastFMSecret) { _, _ in saveLastFMSecrets() }
+        .onChangeCompat(of: lastFMSessionKey) { _, _ in saveLastFMSecrets() }
+        .onChangeCompat(of: koitoToken) { _, _ in saveKoitoSecret() }
+        .onChangeCompat(of: malojaKey) { _, _ in saveMalojaSecret() }
     }
 
     private var lastFMSection: some View {

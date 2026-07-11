@@ -4,7 +4,7 @@ import Translation
 #endif
 
 struct LyricsViewWithState: View {
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @State private var lines: [LyricLine] = []
     @State private var isLoading = false
     @State private var activeLine: Int = 0
@@ -41,7 +41,7 @@ struct LyricsViewWithState: View {
         .overlay(alignment: .topTrailing) { translationButton }
         .background(translationTaskView)
         .task(id: audio.currentSong?.id) { await loadLyrics() }
-        .onChange(of: audio.currentTime) { _, t in updateActiveLine(for: t) }
+        .onChangeCompat(of: audio.currentTime) { _, t in updateActiveLine(for: t) }
     }
 
     private var lyricsContentKey: String {
@@ -83,7 +83,7 @@ struct LyricsViewWithState: View {
                 .padding(.horizontal, 24)
                 .padding(.top, 16)
             }
-            .onChange(of: activeLine) { _, l in
+            .onChangeCompat(of: activeLine) { _, l in
                 withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) {
                     proxy.scrollTo(max(0, l - 1), anchor: .top)
                 }
@@ -123,7 +123,7 @@ struct LyricsViewWithState: View {
                 }
                 .padding(.top, 16)
             }
-            .onChange(of: activeLine) { _, l in
+            .onChangeCompat(of: activeLine) { _, l in
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
                     proxy.scrollTo(max(0, l - 1), anchor: .top)
                 }
@@ -260,7 +260,7 @@ private struct LyricsTranslationTask: View {
         Color.clear
             .frame(width: 0, height: 0)
             .onAppear(perform: refresh)
-            .onChange(of: requestID) { _, _ in refresh() }
+            .onChangeCompat(of: requestID) { _, _ in refresh() }
             .translationTask(configuration) { session in
                 await translate(using: session)
             }

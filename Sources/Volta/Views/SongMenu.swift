@@ -23,8 +23,8 @@ struct SongMenu<Trigger: View>: View {
 
     @ViewBuilder var label: () -> Trigger
 
-    @Environment(AppState.self) private var appState
-    @State private var tasteStore = TasteStore.shared
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var tasteStore = TasteStore.shared
     @State private var sheet: SongMenuSheet? = nil
 
     private var audio: AudioPlayer { appState.audioPlayer }

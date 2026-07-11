@@ -1,17 +1,16 @@
 import Foundation
-import Observation
+import Combine
 
 @MainActor
-@Observable
-final class HomeViewModel {
+final class HomeViewModel: ObservableObject {
     struct MoreLikeSection: Identifiable, Hashable, Codable {
         let id: String          // artist id
         let artistName: String
         let albums: [Album]
     }
 
-    private(set) var picks: [Album] = []
-    private(set) var mixes: [MusicMix] = []
+    @Published private(set) var picks: [Album] = []
+    @Published private(set) var mixes: [MusicMix] = []
 
     // Stable daily shuffle of mixes and albums.
     var picksFeed: [PickFeedItem] {
@@ -20,15 +19,15 @@ final class HomeViewModel {
         items.shuffle(using: &rng)
         return items
     }
-    private(set) var recentlyPlayed: [MediaItem] = []
-    private(set) var moreLike: [MoreLikeSection] = []
-    private(set) var discover: [Album] = []
-    private(set) var newReleases: [Album] = []
-    private(set) var topArtists: [Artist] = []
+    @Published private(set) var recentlyPlayed: [MediaItem] = []
+    @Published private(set) var moreLike: [MoreLikeSection] = []
+    @Published private(set) var discover: [Album] = []
+    @Published private(set) var newReleases: [Album] = []
+    @Published private(set) var topArtists: [Artist] = []
 
-    private(set) var isLoading = false
-    private(set) var hasLoaded = false
-    private(set) var serverUnavailable = false
+    @Published private(set) var isLoading = false
+    @Published private(set) var hasLoaded = false
+    @Published private(set) var serverUnavailable = false
     private var loadedServerID: String?
     private var didFetch = false
 
@@ -111,7 +110,7 @@ final class HomeViewModel {
     }
 
     private static func cacheKey(_ serverID: String) -> String {
-        "home-" + Crypto.md5Hex(serverID)
+        "home-v3-" + Crypto.md5Hex(serverID)
     }
 
     private func apply(_ snapshot: HomeSnapshot) {

@@ -15,10 +15,10 @@ private enum PlaylistCreateKind: String, CaseIterable, Identifiable {
 }
 
 struct PlaylistsView: View {
-    @Environment(AppState.self) private var appState
-    @State private var vm = PlaylistsViewModel()
-    @State private var smartStore = SmartPlaylistStore.shared
-    @State private var folderStore = PlaylistFolderStore.shared
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var vm = PlaylistsViewModel()
+    @StateObject private var smartStore = SmartPlaylistStore.shared
+    @StateObject private var folderStore = PlaylistFolderStore.shared
     @State private var pendingDelete: Playlist?
     @State private var pendingSmartDelete: SmartPlaylist?
     @State private var pendingFolderDelete: PlaylistFolder?
@@ -478,11 +478,11 @@ struct PlaylistsView: View {
                     .keyboardType(.numberPad)
                 Toggle(L(.smart_never_played_only), isOn: $smartDraft.neverPlayedOnly)
                 Toggle(L(.smart_lossless_only), isOn: $smartDraft.onlyLossless)
-                    .onChange(of: smartDraft.onlyLossless) { _, enabled in
+                    .onChangeCompat(of: smartDraft.onlyLossless) { _, enabled in
                         if !enabled { smartDraft.onlyHiResLossless = false }
                     }
                 Toggle(L(.smart_hires_only), isOn: $smartDraft.onlyHiResLossless)
-                    .onChange(of: smartDraft.onlyHiResLossless) { _, enabled in
+                    .onChangeCompat(of: smartDraft.onlyHiResLossless) { _, enabled in
                         if enabled { smartDraft.onlyLossless = true }
                     }
                 .disabled(!smartDraft.onlyLossless)
@@ -596,7 +596,7 @@ private struct PlaylistFolderDetailView: View {
     let smartPlaylists: [SmartPlaylist]
     let smartSourceSongs: [Song]
 
-    @State private var folderStore = PlaylistFolderStore.shared
+    @StateObject private var folderStore = PlaylistFolderStore.shared
 
     private let columns = [GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
                            GridItem(.flexible(), spacing: Theme.Layout.gridSpacing)]
@@ -829,7 +829,7 @@ private struct SmartPlaylistDetailView: View {
     let playlist: SmartPlaylist
     let sourceSongs: [Song]
 
-    @Environment(AppState.self) private var appState
+    @EnvironmentObject private var appState: AppState
     @State private var activeSheet: PlaylistSheet? = nil
     @State private var toastMessage: String?
     @AppStorage("showTrackArtwork") private var showTrackArtwork = true

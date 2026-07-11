@@ -154,7 +154,7 @@ struct JellyfinClient: MusicService {
 
     // Common Items query fields so one decode covers albums/songs/artists/playlists.
     private static let itemFields =
-        "Genres,DateCreated,MediaSources,Path,Overview,ChildCount,ProductionYear,ParentIndexNumber,IndexNumber"
+        "Genres,DateCreated,MediaSources,Path,Overview,ChildCount,ProductionYear,ParentIndexNumber,IndexNumber,ImageTags,PrimaryImageTag,PrimaryImageItemId,AlbumPrimaryImageTag"
 
     private func itemsQuery(_ extra: [URLQueryItem]) -> [URLQueryItem] {
         [
@@ -217,6 +217,17 @@ struct JellyfinClient: MusicService {
     }
 
     func album(id: String) async throws -> Album? {
+        if flavor == .emby {
+            guard let meta = try? await get("/Users/\(userId)/Items/\(id)", as: JFItem.self) else { return nil }
+            let tracks = try? await get("/Users/\(userId)/Items", query: itemsQuery([
+                URLQueryItem(name: "ParentId", value: id),
+                URLQueryItem(name: "IncludeItemTypes", value: "Audio"),
+                URLQueryItem(name: "SortBy", value: "ParentIndexNumber,IndexNumber,SortName"),
+                URLQueryItem(name: "SortOrder", value: "Ascending"),
+            ]), as: JFItemsResponse.self)
+            let songs = tracks?.Items?.map { $0.asSong } ?? []
+            return meta.asAlbum(withSongs: songs)
+        }
         async let metaTask = try? get("/Users/\(userId)/Items/\(id)", as: JFItem.self)
         async let tracksTask = try? get("/Users/\(userId)/Items", query: itemsQuery([
             URLQueryItem(name: "ParentId", value: id),
@@ -249,6 +260,17 @@ struct JellyfinClient: MusicService {
     }
 
     func artist(id: String) async throws -> Artist? {
+        if flavor == .emby {
+            guard let meta = try? await get("/Users/\(userId)/Items/\(id)", as: JFItem.self) else { return nil }
+            let albumRes = try? await get("/Users/\(userId)/Items", query: itemsQuery([
+                URLQueryItem(name: "AlbumArtistIds", value: id),
+                URLQueryItem(name: "IncludeItemTypes", value: "MusicAlbum"),
+                URLQueryItem(name: "SortBy", value: "ProductionYear,SortName"),
+                URLQueryItem(name: "SortOrder", value: "Ascending"),
+            ]), as: JFItemsResponse.self)
+            let albums = albumRes?.Items?.map { $0.asAlbum } ?? []
+            return meta.asArtist(withAlbums: albums)
+        }
         async let metaTask = try? get("/Users/\(userId)/Items/\(id)", as: JFItem.self)
         async let albumsTask = try? get("/Users/\(userId)/Items", query: itemsQuery([
             URLQueryItem(name: "AlbumArtistIds", value: id),
@@ -262,6 +284,21 @@ struct JellyfinClient: MusicService {
     }
 
     func artistInfo(id: String) async throws -> ArtistInfo? {
+        if flavor == .emby {
+            let meta = try? await get("/Users/\(userId)/Items/\(id)", as: JFItem.self)
+            let similar = (try? await get("/Artists/\(id)/Similar", query: [
+                URLQueryItem(name: "UserId", value: userId),
+                URLQueryItem(name: "Limit", value: "20"),
+            ], as: JFItemsResponse.self))?.Items?.map { $0.asArtist } ?? []
+            let image = meta.flatMap { coverArtURL(id: $0.asArtist.coverArt, size: 600)?.absoluteString }
+            return ArtistInfo(
+                biography: meta?.Overview,
+                similarArtist: similar,
+                smallImageUrl: nil,
+                mediumImageUrl: nil,
+                largeImageUrl: image
+            )
+        }
         async let metaTask = try? get("/Users/\(userId)/Items/\(id)", as: JFItem.self)
         async let similarTask = try? get("/Artists/\(id)/Similar", query: [
             URLQueryItem(name: "UserId", value: userId),
@@ -269,7 +306,7 @@ struct JellyfinClient: MusicService {
         ], as: JFItemsResponse.self)
         let meta = await metaTask
         let similar = (await similarTask)?.Items?.map { $0.asArtist } ?? []
-        let image = meta.flatMap { coverArtURL(id: $0.Id, size: 600)?.absoluteString }
+        let image = meta.flatMap { coverArtURL(id: $0.asArtist.coverArt, size: 600)?.absoluteString }
         return ArtistInfo(
             biography: meta?.Overview,
             similarArtist: similar,
@@ -344,6 +381,14 @@ struct JellyfinClient: MusicService {
                 URLQueryItem(name: "Limit", value: String(limit)),
             ]), as: JFItemsResponse.self)
             return res?.Items ?? []
+        }
+        if flavor == .emby {
+            let artistItems = await find("MusicArtist", artistCount)
+            let albumItems = await find("MusicAlbum", albumCount)
+            let songItems = await find("Audio", songCount)
+            return (artistItems.map { $0.asArtist },
+                    albumItems.map { $0.asAlbum },
+                    songItems.map { $0.asSong })
         }
         async let artistsTask = find("MusicArtist", artistCount)
         async let albumsTask = find("MusicAlbum", albumCount)
@@ -536,9 +581,19 @@ struct JellyfinClient: MusicService {
 
     func coverArtURL(id: String?, size: Int?) -> URL? {
         guard let id, !id.isEmpty else { return nil }
+        let image = Self.imageIDParts(from: id)
         var q = [URLQueryItem(name: "api_key", value: token)]
-        if let size { q.append(URLQueryItem(name: "maxWidth", value: String(size))) }
-        return url("/Items/\(id)/Images/Primary", query: q)
+        if flavor == .emby {
+            q.append(URLQueryItem(name: "X-Emby-Token", value: token))
+        }
+        if let tag = image.tag {
+            q.append(URLQueryItem(name: "tag", value: tag))
+        }
+        if let size {
+            q.append(URLQueryItem(name: "maxWidth", value: String(size)))
+            q.append(URLQueryItem(name: "maxHeight", value: String(size)))
+        }
+        return url("/Items/\(image.id)/Images/Primary", query: q)
     }
 
     func streamURL(id: String) -> URL? {
@@ -590,6 +645,16 @@ struct JellyfinClient: MusicService {
         case "ogg": return "vorbis"
         default: return "aac"
         }
+    }
+
+    private static func imageIDParts(from raw: String) -> (id: String, tag: String?) {
+        guard let range = raw.range(of: "::", options: .backwards) else {
+            return (raw, nil)
+        }
+        let id = String(raw[..<range.lowerBound])
+        let tag = String(raw[range.upperBound...])
+        guard !id.isEmpty, !tag.isEmpty else { return (raw, nil) }
+        return (id, tag)
     }
 }
 
