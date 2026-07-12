@@ -241,13 +241,18 @@ final class LoginViewModel: ObservableObject {
     ) async -> Bool {
         guard !allowInsecureHTTP,
               !SubsonicConfig.hasExplicitScheme(address),
-              address == serverAddress,
-              let httpURL = candidates.first(where: { $0.scheme?.lowercased() == "http" }) else {
+              address == serverAddress else {
             return false
         }
-        guard await Self.hostResponds(httpURL), address == serverAddress else { return false }
-        reachability = .reachable(insecure: true)
-        return true
+        for httpURL in candidates where httpURL.scheme?.lowercased() == "http" {
+            guard address == serverAddress else { return false }
+            if await Self.hostResponds(httpURL) {
+                guard address == serverAddress else { return false }
+                reachability = .reachable(insecure: true)
+                return true
+            }
+        }
+        return false
     }
 
     func cancelInsecureHTTPContinuation() {

@@ -84,8 +84,9 @@ extension SettingsView {
                     .foregroundStyle(Theme.primaryText)
                 }
 
-                if rowVisible(s, ["theme", "dark", "light", "amoled", "oled", "black", "appearance"]) {
+                if rowVisible(s, ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"]) {
                     Picker(selection: $themeMode) {
+                        Text(L(.theme_system)).tag("system")
                         Text(L(.theme_dark)).tag("dark")
                         Text(L(.theme_amoled)).tag("amoled")
                         Text(L(.theme_light)).tag("light")

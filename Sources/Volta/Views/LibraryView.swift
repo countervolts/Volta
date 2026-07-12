@@ -38,6 +38,7 @@ struct LibraryView: View {
             }
             .navigationTitle(L(.tab_library))
             .navigationBarTitleDisplayMode(.large)
+            .toolbar(.visible, for: .navigationBar)
             .accountToolbar(path: $path)
             .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: searchPrompt)
             .navigationDestination(for: LibraryRoute.self) { route in
@@ -63,6 +64,7 @@ struct LibraryView: View {
             .onChangeCompat(of: hiddenAlbums.revision) { _, _ in
                 exitSelection()
             }
+            .background(NavigationBarRestorer())
         }
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
@@ -604,6 +606,27 @@ struct LibraryView: View {
 
     private func formatDuration(_ s: Int) -> String {
         String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+private struct NavigationBarRestorer: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Controller {
+        Controller()
+    }
+
+    func updateUIViewController(_ controller: Controller, context: Context) {
+        controller.restore()
+    }
+
+    final class Controller: UIViewController {
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            restore()
+        }
+
+        func restore() {
+            navigationController?.setNavigationBarHidden(false, animated: false)
+        }
     }
 }
 

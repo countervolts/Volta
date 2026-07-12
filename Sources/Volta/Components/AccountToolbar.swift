@@ -6,6 +6,7 @@ import SwiftUI
 // on iOS versions before 26.
 enum SettingsRoute: Hashable {
     case root
+    case category(SettingsCategory)
     case autoMix
     case autoMixPreview
     case equalizer
@@ -57,6 +58,8 @@ private struct SettingsDestinations: ViewModifier {
             switch route {
             case .root:
                 SettingsView()
+            case .category(let category):
+                SettingsView(focusedCategory: category)
             case .autoMix:
                 AutoMixSettingsView()
             case .autoMixPreview:
