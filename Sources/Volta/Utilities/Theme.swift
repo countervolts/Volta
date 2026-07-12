@@ -1,12 +1,14 @@
 import SwiftUI
+import UIKit
 
 enum Theme {
-    // app theme: "dark" (default), "amoled" (pure black), "light"
+    // app theme: "dark" (default), "amoled" (pure black), "light", "system"
     static var themeMode: String { UserDefaults.standard.string(forKey: "themeMode") ?? "dark" }
 
     static var background: Color {
         switch themeMode {
         case "light":  return Color(red: 0.95, green: 0.95, blue: 0.96)
+        case "system": return dynamicColor(light: UIColor(red: 0.95, green: 0.95, blue: 0.96, alpha: 1), dark: .black)
         case "amoled": return .black
         default:       return .black
         }
@@ -15,6 +17,7 @@ enum Theme {
     static var secondaryBackground: Color {
         switch themeMode {
         case "light":  return .white
+        case "system": return dynamicColor(light: .white, dark: UIColor(red: 0.07, green: 0.07, blue: 0.08, alpha: 1))
         case "amoled": return Color(red: 0.03, green: 0.03, blue: 0.035)
         default:       return Color(red: 0.07, green: 0.07, blue: 0.08)
         }
@@ -23,6 +26,7 @@ enum Theme {
     static var primaryText: Color {
         switch themeMode {
         case "light":  return Color(red: 0.08, green: 0.08, blue: 0.10)
+        case "system": return dynamicColor(light: UIColor(red: 0.08, green: 0.08, blue: 0.10, alpha: 1), dark: .white)
         default:       return .white
         }
     }
@@ -30,11 +34,24 @@ enum Theme {
     static var secondaryText: Color {
         switch themeMode {
         case "light":  return Color.black.opacity(0.55)
+        case "system": return dynamicColor(light: UIColor.black.withAlphaComponent(0.55), dark: UIColor.white.withAlphaComponent(0.6))
         default:       return Color.white.opacity(0.6)
         }
     }
 
-    static var colorScheme: ColorScheme { themeMode == "light" ? .light : .dark }
+    static var colorScheme: ColorScheme? {
+        switch themeMode {
+        case "system": return nil
+        case "light": return .light
+        default: return .dark
+        }
+    }
+
+    private static func dynamicColor(light: UIColor, dark: UIColor) -> Color {
+        Color(UIColor { traits in
+            traits.userInterfaceStyle == .dark ? dark : light
+        })
+    }
 
     static let error = Color(red: 0.95, green: 0.26, blue: 0.30)
 

@@ -161,6 +161,7 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case hidden_albums_no_matches
     case hidden_albums_no_server
     case artist_singles
+    case theme_system
     case theme_dark
     case theme_amoled
     case theme_light
@@ -1455,6 +1456,12 @@ enum Strings {
             .portuguese: "Singles", .italian: "Singoli", .dutch: "Singles", .russian: "Синглы",
             .polish: "Single", .turkish: "Single'lar", .swedish: "Singlar", .norwegian: "Singler",
             .danish: "Singler", .finnish: "Singlet", .chinese: "单曲", .japanese: "シングル", .korean: "싱글",
+        ],
+        .theme_system: [
+            .english: "System", .spanish: "Sistema", .french: "Système", .german: "System",
+            .portuguese: "Sistema", .italian: "Sistema", .dutch: "Systeem", .russian: "Системная",
+            .polish: "Systemowy", .turkish: "Sistem", .swedish: "System", .norwegian: "System",
+            .danish: "System", .finnish: "Järjestelmä", .chinese: "系统", .japanese: "システム", .korean: "시스템",
         ],
         .theme_dark: [
             .english: "Dark", .spanish: "Oscuro", .french: "Sombre", .german: "Dunkel",

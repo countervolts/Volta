@@ -1176,6 +1176,7 @@ struct NowPlayingScreen: View {
     }
 
     private func shouldSuppressPlayerDismissDrag(_ value: DragGesture.Value) -> Bool {
+        if isAdjustingVolume { return true }
         guard !isPhoneLandscape,
               sizeClass != .regular,
               activeTab == .queue else { return false }
@@ -2187,63 +2188,179 @@ private struct ScrubBar: View {
 private struct SystemVolumeSlider: UIViewRepresentable {
     @Binding var isInteracting: Bool
 
-    final class SliderOnlyVolumeView: MPVolumeView {
-        var usesNativeSliderInteraction = false
+    final class VolumeControlView: UIView {
+        var isInteracting: Binding<Bool>?
+
+        private let volumeView = MPVolumeView(frame: .zero)
+        private let trackLayer = CALayer()
+        private let backgroundLayer = CALayer()
+        private let fillLayer = CALayer()
+        private var volumeObservation: NSKeyValueObservation?
+        private var isTrackingTouch = false
+        private var pendingSliderPrep = false
+        private var dragStartVolume: Float = 0
+        private var displayedVolume: Float = AVAudioSession.sharedInstance().outputVolume {
+            didSet {
+                setNeedsLayout()
+            }
+        }
 
         override init(frame: CGRect) {
             super.init(frame: frame)
-            showsVolumeSlider = true
-            backgroundColor = .clear
-            clipsToBounds = false
+            configure()
         }
 
         required init?(coder: NSCoder) {
             super.init(coder: coder)
-            showsVolumeSlider = true
+            configure()
+        }
+
+        deinit {
+            volumeObservation?.invalidate()
+        }
+
+        private func configure() {
             backgroundColor = .clear
             clipsToBounds = false
+
+            volumeView.showsVolumeSlider = true
+            volumeView.alpha = 0.02
+            volumeView.isUserInteractionEnabled = false
+            addSubview(volumeView)
+
+            trackLayer.masksToBounds = true
+            backgroundLayer.backgroundColor = UIColor.white.withAlphaComponent(0.24).cgColor
+            fillLayer.backgroundColor = UIColor.white.withAlphaComponent(0.92).cgColor
+            trackLayer.addSublayer(backgroundLayer)
+            trackLayer.addSublayer(fillLayer)
+            layer.addSublayer(trackLayer)
+
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            pan.cancelsTouchesInView = true
+            addGestureRecognizer(pan)
+
+            startVolumeObservation()
         }
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            let slider = RuntimeCompatibility.isIOS16
-                ? Self.firstVolumeSlider(in: self)
-                : subviews.compactMap { $0 as? UISlider }.first
-            guard let slider else { return }
+            volumeView.frame = bounds
+            volumeView.layoutIfNeeded()
+            _ = configuredVolumeSlider()
+            layoutTrack()
+        }
 
-            if RuntimeCompatibility.isIOS16 {
-                for subview in subviews where subview !== slider && !slider.isDescendant(of: subview) {
-                    subview.isHidden = true
-                    subview.frame = .zero
-                }
-                slider.superview?.isHidden = false
-                slider.superview?.alpha = 1
-                slider.isHidden = false
-                slider.alpha = 1
-                slider.isEnabled = true
-                slider.isUserInteractionEnabled = usesNativeSliderInteraction
-                if slider.superview === self {
-                    slider.frame = bounds
-                } else {
-                    slider.superview?.frame = bounds
-                    slider.frame = slider.superview?.bounds ?? bounds
-                }
-            } else {
-                for subview in subviews where subview !== slider {
-                    subview.isHidden = true
-                    subview.frame = .zero
-                }
-                slider.isHidden = false
-                slider.alpha = 1
-                slider.isEnabled = true
-                // MPVolumeView's slider jumps to a tapped track location. Route touch
-                // changes through our pan gesture so press/release does not change volume.
-                slider.isUserInteractionEnabled = false
-                slider.frame = bounds
+        func refresh() {
+            volumeView.showsVolumeSlider = true
+            if !isTrackingTouch {
+                displayedVolume = AVAudioSession.sharedInstance().outputVolume
+            }
+            setNeedsLayout()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.volumeView.frame = self.bounds
+                self.volumeView.layoutIfNeeded()
+                _ = self.configuredVolumeSlider()
+                self.layoutTrack()
             }
         }
 
-        fileprivate static func firstVolumeSlider(in view: UIView) -> UISlider? {
+        private func startVolumeObservation() {
+            volumeObservation = AVAudioSession.sharedInstance().observe(\.outputVolume, options: [.initial, .new]) { [weak self] session, _ in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if self.isTrackingTouch {
+                        return
+                    } else {
+                        self.displayedVolume = session.outputVolume
+                    }
+                }
+            }
+        }
+
+        private func layoutTrack() {
+            let trackHeight: CGFloat = 4
+            let trackWidth = max(0, bounds.width)
+            let trackFrame = CGRect(
+                x: 0,
+                y: (bounds.height - trackHeight) / 2,
+                width: trackWidth,
+                height: trackHeight
+            )
+            let fillWidth = trackWidth * CGFloat(max(0, min(1, displayedVolume)))
+
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            trackLayer.frame = trackFrame
+            trackLayer.cornerRadius = trackHeight / 2
+            backgroundLayer.frame = CGRect(origin: .zero, size: trackFrame.size)
+            fillLayer.frame = CGRect(x: 0, y: 0, width: fillWidth, height: trackHeight)
+            CATransaction.commit()
+        }
+
+        private func configuredVolumeSlider() -> UISlider? {
+            volumeView.frame = bounds
+            volumeView.alpha = 0.01
+            volumeView.isHidden = false
+            volumeView.isUserInteractionEnabled = false
+            volumeView.layoutIfNeeded()
+
+            guard let slider = Self.firstVolumeSlider(in: volumeView) else {
+                scheduleSliderPrepRetry()
+                return nil
+            }
+
+            slider.isHidden = false
+            slider.alpha = 0.001
+            slider.isEnabled = true
+            slider.isUserInteractionEnabled = false
+            slider.minimumValue = 0
+            slider.maximumValue = 1
+            slider.value = displayedVolume
+
+            let thumb = Self.transparentImage(size: CGSize(width: 1, height: 1))
+            let track = Self.transparentImage(size: CGSize(width: 1, height: 4))
+            for state in Self.controlStates {
+                slider.setThumbImage(thumb, for: state)
+                slider.setMinimumTrackImage(track, for: state)
+                slider.setMaximumTrackImage(track, for: state)
+            }
+            slider.thumbTintColor = .clear
+            slider.minimumTrackTintColor = .clear
+            slider.maximumTrackTintColor = .clear
+
+            fadeNativeChrome(in: volumeView, keeping: slider)
+            return slider
+        }
+
+        private func scheduleSliderPrepRetry() {
+            guard !pendingSliderPrep else { return }
+            pendingSliderPrep = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.pendingSliderPrep = false
+                self.volumeView.setNeedsLayout()
+                self.volumeView.layoutIfNeeded()
+                _ = self.configuredVolumeSlider()
+            }
+        }
+
+        private func fadeNativeChrome(in view: UIView, keeping slider: UISlider) {
+            for subview in view.subviews {
+                subview.isUserInteractionEnabled = false
+                if subview === slider {
+                    subview.alpha = 0.001
+                } else if slider.isDescendant(of: subview) {
+                    subview.alpha = 1
+                    fadeNativeChrome(in: subview, keeping: slider)
+                } else {
+                    subview.alpha = 0.001
+                    fadeNativeChrome(in: subview, keeping: slider)
+                }
+            }
+        }
+
+        private static func firstVolumeSlider(in view: UIView) -> UISlider? {
             if let slider = view as? UISlider {
                 return slider
             }
@@ -2254,99 +2371,75 @@ private struct SystemVolumeSlider: UIViewRepresentable {
             }
             return nil
         }
+
+        private static let controlStates: [UIControl.State] = [
+            .normal,
+            .highlighted,
+            .disabled,
+            .selected,
+            [.selected, .highlighted],
+            [.disabled, .selected],
+            .focused
+        ]
+
+        private static func transparentImage(size: CGSize) -> UIImage {
+            let format = UIGraphicsImageRendererFormat.default()
+            format.opaque = false
+            return UIGraphicsImageRenderer(size: size, format: format).image { _ in }
+        }
+
+        private func setSystemVolume(_ volume: Float) {
+            let clamped = max(0, min(1, volume))
+            displayedVolume = clamped
+            guard let slider = configuredVolumeSlider() else { return }
+            slider.setValue(clamped, animated: false)
+            slider.sendActions(for: .valueChanged)
+            slider.sendActions(for: .touchUpInside)
+        }
+
+        private func beginTracking() {
+            isTrackingTouch = true
+            isInteracting?.wrappedValue = true
+        }
+
+        private func endTracking() {
+            isTrackingTouch = false
+            isInteracting?.wrappedValue = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+                guard let self, !self.isTrackingTouch else { return }
+                let settledVolume = AVAudioSession.sharedInstance().outputVolume
+                self.displayedVolume = settledVolume
+                _ = self.configuredVolumeSlider()
+            }
+        }
+
+        @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard bounds.width > 0 else { return }
+            switch gesture.state {
+            case .began:
+                beginTracking()
+                dragStartVolume = displayedVolume
+                gesture.setTranslation(.zero, in: self)
+                _ = configuredVolumeSlider()
+            case .changed:
+                let delta = Float(gesture.translation(in: self).x / bounds.width)
+                setSystemVolume(dragStartVolume + delta)
+            default:
+                endTracking()
+            }
+        }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(isInteracting: $isInteracting) }
-
-    func makeUIView(context: Context) -> SliderOnlyVolumeView {
-        let v = SliderOnlyVolumeView()
-        v.usesNativeSliderInteraction = RuntimeCompatibility.isIOS16
-        v.showsVolumeSlider = true
-        v.tintColor = .white
-        v.setMinimumVolumeSliderImage(Self.trackImage(color: UIColor.white.withAlphaComponent(0.92)), for: .normal)
-        v.setMaximumVolumeSliderImage(Self.trackImage(color: UIColor.white.withAlphaComponent(0.24)), for: .normal)
-        v.setVolumeThumbImage(Self.thumbImage(highlighted: false), for: .normal)
-        v.setVolumeThumbImage(Self.thumbImage(highlighted: true), for: .highlighted)
-        context.coordinator.volumeView = v
-        DispatchQueue.main.async {
-            v.setNeedsLayout()
-            v.layoutIfNeeded()
-        }
-        if !RuntimeCompatibility.isIOS16 {
-            let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
-            pan.cancelsTouchesInView = true
-            v.addGestureRecognizer(pan)
-        }
+    func makeUIView(context: Context) -> VolumeControlView {
+        let v = VolumeControlView()
+        v.isInteracting = $isInteracting
+        v.refresh()
         return v
     }
-    func updateUIView(_ uiView: SliderOnlyVolumeView, context: Context) {
-        uiView.usesNativeSliderInteraction = RuntimeCompatibility.isIOS16
-        uiView.showsVolumeSlider = true
-        uiView.setNeedsLayout()
-    }
 
-    private static func trackImage(color: UIColor) -> UIImage {
-        let size = CGSize(width: 4, height: 4)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let image = renderer.image { _ in
-            color.setFill()
-            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 2).fill()
-        }
-        return image.resizableImage(withCapInsets: UIEdgeInsets(top: 2, left: 2, bottom: 2, right: 2))
-    }
-
-    private static func thumbImage(highlighted: Bool) -> UIImage {
-        let diameter: CGFloat = highlighted ? 16 : 14
-        let size = CGSize(width: diameter, height: diameter)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { _ in
-            UIColor.white.withAlphaComponent(highlighted ? 1 : 0.96).setFill()
-            UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).fill()
-        }
-    }
-
-    final class Coordinator: NSObject {
-        weak var volumeView: MPVolumeView?
-        private var isInteracting: Binding<Bool>
-        private var panStartVolume: Float = 0
-        private var panActive = false
-
-        init(isInteracting: Binding<Bool>) {
-            self.isInteracting = isInteracting
-        }
-
-        private var slider: UISlider? {
-            guard let volumeView else { return nil }
-            if RuntimeCompatibility.isIOS16 {
-                return SliderOnlyVolumeView.firstVolumeSlider(in: volumeView)
-            }
-            return volumeView.subviews.compactMap { $0 as? UISlider }.first
-        }
-
-        // Only gestures that start on the real slider track should affect volume.
-        private func onTrack(_ point: CGPoint, _ slider: UISlider) -> Bool {
-            point.x >= 0 && point.x <= slider.bounds.width
-        }
-
-        @objc func handlePan(_ g: UIPanGestureRecognizer) {
-            guard let slider, slider.bounds.width > 0 else { return }
-            switch g.state {
-            case .began:
-                panActive = onTrack(g.location(in: slider), slider)
-                panStartVolume = slider.value
-                isInteracting.wrappedValue = panActive
-            case .changed:
-                guard panActive else { return }
-                let delta = Float(g.translation(in: slider).x / slider.bounds.width)
-                let frac = max(0, min(1, panStartVolume + delta))
-                slider.setValue(frac, animated: false)
-                slider.sendActions(for: .valueChanged)
-            default:
-                panActive = false
-                isInteracting.wrappedValue = false
-                panStartVolume = slider.value
-            }
-        }
+    func updateUIView(_ uiView: VolumeControlView, context: Context) {
+        uiView.isInteracting = $isInteracting
+        uiView.refresh()
     }
 }
 
