@@ -10,8 +10,10 @@ enum PlayerTab { case nowPlaying, queue, lyrics }
 struct NowPlayingScreen: View {
     @EnvironmentObject private var appState: AppState
     @Binding var isPresented: Bool
+    var onDismissDragChanged: (CGFloat) -> Void = { _ in }
+    var onDismissDragCancelled: () -> Void = {}
+    var onDismissDragEnded: (CGFloat) -> Void = { _ in }
     @State private var activeTab: PlayerTab = .nowPlaying
-    @State private var dragOffset: CGFloat = 0
     @State private var pendingDragOffset: CGFloat = 0
     @State private var dragThrottler: VSyncThrottler?
     @State private var infoSheet: SongMenuSheet? = nil
@@ -32,11 +34,14 @@ struct NowPlayingScreen: View {
     @State private var isFetchingAlbum = false
     @StateObject private var tasteStore = TasteStore.shared
     @State private var showQueueHistory = false
-    @State private var didPositionQueueScroll = false
     @State private var queueScrollRequest = 0
     @State private var queueAnchorOffset: CGFloat = 0
     @State private var draggingQueueIndex: Int?
     @State private var draggingQueueSongID: String?
+    @State private var queueTransitionProgress: CGFloat = 0
+    @State private var lyricsTransitionProgress: CGFloat = 0
+    @State private var queueStageOpacity: CGFloat = 1
+    @State private var lyricsStageOpacity: CGFloat = 0
     @AppStorage("showLosslessBadge") private var showLosslessBadge = true
     @AppStorage(DeveloperExperiments.preciseTimestampsKey) private var preciseTimestamps = false
     @AppStorage("artworkAnimation") private var artworkAnimation = true
@@ -53,6 +58,7 @@ struct NowPlayingScreen: View {
     @State private var playerBackground = Color(white: 0.08)
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     private var audio: AudioPlayer { appState.audioPlayer }
     private let queueContentAnchor = "queue-content-anchor"
@@ -62,7 +68,20 @@ struct NowPlayingScreen: View {
     private var isPhoneLandscape: Bool {
         UIDevice.current.userInterfaceIdiom == .phone && verticalSizeClass == .compact
     }
-
+    private var reducesPlayerMotion: Bool {
+        accessibilityReduceMotion || PerformanceMode.reduceAnimations
+    }
+    private var usesQueueHeroTransition: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+            && !isPhoneLandscape
+            && sizeClass != .regular
+            && !reducesPlayerMotion
+    }
+    private var playerTabHeroAnimation: Animation {
+        reducesPlayerMotion
+            ? .linear(duration: 0.01)
+            : .spring(response: 0.42, dampingFraction: 1, blendDuration: 0.08)
+    }
     var body: some View {
         ZStack {
             playerBackground.ignoresSafeArea()
@@ -80,37 +99,43 @@ struct NowPlayingScreen: View {
                 .onChanged { v in
                     if shouldSuppressPlayerDismissDrag(v) {
                         pendingDragOffset = 0
-                        dragOffset = 0
+                        onDismissDragCancelled()
                         return
                     }
                     pendingDragOffset = max(0, v.translation.height)
                     if let dragThrottler {
                         dragThrottler.schedule()
                     } else {
-                        dragOffset = pendingDragOffset
+                        onDismissDragChanged(pendingDragOffset)
                     }
                 }
                 .onEnded { v in
                     if shouldSuppressPlayerDismissDrag(v) {
                         pendingDragOffset = 0
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { dragOffset = 0 }
+                        onDismissDragCancelled()
                         return
                     }
+                    let finalOffset = max(0, v.translation.height)
                     if v.translation.height > 120 || v.predictedEndTranslation.height > 300 {
                         AppLogger.shared.log(
                             "Player dismissed by drag; translation=\(Int(v.translation.height)); predicted=\(Int(v.predictedEndTranslation.height))",
                             category: .playback
                         )
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                            isPresented = false
+                        // Synchronize the last gesture sample before the parent
+                        // continues the linear reverse transition from it.
+                        onDismissDragChanged(finalOffset)
+                        var handoff = Transaction()
+                        handoff.disablesAnimations = true
+                        withTransaction(handoff) {
+                            pendingDragOffset = 0
                         }
+                        onDismissDragEnded(finalOffset)
+                        return
                     }
                     pendingDragOffset = 0
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { dragOffset = 0 }
+                    onDismissDragCancelled()
                 }
         )
-        // Track the finger directly; only release gets the spring.
-        .offset(y: dragOffset)
         .sheet(item: $infoSheet) { which in
             switch which {
             case .info:    SongInfoSheet(song: audio.currentSong)
@@ -181,7 +206,7 @@ struct NowPlayingScreen: View {
                 category: .playback
             )
             dragThrottler = VSyncThrottler {
-                dragOffset = pendingDragOffset
+                onDismissDragChanged(pendingDragOffset)
             }
             refreshPlayerBackground(animated: false)
             // Hold the scrubber's high-frequency schedule until the open
@@ -208,8 +233,6 @@ struct NowPlayingScreen: View {
         .onChangeCompat(of: activeTab) { _, tab in
             if tab != .queue {
                 showQueueHistory = false
-                didPositionQueueScroll = false
-                queueAnchorOffset = 0
             }
         }
         .preferredColorScheme(Theme.colorScheme)
@@ -217,72 +240,365 @@ struct NowPlayingScreen: View {
 
     @ViewBuilder
     private var phoneLayout: some View {
-        if usesFullBleedCover {
-            fullBleedLayout()
-        } else {
-            VStack(spacing: 0) {
+        GeometryReader { geo in
+            let controlsHeight = min(320, max(280, geo.size.height * 0.37))
+            let stageHeight = max(0, geo.size.height - 24 - controlsHeight)
+
+            ZStack(alignment: .top) {
+                VStack(spacing: 0) {
+                    // The handle owns one fixed slot in every portrait mode.
+                    // Full-bleed artwork extends behind it instead of laying out
+                    // a second, differently padded copy.
+                    Color.clear.frame(height: 24)
+
+                    ZStack(alignment: .top) {
+                        QueueTransitionAnimator(progress: queueTransitionProgress) { progress in
+                            portraitQueueStage(in: geo, progress: progress)
+                        }
+                        .opacity(queueStageOpacity)
+                        .allowsHitTesting(activeTab != .lyrics)
+
+                        QueueTransitionAnimator(progress: lyricsTransitionProgress) { progress in
+                            portraitLyricsStage(in: geo, progress: progress)
+                        }
+                        .opacity(lyricsStageOpacity)
+                        .allowsHitTesting(activeTab == .lyrics)
+                    }
+                    .frame(height: stageHeight, alignment: .top)
+
+                    VStack(spacing: 0) {
+                        scrubber
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 4)
+                        Spacer(minLength: 0)
+                        transportControls
+                        Spacer(minLength: 0)
+                        bottomControls
+                    }
+                    .frame(height: controlsHeight)
+                    .background(playerBackground)
+                    .zIndex(5)
+                }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+
                 dragHandle
-                tabContent
-                Spacer(minLength: 0)
-                transportControls
-                Spacer(minLength: 0)
-                bottomControls
+                    .zIndex(20)
             }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }
     }
 
     // Full-bleed artwork header for live/stylized covers.
-    private var usesFullBleedCover: Bool {
-        guard activeTab == .nowPlaying else { return false }
+    private var prefersFullBleedCover: Bool {
         if audio.currentLiveArtwork != nil { return true }
         return stylizedPlayerCover && audio.currentArtwork != nil
     }
 
-    private func fullBleedLayout() -> some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let topInset = geo.safeAreaInsets.top
-            VStack(spacing: 0) {
-                ZStack(alignment: .top) {
-                    fullBleedCoverContent
-                        .frame(width: w, height: w + topInset)
-                        .clipped()
-                        .overlay(alignment: .bottom) {
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear, location: 0),
-                                    .init(color: playerBackground.opacity(0.55), location: 0.72),
-                                    .init(color: playerBackground, location: 1)
-                                ],
-                                startPoint: .top, endPoint: .bottom
-                            )
-                            .frame(height: w * 0.30)
-                        }
-                        .id(audio.currentSong?.id)
-                    // the whole header is offset up by topInset, so doubling the
-                    // inset puts the handle just below the status bar
-                    dragHandle.padding(.top, topInset * 2)
-                }
-                .frame(width: w, height: w + topInset)
-                .offset(y: -topInset)
-                .padding(.bottom, -topInset)
+    /// A persistent portrait stage keeps the scrubber and every control below
+    /// it stationary. `progress` is the *interpolated* animation value, so each
+    /// layer can follow its own portion of the supplied keyframe sequence.
+    private func portraitQueueStage(in geo: GeometryProxy, progress rawProgress: CGFloat) -> some View {
+        let width = geo.size.width
+        let topInset = geo.safeAreaInsets.top
+        let progress = min(max(rawProgress, 0), 1)
+        let artworkProgress = smoothStep(progress, from: 0, to: 1)
+        let sourceOpacity = 1 - smoothStep(progress, from: 0.46, to: 0.78)
+        let queueBodyOpacity = smoothStep(progress, from: 0.40, to: 0.88)
+        let queueBodyProgress = smoothStep(progress, from: 0.24, to: 1)
+        let compactOpacity = smoothStep(progress, from: 0.58, to: 0.92)
+        let headerScrollProgress = smoothStep(progress, from: 0.84, to: 1)
+        let transitionHeaderOpacity = 1 - smoothStep(progress, from: 0.94, to: 1)
 
-                trackInfo
-                    .padding(.horizontal, 24)
-                    .padding(.top, 18)
-                    .padding(.bottom, 20)
+        let compactSide: CGFloat = 72
+        let standardSide = max(0, width - 48)
+        let sourceX: CGFloat = prefersFullBleedCover ? 0 : 24
+        let sourceY: CGFloat = prefersFullBleedCover ? -topInset - 24 : 8
+        let sourceWidth: CGFloat = prefersFullBleedCover ? width : standardSide
+        let sourceHeight: CGFloat = prefersFullBleedCover ? width + topInset : standardSide
+        let targetX: CGFloat = 24
+        let targetY: CGFloat = 8
+        let artworkX = interpolate(sourceX, targetX, artworkProgress)
+        let artworkY = interpolate(sourceY, targetY, artworkProgress)
+        let artworkWidth = interpolate(sourceWidth, compactSide, artworkProgress)
+        let artworkHeight = interpolate(sourceHeight, compactSide, artworkProgress)
+        let artworkRenderScale = sourceWidth > 0 ? artworkWidth / sourceWidth : 1
+        let scaledArtworkHeight = sourceHeight * artworkRenderScale
+        let artworkCropOffset = (artworkHeight - scaledArtworkHeight) / 2
+        let sourceCornerRadius: CGFloat = prefersFullBleedCover ? 0 : 18
+        let cornerRadius = interpolate(sourceCornerRadius, 8, artworkProgress)
+        let normalPlaybackScale: CGFloat = {
+            guard !prefersFullBleedCover,
+                  artworkAnimation,
+                  !PerformanceMode.reduceAnimations else { return 1 }
+            return audio.isPlaying ? 1 : 0.88
+        }()
+        let artworkScale = interpolate(
+            normalPlaybackScale,
+            1,
+            smoothStep(progress, from: 0, to: 0.30)
+        )
 
-                scrubber
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 4)
+        // The invisible standard scaffold is deliberately used for both cover
+        // styles. A live artwork arriving can no longer move the scrubber.
+        let standardInfoY = standardSide + 50
+        let sourceInfoY = prefersFullBleedCover ? width - 6 : standardInfoY
+        let compactSourceInfoY = targetY + compactSide + 12
+        let trackInfoY = interpolate(sourceInfoY, compactSourceInfoY, artworkProgress)
+        let queueTravel = max(0, standardSide - compactSide)
+        let queueBodyOffset = queueTravel * (1 - queueBodyProgress)
 
-                Spacer(minLength: 0)
-                transportControls
-                Spacer(minLength: 0)
-                bottomControls
-            }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+        let scaffold = VStack(spacing: 0) {
+            Color.clear.frame(height: standardInfoY)
+            trackInfo
+                .hidden()
+                .frame(width: standardSide, alignment: .leading)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            Color.clear.frame(height: 20)
         }
+        .frame(width: width)
+
+        return scaffold
+            .background {
+                // Keep the UIKit scroll view mounted so entering the queue does
+                // not trigger list construction and scroll positioning mid-flight.
+                queuePagerContent(
+                    progress: progress,
+                    bodyOpacity: queueBodyOpacity,
+                    bodyOffset: queueBodyOffset
+                )
+                .mask(Rectangle())
+            }
+            .overlay(alignment: .topLeading) {
+                ZStack(alignment: .topLeading) {
+                    portraitArtworkSurface
+                        // Keep live artwork at a stable render size. Scaling its
+                        // layer is much cheaper than resizing AVPlayer every frame.
+                        .frame(width: sourceWidth, height: sourceHeight)
+                        .scaleEffect(artworkRenderScale, anchor: .topLeading)
+                        .offset(y: artworkCropOffset)
+                        .frame(width: artworkWidth, height: artworkHeight, alignment: .topLeading)
+                        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                        .shadow(
+                            color: .black.opacity(
+                                prefersFullBleedCover ? 0 : 0.4 * (1 - artworkProgress)
+                            ),
+                            radius: 20,
+                            y: 10
+                        )
+                        .scaleEffect(artworkScale)
+                        .animation(
+                            .spring(response: 0.5, dampingFraction: 0.75),
+                            value: audio.isPlaying
+                        )
+                        .offset(
+                            x: artworkX,
+                            y: artworkY + queueAnchorOffset * headerScrollProgress
+                        )
+                        .opacity(transitionHeaderOpacity)
+                        .id(audio.currentSong?.id)
+
+                    if prefersFullBleedCover {
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: playerBackground.opacity(0.55), location: 0.72),
+                                .init(color: playerBackground, location: 1)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(width: width, height: width * 0.30)
+                        .offset(y: width - 24 - width * 0.30)
+                        .opacity(1 - smoothStep(progress, from: 0, to: 0.40))
+                        .allowsHitTesting(false)
+                    }
+
+                    trackInfo
+                        .frame(width: standardSide, alignment: .leading)
+                        .offset(x: 24, y: trackInfoY)
+                        .opacity(sourceOpacity)
+                        .allowsHitTesting(progress < 0.05)
+                        .accessibilityHidden(progress >= 0.05)
+
+                    compactTrackHeader(queueHeroDestination: true, showsArtwork: false)
+                        .padding(.horizontal, 24)
+                        .offset(y: targetY + queueAnchorOffset * headerScrollProgress)
+                        .opacity(compactOpacity * transitionHeaderOpacity)
+                        .allowsHitTesting(progress > 0.95 && progress < 0.999)
+                        .accessibilityHidden(progress <= 0.95)
+
+                    // A real, topmost hit target follows the persistent cover.
+                    // The visual compact header uses a transparent artwork slot,
+                    // which is not reliably tappable on every iOS release.
+                    Button {
+                        selectPlayerTab(.nowPlaying)
+                    } label: {
+                        Color.white.opacity(0.001)
+                            .frame(width: compactSide, height: compactSide)
+                            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .offset(
+                        x: targetX,
+                        y: targetY + queueAnchorOffset * headerScrollProgress
+                    )
+                    .allowsHitTesting(progress > 0.95 && progress < 0.999)
+                    .accessibilityLabel("Back to Now Playing")
+                    .accessibilityHidden(progress <= 0.95 || progress >= 0.999)
+                }
+            }
+    }
+
+    /// Mirrors the queue hero for lyrics: the cover settles into the compact
+    /// lyrics header while the lyric body rises into place behind it.
+    private func portraitLyricsStage(in geo: GeometryProxy, progress rawProgress: CGFloat) -> some View {
+        let width = geo.size.width
+        let topInset = geo.safeAreaInsets.top
+        let progress = min(max(rawProgress, 0), 1)
+        let artworkProgress = smoothStep(progress, from: 0, to: 1)
+        let sourceOpacity = 1 - smoothStep(progress, from: 0.46, to: 0.78)
+        let lyricsBodyOpacity = smoothStep(progress, from: 0.40, to: 0.88)
+        let lyricsBodyProgress = smoothStep(progress, from: 0.24, to: 1)
+        let compactOpacity = smoothStep(progress, from: 0.58, to: 0.92)
+
+        let compactSide: CGFloat = 48
+        let standardSide = max(0, width - 48)
+        let sourceX: CGFloat = prefersFullBleedCover ? 0 : 24
+        let sourceY: CGFloat = prefersFullBleedCover ? -topInset - 24 : 8
+        let sourceWidth: CGFloat = prefersFullBleedCover ? width : standardSide
+        let sourceHeight: CGFloat = prefersFullBleedCover ? width + topInset : standardSide
+        let targetX: CGFloat = 20
+        let targetY: CGFloat = 4
+        let artworkX = interpolate(sourceX, targetX, artworkProgress)
+        let artworkY = interpolate(sourceY, targetY, artworkProgress)
+        let artworkWidth = interpolate(sourceWidth, compactSide, artworkProgress)
+        let artworkHeight = interpolate(sourceHeight, compactSide, artworkProgress)
+        let artworkRenderScale = sourceWidth > 0 ? artworkWidth / sourceWidth : 1
+        let scaledArtworkHeight = sourceHeight * artworkRenderScale
+        let artworkCropOffset = (artworkHeight - scaledArtworkHeight) / 2
+        let sourceCornerRadius: CGFloat = prefersFullBleedCover ? 0 : 18
+        let cornerRadius = interpolate(sourceCornerRadius, 8, artworkProgress)
+        let normalPlaybackScale: CGFloat = {
+            guard !prefersFullBleedCover,
+                  artworkAnimation,
+                  !PerformanceMode.reduceAnimations else { return 1 }
+            return audio.isPlaying ? 1 : 0.88
+        }()
+        let artworkScale = interpolate(
+            normalPlaybackScale,
+            1,
+            smoothStep(progress, from: 0, to: 0.30)
+        )
+
+        let standardInfoY = standardSide + 50
+        let sourceInfoY = prefersFullBleedCover ? width - 6 : standardInfoY
+        let compactSourceInfoY = targetY + compactSide + 8
+        let trackInfoY = interpolate(sourceInfoY, compactSourceInfoY, artworkProgress)
+        let bodyTravel = max(0, standardSide - compactSide)
+        let lyricsBodyOffset = bodyTravel * (1 - lyricsBodyProgress)
+
+        return ZStack(alignment: .topLeading) {
+            VStack(spacing: 0) {
+                Color.clear.frame(height: 60)
+                LyricsViewWithState()
+                    .frame(maxHeight: .infinity)
+                    .opacity(lyricsBodyOpacity)
+                    .offset(y: lyricsBodyOffset)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            portraitArtworkSurface
+                .frame(width: sourceWidth, height: sourceHeight)
+                .scaleEffect(artworkRenderScale, anchor: .topLeading)
+                .offset(y: artworkCropOffset)
+                .frame(width: artworkWidth, height: artworkHeight, alignment: .topLeading)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .shadow(
+                    color: .black.opacity(prefersFullBleedCover ? 0 : 0.4 * (1 - artworkProgress)),
+                    radius: 20,
+                    y: 10
+                )
+                .scaleEffect(artworkScale)
+                .animation(.spring(response: 0.5, dampingFraction: 0.75), value: audio.isPlaying)
+                .offset(x: artworkX, y: artworkY)
+                .id(audio.currentSong?.id)
+
+            if prefersFullBleedCover {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: playerBackground.opacity(0.55), location: 0.72),
+                        .init(color: playerBackground, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(width: width, height: width * 0.30)
+                .offset(y: width - 24 - width * 0.30)
+                .opacity(1 - smoothStep(progress, from: 0, to: 0.40))
+                .allowsHitTesting(false)
+            }
+
+            trackInfo
+                .frame(width: standardSide, alignment: .leading)
+                .offset(x: 24, y: trackInfoY)
+                .opacity(sourceOpacity)
+                .allowsHitTesting(progress < 0.05)
+                .accessibilityHidden(progress >= 0.05)
+
+            compactTrackHeader(queueHeroDestination: false, showsArtwork: false)
+                .padding(.horizontal, 20)
+                .offset(y: targetY)
+                .opacity(compactOpacity)
+                .allowsHitTesting(progress > 0.95)
+                .accessibilityHidden(progress <= 0.95)
+
+            // The animated artwork sits above the compact header, so give it
+            // its own topmost target once the lyrics transition has settled.
+            Button {
+                selectPlayerTab(.nowPlaying)
+            } label: {
+                Color.white.opacity(0.001)
+                    .frame(width: compactSide, height: compactSide)
+                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .offset(x: targetX, y: targetY)
+            .allowsHitTesting(progress > 0.95)
+            .accessibilityLabel("Back to Now Playing")
+            .accessibilityHidden(progress <= 0.95)
+        }
+        .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+        .clipped()
+    }
+
+    private var portraitArtworkSurface: some View {
+        ZStack {
+            Color(white: 0.12)
+            if let live = audio.currentLiveArtwork {
+                liveArtworkView(live)
+            } else if let image = audio.currentArtwork {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: Symbols.albumPlaceholder)
+                    .font(.system(size: 60, weight: .ultraLight))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+        }
+        .clipped()
+    }
+
+    private func smoothStep(_ value: CGFloat, from lower: CGFloat, to upper: CGFloat) -> CGFloat {
+        guard upper > lower else { return value >= upper ? 1 : 0 }
+        let t = min(max((value - lower) / (upper - lower), 0), 1)
+        return t * t * (3 - 2 * t)
+    }
+
+    private func interpolate(_ start: CGFloat, _ end: CGFloat, _ progress: CGFloat) -> CGFloat {
+        start + (end - start) * progress
     }
 
     private var phoneLandscapeLayout: some View {
@@ -743,9 +1059,7 @@ struct NowPlayingScreen: View {
     private func landscapeTabButton(tab: PlayerTab, icon: String) -> some View {
         let active = activeTab == tab
         return Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                activeTab = active ? .nowPlaying : tab
-            }
+            selectPlayerTab(active ? .nowPlaying : tab)
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 23, weight: .semibold))
@@ -778,6 +1092,9 @@ struct NowPlayingScreen: View {
                 VStack(spacing: 0) {
                     dragHandle
                     nowPlayingContent
+                    scrubber
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 4)
                     Spacer(minLength: 0)
                     transportControls
                     Spacer(minLength: 0)
@@ -802,6 +1119,9 @@ struct NowPlayingScreen: View {
             VStack(spacing: 0) {
                 dragHandle
                 nowPlayingContent
+                scrubber
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 4)
                 Spacer(minLength: 0)
                 transportControls
                 Spacer(minLength: 0)
@@ -880,52 +1200,136 @@ struct NowPlayingScreen: View {
             .padding(.bottom, 8)
     }
 
+    private func selectPlayerTab(_ tab: PlayerTab) {
+        guard tab != activeTab else { return }
+
+        let isPortraitQueueToggle = usesQueueHeroTransition
+            && ((activeTab == .nowPlaying && tab == .queue)
+                || (activeTab == .queue && tab == .nowPlaying))
+        let isPortraitLyricsToggle = usesQueueHeroTransition
+            && ((activeTab == .nowPlaying && tab == .lyrics)
+                || (activeTab == .lyrics && tab == .nowPlaying))
+        let isPortraitAlternateSwitch = usesQueueHeroTransition
+            && ((activeTab == .queue && tab == .lyrics)
+                || (activeTab == .lyrics && tab == .queue))
+
+        if isPortraitAlternateSwitch {
+            // Both destinations are already fully composed. Crossfade their
+            // settled layouts directly instead of shrinking back through the
+            // normal player and immediately expanding into the other tab.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                activeTab = tab
+                queueTransitionProgress = 1
+                lyricsTransitionProgress = 1
+                if tab == .queue {
+                    showQueueHistory = false
+                }
+            }
+            withAnimation(.easeInOut(duration: 0.22)) {
+                queueStageOpacity = tab == .queue ? 1 : 0
+                lyricsStageOpacity = tab == .lyrics ? 1 : 0
+            }
+            return
+        }
+
+        if isPortraitQueueToggle || isPortraitLyricsToggle {
+            // The stage is persistent for both states. Changing the semantic
+            // tab first keeps controls correct while the animatable scalar can
+            // be smoothly retargeted by a rapid second tap.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                activeTab = tab
+                if tab == .queue {
+                    showQueueHistory = false
+                }
+                // A prior lyrics/queue crossfade leaves both stages at their
+                // destination geometry. Reset the hidden stage before it is
+                // revealed as the normal-player backdrop.
+                if tab == .nowPlaying, isPortraitLyricsToggle {
+                    queueTransitionProgress = 0
+                } else if tab == .nowPlaying, isPortraitQueueToggle {
+                    lyricsTransitionProgress = 0
+                }
+            }
+            withAnimation(playerTabHeroAnimation) {
+                if isPortraitQueueToggle {
+                    queueTransitionProgress = tab == .queue ? 1 : 0
+                } else {
+                    lyricsTransitionProgress = tab == .lyrics ? 1 : 0
+                }
+                queueStageOpacity = tab == .lyrics ? 0 : 1
+                lyricsStageOpacity = tab == .lyrics ? 1 : 0
+            }
+            return
+        }
+
+        withAnimation(.easeInOut(duration: reducesPlayerMotion ? 0.01 : 0.2)) {
+            activeTab = tab
+            queueTransitionProgress = tab == .queue ? 1 : 0
+            lyricsTransitionProgress = tab == .lyrics ? 1 : 0
+            queueStageOpacity = tab == .lyrics ? 0 : 1
+            lyricsStageOpacity = tab == .lyrics ? 1 : 0
+        }
+    }
+
     // MARK: - Tab content
 
     @ViewBuilder
     private var tabContent: some View {
         switch activeTab {
         case .nowPlaying:
-            nowPlayingContent
+            nowPlayingContent.transition(.identity)
         case .queue:
-            queuePagerContent
+            queuePagerContent(progress: 1, bodyOpacity: 1, bodyOffset: 0)
+                .transition(.identity)
         case .lyrics:
             altContent { LyricsViewWithState().transition(.opacity) }
         }
     }
 
-    private var queuePagerContent: some View {
-        ScrollViewReader { proxy in
-            VStack(spacing: 0) {
-                GeometryReader { scrollGeo in
-                    ScrollView(.vertical, showsIndicators: true) {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            queueHistoryHeader
+    private func queuePagerContent(
+        progress: CGFloat,
+        bodyOpacity: CGFloat,
+        bodyOffset: CGFloat
+    ) -> some View {
+        let settledHeaderOpacity = smoothStep(progress, from: 0.94, to: 1)
+        return ScrollViewReader { proxy in
+            GeometryReader { scrollGeo in
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        queueHistoryHeader
+                            .padding(.horizontal, 24)
+                            .padding(.top, 52)
+                            .padding(.bottom, 18)
+                            .opacity(bodyOpacity)
+
+                        queueHistoryRows
+                            .padding(.bottom, 34)
+                            .opacity(bodyOpacity)
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(queueContentAnchor)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: QueueAnchorOffsetKey.self,
+                                        value: geo.frame(in: .named("queueScroll")).minY
+                                    )
+                                }
+                            )
+
+                        VStack(alignment: .leading, spacing: 0) {
+                            compactTrackHeader(queueHeroDestination: true)
                                 .padding(.horizontal, 24)
-                                .padding(.top, 52)
-                                .padding(.bottom, 18)
-
-                            queueHistoryRows
-                                .padding(.bottom, 34)
-
-                            Color.clear
-                                .frame(height: 1)
-                                .id(queueContentAnchor)
-                                .background(
-                                    GeometryReader { geo in
-                                        Color.clear.preference(
-                                            key: QueueAnchorOffsetKey.self,
-                                            value: geo.frame(in: .named("queueScroll")).minY
-                                        )
-                                    }
-                                )
+                                .padding(.top, 8)
+                                .padding(.bottom, 16)
+                                .opacity(bodyOpacity * settledHeaderOpacity)
 
                             VStack(alignment: .leading, spacing: 0) {
-                                compactTrackHeader
-                                    .padding(.horizontal, 20)
-                                    .padding(.top, 4)
-                                    .padding(.bottom, 20)
-
                                 queueModeToggles
                                     .padding(.horizontal, 20)
                                     .padding(.bottom, 26)
@@ -937,37 +1341,42 @@ struct NowPlayingScreen: View {
                                 queueUpcomingRows
                                     .padding(.horizontal, 24)
                             }
-                            .frame(maxWidth: .infinity, minHeight: scrollGeo.size.height, alignment: .top)
+                            .opacity(bodyOpacity)
+                            .offset(y: bodyOffset)
                         }
-                        .padding(.bottom, 28)
+                        .frame(maxWidth: .infinity, minHeight: scrollGeo.size.height, alignment: .top)
                     }
-                    .coordinateSpace(name: "queueScroll")
-                    .scrollIndicators(.visible)
-                    .task(id: activeTab) {
-                        guard activeTab == .queue, !didPositionQueueScroll else { return }
-                        didPositionQueueScroll = true
-                        try? await Task.sleep(nanoseconds: 50_000_000)
+                    .padding(.bottom, 28)
+                }
+                .coordinateSpace(name: "queueScroll")
+                .scrollIndicators(.visible)
+                .allowsHitTesting(activeTab == .queue && progress > 0.95)
+                .accessibilityHidden(activeTab != .queue || progress <= 0.95)
+                .task {
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
                         proxy.scrollTo(queueContentAnchor, anchor: .top)
                     }
-                    .onChangeCompat(of: queueScrollRequest) { _, _ in
-                        withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
-                            proxy.scrollTo(queueContentAnchor, anchor: .top)
-                        }
-                    }
-                    .onPreferenceChange(QueueAnchorOffsetKey.self) { offset in
-                        queueAnchorOffset = offset
-                        let visible = offset > 24
-                        if visible != showQueueHistory {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            showQueueHistory = visible
-                        }
+                }
+                .onChangeCompat(of: queueScrollRequest) { _, _ in
+                    withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
+                        proxy.scrollTo(queueContentAnchor, anchor: .top)
                     }
                 }
-
-                scrubber
-                    .padding(.horizontal, 24)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
+                .onPreferenceChange(QueueAnchorOffsetKey.self) { offset in
+                    guard activeTab == .queue, progress > 0.999 else { return }
+                    queueAnchorOffset = offset
+                    let visible = offset > 24
+                    if visible != showQueueHistory {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showQueueHistory = visible
+                    }
+                }
+                .frame(width: scrollGeo.size.width, height: scrollGeo.size.height, alignment: .top)
+                .clipped()
             }
         }
     }
@@ -1186,10 +1595,10 @@ struct NowPlayingScreen: View {
         return true
     }
 
-    // compact artwork+title+artist at top, content in middle, full scrubber at bottom
+    // Compact artwork + title + artist above alternate content.
     private func altContent<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         VStack(spacing: 0) {
-            compactTrackHeader
+            compactTrackHeader(queueHeroDestination: false)
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
                 .padding(.bottom, 8)
@@ -1197,17 +1606,16 @@ struct NowPlayingScreen: View {
             content()
                 .frame(maxHeight: .infinity)
 
-            scrubber
-                .padding(.horizontal, 24)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
         }
     }
 
-    private var compactTrackHeader: some View {
+    private func compactTrackHeader(
+        queueHeroDestination: Bool,
+        showsArtwork: Bool = true
+    ) -> some View {
         HStack(spacing: 12) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) { activeTab = .nowPlaying }
+                selectPlayerTab(.nowPlaying)
             } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -1218,101 +1626,107 @@ struct NowPlayingScreen: View {
                             .aspectRatio(contentMode: .fill)
                     }
                 }
-                .frame(width: 48, height: 48)
+                .frame(
+                    width: queueHeroDestination ? 72 : 48,
+                    height: queueHeroDestination ? 72 : 48
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)
+            .opacity(showsArtwork ? 1 : 0)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(audio.currentSong?.title ?? " ")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                Button {
-                    guard let song = audio.currentSong, let artistId = song.artistId else { return }
-                    guard !isFetchingArtist else { return }
-                    isFetchingArtist = true
-                    Task {
-                        defer { isFetchingArtist = false }
-                        artistToShow = try? await appState.client?.artist(id: artistId)
-                    }
-                } label: {
-                    Text(audio.currentSong?.artist ?? " ")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(isFetchingArtist ? 0.35 : 0.65))
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(audio.currentSong?.title ?? " ")
+                        .font(.headline)
+                        .foregroundStyle(.white)
                         .lineLimit(1)
+                    Button {
+                        guard let song = audio.currentSong, let artistId = song.artistId else { return }
+                        guard !isFetchingArtist else { return }
+                        isFetchingArtist = true
+                        Task {
+                            defer { isFetchingArtist = false }
+                            artistToShow = try? await appState.client?.artist(id: artistId)
+                        }
+                    } label: {
+                        Text(audio.currentSong?.artist ?? " ")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(isFetchingArtist ? 0.35 : 0.65))
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(audio.currentSong?.artistId == nil)
                 }
-                .buttonStyle(.plain)
-                .disabled(audio.currentSong?.artistId == nil)
-            }
-            Spacer()
-            HStack(spacing: 4) {
-                Button {
-                    if let id = audio.currentSong?.id { audio.toggleStar(songID: id) }
-                } label: {
-                    Image(systemName: audio.currentSong.map { audio.isStarred($0.id) } == true
-                          ? Symbols.star : Symbols.starEmpty)
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(audio.currentSong.map { audio.isStarred($0.id) } == true
-                                         ? .yellow : .white.opacity(0.6))
-                        .frame(width: 36, height: 36)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .animation(.spring(response: 0.3, dampingFraction: 0.6),
-                           value: audio.currentSong.map { audio.isStarred($0.id) })
+                Spacer()
+                HStack(spacing: 4) {
+                    Button {
+                        if let id = audio.currentSong?.id { audio.toggleStar(songID: id) }
+                    } label: {
+                        Image(systemName: audio.currentSong.map { audio.isStarred($0.id) } == true
+                              ? Symbols.star : Symbols.starEmpty)
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(audio.currentSong.map { audio.isStarred($0.id) } == true
+                                             ? .yellow : .white.opacity(0.6))
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.6),
+                               value: audio.currentSong.map { audio.isStarred($0.id) })
 
-                Menu {
-                    Button {
-                        if let s = audio.currentSong { tasteStore.toggleLove(s.id) }
-                    } label: {
-                        Label(currentTaste == .loved ? L(.action_unlove) : L(.action_love),
-                              systemImage: currentTaste == .loved ? "heart.fill" : "heart")
-                    }
-                    Button {
-                        if let s = audio.currentSong { tasteStore.toggleDislike(s.id) }
-                    } label: {
-                        Label(currentTaste == .disliked ? L(.action_remove_dislike) : L(.action_dislike),
-                              systemImage: currentTaste == .disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                    }
-                    Divider()
-                    Button {
-                        if let s = audio.currentSong { audio.playNext(s) }
-                    } label: {
-                        Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
-                    }
-                    Button {
-                        if let s = audio.currentSong { audio.addToQueue(s) }
-                    } label: {
-                        Label(L(.action_play_last), systemImage: "text.line.last.and.arrowtriangle.forward")
-                    }
-                    Divider()
-                    Button { infoSheet = .info } label: { Label(L(.action_info), systemImage: Symbols.info) }
-                    Button { infoSheet = .credits } label: { Label(L(.action_view_credits), systemImage: "list.star") }
-                    Button { shareCurrentSong() } label: { Label(L(.action_share), systemImage: Symbols.share) }
-                    if audio.currentSong?.albumId != nil {
-                        Button { openCurrentAlbum() } label: {
-                            Label(L(.action_go_to_album), systemImage: "square.stack")
+                    Menu {
+                        Button {
+                            if let s = audio.currentSong { tasteStore.toggleLove(s.id) }
+                        } label: {
+                            Label(currentTaste == .loved ? L(.action_unlove) : L(.action_love),
+                                  systemImage: currentTaste == .loved ? "heart.fill" : "heart")
                         }
-                    }
-                    if audio.currentSong?.artistId != nil {
-                        Button { openCurrentArtist() } label: {
-                            Label(L(.action_go_to_artist), systemImage: "person.fill")
+                        Button {
+                            if let s = audio.currentSong { tasteStore.toggleDislike(s.id) }
+                        } label: {
+                            Label(currentTaste == .disliked ? L(.action_remove_dislike) : L(.action_dislike),
+                                  systemImage: currentTaste == .disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                         }
+                        Divider()
+                        Button {
+                            if let s = audio.currentSong { audio.playNext(s) }
+                        } label: {
+                            Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
+                        }
+                        Button {
+                            if let s = audio.currentSong { audio.addToQueue(s) }
+                        } label: {
+                            Label(L(.action_play_last), systemImage: "text.line.last.and.arrowtriangle.forward")
+                        }
+                        Divider()
+                        Button { infoSheet = .info } label: { Label(L(.action_info), systemImage: Symbols.info) }
+                        Button { infoSheet = .credits } label: { Label(L(.action_view_credits), systemImage: "list.star") }
+                        Button { shareCurrentSong() } label: { Label(L(.action_share), systemImage: Symbols.share) }
+                        if audio.currentSong?.albumId != nil {
+                            Button { openCurrentAlbum() } label: {
+                                Label(L(.action_go_to_album), systemImage: "square.stack")
+                            }
+                        }
+                        if audio.currentSong?.artistId != nil {
+                            Button { openCurrentArtist() } label: {
+                                Label(L(.action_go_to_artist), systemImage: "person.fill")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: Symbols.more)
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
                     }
-                } label: {
-                    Image(systemName: Symbols.more)
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .frame(width: 36, height: 36)
-                        .contentShape(Rectangle())
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
     }
 
-    // MARK: - Now playing content (artwork + track info + scrubber)
+    // MARK: - Now playing content (artwork + track info)
 
     private var nowPlayingContent: some View {
         VStack(spacing: 0) {
@@ -1325,9 +1739,6 @@ struct NowPlayingScreen: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 20)
 
-            scrubber
-                .padding(.horizontal, 24)
-                .padding(.bottom, 4)
         }
     }
 
@@ -1354,10 +1765,6 @@ struct NowPlayingScreen: View {
         .scaleEffect((artworkAnimation && !PerformanceMode.reduceAnimations) ? (audio.isPlaying ? 1.0 : 0.88) : 1.0)
         .animation(.spring(response: 0.5, dampingFraction: 0.75), value: audio.isPlaying)
         .id(audio.currentSong?.id)
-        .transition(.asymmetric(
-            insertion: .scale(scale: 0.92).combined(with: .opacity),
-            removal: .scale(scale: 0.92).combined(with: .opacity)
-        ))
     }
 
     @ViewBuilder
@@ -1614,9 +2021,7 @@ struct NowPlayingScreen: View {
             // Equal thirds: lyrics, AirPlay, queue.
             HStack(spacing: 0) {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        activeTab = activeTab == .lyrics ? .nowPlaying : .lyrics
-                    }
+                    selectPlayerTab(activeTab == .lyrics ? .nowPlaying : .lyrics)
                 } label: {
                     Image(systemName: activeTab == .lyrics ? Symbols.lyrics : Symbols.lyricsInactive)
                         .font(.system(size: 20, weight: .medium))
@@ -1647,9 +2052,7 @@ struct NowPlayingScreen: View {
                     if activeTab == .queue, showQueueHistory {
                         queueScrollRequest += 1
                     } else {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            activeTab = activeTab == .queue ? .nowPlaying : .queue
-                        }
+                        selectPlayerTab(activeTab == .queue ? .nowPlaying : .queue)
                     }
                 } label: {
                     Image(systemName: Symbols.queue)
@@ -1706,6 +2109,31 @@ struct NowPlayingScreen: View {
         }
         let s = Int(t)
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+/// Makes the closure receive SwiftUI's presentation value on every frame.
+/// Computing staged opacities directly from ordinary state would only animate
+/// their endpoints and lose the keyframe timing on iOS 16.
+private struct QueueTransitionAnimator<Content: View>: View, Animatable {
+    var progress: CGFloat
+    private let content: (CGFloat) -> Content
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    init(progress: CGFloat, @ViewBuilder content: @escaping (CGFloat) -> Content) {
+        self.progress = progress
+        self.content = content
+    }
+
+    var body: some View {
+        content(progress)
+            // `progress` already contains the interpolated presentation value.
+            // Prevent descendants from recursively animating each frame's value.
+            .transaction { $0.animation = nil }
     }
 }
 

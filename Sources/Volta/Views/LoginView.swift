@@ -8,12 +8,14 @@ struct LoginView: View {
 
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = LoginViewModel()
+    @StateObject private var discovery = LocalServerDiscovery()
     @StateObject private var localization = LocalizationManager.shared
     @State private var appeared = false
     @State private var showHTTPWarning = false
     @State private var pendingHTTPWarningAction: HTTPWarningAction = .credentials
     @State private var isPasswordVisible = false
     @State private var plexAuthPage: SafariPage?
+    @State private var isShowingAutoDiscovery = false
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable { case server, username, password }
@@ -25,7 +27,9 @@ struct LoginView: View {
             backdrop
 
             Group {
-                if let kind = vm.selectedBackend, let option = Self.option(for: kind) {
+                if isShowingAutoDiscovery {
+                    autoDiscoveryView
+                } else if let kind = vm.selectedBackend, let option = Self.option(for: kind) {
                     credentialsForm(
                         option: option,
                         server: $vm.serverAddress,
@@ -41,10 +45,10 @@ struct LoginView: View {
         }
         // Keep these outside the transitioning ScrollView so taps land reliably.
         .overlay(alignment: .topLeading) {
-            if vm.selectedBackend != nil { backButton }
+            if vm.selectedBackend != nil || isShowingAutoDiscovery { backButton }
         }
         .overlay(alignment: .topTrailing) {
-            if vm.selectedBackend == nil && !isEmbeddedInSheet { languageMenu }
+            if vm.selectedBackend == nil && !isShowingAutoDiscovery && !isEmbeddedInSheet { languageMenu }
         }
         .preferredColorScheme(Theme.colorScheme)
         .opacity(isEmbeddedInSheet || appeared ? 1 : 0)
@@ -82,6 +86,7 @@ struct LoginView: View {
             SafariView(url: page.url)
                 .ignoresSafeArea()
         }
+        .onDisappear { discovery.stop() }
     }
 
     // MARK: - Language picker (service-selection step)
@@ -122,7 +127,12 @@ struct LoginView: View {
         Button {
             withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
                 isPasswordVisible = false
-                vm.deselect()
+                if isShowingAutoDiscovery {
+                    discovery.stop()
+                    isShowingAutoDiscovery = false
+                } else {
+                    vm.deselect()
+                }
             }
         } label: {
             Image(systemName: Symbols.back)
@@ -148,6 +158,8 @@ struct LoginView: View {
                     ForEach(Self.backends) { option in
                         serviceCard(option)
                     }
+
+                    autoDiscoveryCard
                 }
 
                 Text(L(.login_add_servers_later))
@@ -165,6 +177,179 @@ struct LoginView: View {
             insertion: .opacity.combined(with: .move(edge: .leading)),
             removal: .opacity.combined(with: .move(edge: .leading))
         ))
+    }
+
+    private var autoDiscoveryCard: some View {
+        Button {
+            focusedField = nil
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+                isShowingAutoDiscovery = true
+            }
+            discovery.start()
+        } label: {
+            HStack(spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(Theme.accent.gradient)
+                        .frame(width: 50, height: 50)
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: 23, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .shadow(color: Theme.accent.opacity(0.35), radius: 8, y: 4)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Auto")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.primaryText)
+                    Text("Find compatible music servers on this network")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Theme.secondaryText)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: 8)
+                Image(systemName: Symbols.chevron)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.5))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .glassCard(cornerRadius: 18)
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Theme.accent.opacity(0.24), lineWidth: 0.8)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Automatic server discovery
+
+    private var autoDiscoveryView: some View {
+        ScrollView {
+            VStack(spacing: 22) {
+                VStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Theme.accent.opacity(0.16))
+                            .frame(width: 82, height: 82)
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 36, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .symbolPulseRepeatingCompat()
+                    }
+                    Text("Servers on Your Network")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.primaryText)
+                    Text(discovery.isScanning ? "Scanning for compatible services…" : "Select a server to continue")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+
+                if discovery.servers.isEmpty {
+                    VStack(spacing: 12) {
+                        if discovery.isScanning {
+                            ProgressView()
+                                .controlSize(.large)
+                                .tint(Theme.accent)
+                            Text("This usually takes a few seconds.")
+                        } else {
+                            Image(systemName: "wifi.exclamationmark")
+                                .font(.system(size: 30))
+                                .foregroundStyle(Theme.secondaryText)
+                            Text("No compatible servers found")
+                                .font(.headline)
+                                .foregroundStyle(Theme.primaryText)
+                            Text("Make sure this iPhone is on the same Wi-Fi network as your server, then scan again.")
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+                    .padding(.vertical, 28)
+                    .frame(maxWidth: .infinity)
+                    .glassCard(cornerRadius: 18)
+                } else {
+                    LazyVStack(spacing: 12) {
+                        ForEach(discovery.servers) { server in
+                            discoveredServerCard(server)
+                        }
+                    }
+                }
+
+                Button {
+                    discovery.start()
+                } label: {
+                    Label(discovery.isScanning ? "Scanning…" : "Scan Again", systemImage: "arrow.clockwise")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .glassButtonStyle(prominent: false)
+                .disabled(discovery.isScanning)
+                .opacity(discovery.isScanning ? 0.55 : 1)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, isEmbeddedInSheet ? 56 : 64)
+            .padding(.bottom, 40)
+            .frame(maxWidth: .infinity)
+        }
+        .transition(.asymmetric(
+            insertion: .opacity.combined(with: .move(edge: .trailing)),
+            removal: .opacity.combined(with: .move(edge: .trailing))
+        ))
+    }
+
+    private func discoveredServerCard(_ server: DiscoveredMusicServer) -> some View {
+        Button {
+            discovery.stop()
+            vm.select(server.backend)
+            vm.serverAddress = server.address
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+                isShowingAutoDiscovery = false
+            }
+            Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                focusedField = .username
+            }
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill((Self.option(for: server.backend)?.tint ?? Theme.accent).opacity(0.18))
+                        .frame(width: 46, height: 46)
+                    Image(systemName: Self.option(for: server.backend)?.icon ?? Symbols.server)
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(Self.option(for: server.backend)?.tint ?? Theme.accent)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(server.primaryDisplayName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.primaryText)
+                        .lineLimit(1)
+                    Text(server.secondaryDisplayName)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                    Text(server.address)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(Theme.secondaryText.opacity(0.8))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 6)
+                Image(systemName: Symbols.chevron)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.5))
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
+            .glassCard(cornerRadius: 16)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(server.primaryDisplayName), \(server.secondaryDisplayName), \(server.address)")
     }
 
     private var brandHeader: some View {
