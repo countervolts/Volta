@@ -4,6 +4,7 @@ import SwiftUI
 struct MiniPlayerAccessory: View {
     @EnvironmentObject private var appState: AppState
     var onExpand: () -> Void
+    var onArtworkFrameChange: (CGRect) -> Void = { _ in }
 
     private var audio: AudioPlayer { appState.audioPlayer }
 
@@ -80,5 +81,24 @@ struct MiniPlayerAccessory: View {
         }
         .frame(width: 32, height: 32)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .background {
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: MiniPlayerArtworkFrameKey.self,
+                    value: geo.frame(in: .global)
+                )
+            }
+        }
+        .onPreferenceChange(MiniPlayerArtworkFrameKey.self) { frame in
+            guard frame.width > 1, frame.height > 1 else { return }
+            onArtworkFrameChange(frame)
+        }
+    }
+}
+
+private struct MiniPlayerArtworkFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
     }
 }

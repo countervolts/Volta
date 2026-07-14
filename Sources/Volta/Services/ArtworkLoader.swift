@@ -3,15 +3,22 @@ import UIKit
 import ImageIO
 import AVFoundation
 
+enum LockScreenArtworkAspect: String, Sendable {
+    case square = "1x1"
+    case portrait = "3x4"
+}
+
 struct LiveArtworkAsset {
     let artworkID: String
     let animatedImage: UIImage
     let previewImage: UIImage
     let videoURL: URL?
+    let videoAspect: LockScreenArtworkAspect?
 }
 
 actor ArtworkLoader {
     static let shared = ArtworkLoader()
+    private static let lockScreenVideoVersion = 3
 
     private let memory = NSCache<NSString, UIImage>()
     // Optional decoded-frame cache; animated covers are large.
@@ -198,11 +205,16 @@ actor ArtworkLoader {
         return await liveArtwork(for: url, includeVideo: false)?.animatedImage
     }
 
-    func liveArtwork(for url: URL?, includeVideo: Bool = true) async -> LiveArtworkAsset? {
+    func liveArtwork(
+        for url: URL?,
+        includeVideo: Bool = true,
+        videoAspect: LockScreenArtworkAspect = .portrait
+    ) async -> LiveArtworkAsset? {
         guard LiveArtworkSettings.supportsAnimatedArtwork,
               LiveArtworkSettings.shouldShowAnimatedArtwork else { return nil }
         guard let url else { return nil }
-        let requestKey = "\(Self.cacheKey(for: url))-video\(includeVideo)"
+        let videoVariant = includeVideo ? videoAspect.rawValue : "none"
+        let requestKey = "\(Self.cacheKey(for: url))-video-\(videoVariant)"
         if let existing = liveInFlight[requestKey] {
             AppLogger.shared.log(
                 "Live artwork joined in-flight request; key=\(String(requestKey.prefix(12))); video=\(includeVideo)",
@@ -218,7 +230,11 @@ actor ArtworkLoader {
         )
         let task = Task<LiveArtworkAsset?, Never> { [weak self] in
             guard let self else { return nil }
-            return await self.loadLiveArtwork(for: url, includeVideo: includeVideo)
+            return await self.loadLiveArtwork(
+                for: url,
+                includeVideo: includeVideo,
+                videoAspect: videoAspect
+            )
         }
         liveInFlight[requestKey] = task
         let asset = await task.value
@@ -231,7 +247,11 @@ actor ArtworkLoader {
         return asset
     }
 
-    private func loadLiveArtwork(for url: URL, includeVideo: Bool) async -> LiveArtworkAsset? {
+    private func loadLiveArtwork(
+        for url: URL,
+        includeVideo: Bool,
+        videoAspect: LockScreenArtworkAspect
+    ) async -> LiveArtworkAsset? {
         let rawMode = LiveArtworkSettings.rawAnimatedArtworkEnabled
         applyMemoryPolicy(rawMode: rawMode)
         let key = Self.cacheKey(for: url)
@@ -255,7 +275,8 @@ actor ArtworkLoader {
                 category: .other
             )
             return await Self.makeAsset(from: box.sequence, variantKey: variantKey,
-                                        wantVideo: wantVideo, videoDirectory: liveDir)
+                                        wantVideo: wantVideo, videoAspect: videoAspect,
+                                        videoDirectory: liveDir)
         }
 
         // Durable cache first, then transient. Raw mode skips optimized frames.
@@ -303,7 +324,8 @@ actor ArtworkLoader {
             liveMemory.setObject(box, forKey: variantKey as NSString, cost: box.cost)
         }
         return await Self.makeAsset(from: sequence, variantKey: variantKey,
-                                    wantVideo: wantVideo, videoDirectory: liveDir)
+                                    wantVideo: wantVideo, videoAspect: videoAspect,
+                                    videoDirectory: liveDir)
     }
 
     private func applyMemoryPolicy(rawMode: Bool) {
@@ -346,16 +368,34 @@ actor ArtworkLoader {
         from sequence: AnimationSequence,
         variantKey: String,
         wantVideo: Bool,
+        videoAspect: LockScreenArtworkAspect,
         videoDirectory: URL
     ) async -> LiveArtworkAsset {
         let videoURL = wantVideo
-            ? await videoAsset(for: sequence, key: variantKey, directory: videoDirectory)
+            ? await videoAsset(
+                for: sequence,
+                key: variantKey,
+                aspect: videoAspect,
+                directory: videoDirectory
+            )
             : nil
+        let sourcePreview = sequence.frames.first ?? sequence.image
+        let lockScreenPreview = videoURL.map { _ in
+            aspectFillImage(
+                sourcePreview,
+                size: videoCanvasSize(for: sourcePreview, aspect: videoAspect)
+            )
+        }
         return LiveArtworkAsset(
-            artworkID: variantKey,
+            // Version the identifier so the system doesn't reuse an earlier
+            // rejected preview/video pair after an app update.
+            artworkID: videoURL == nil
+                ? variantKey
+                : "\(variantKey)-lock-v\(lockScreenVideoVersion)-\(videoAspect.rawValue)",
             animatedImage: sequence.image,
-            previewImage: sequence.frames.first ?? sequence.image,
-            videoURL: videoURL
+            previewImage: lockScreenPreview ?? sourcePreview,
+            videoURL: videoURL,
+            videoAspect: videoURL == nil ? nil : videoAspect
         )
     }
 
@@ -565,24 +605,25 @@ actor ArtworkLoader {
     private nonisolated static func videoAsset(
         for sequence: AnimationSequence,
         key: String,
+        aspect: LockScreenArtworkAspect,
         directory: URL
     ) async -> URL? {
-        // Lock-screen artwork wants a 3:4 HEVC video; H.264 is ignored.
-        let url = directory.appendingPathComponent(key + "-3x4f30").appendingPathExtension("mov")
+        let url = directory
+            .appendingPathComponent(key + "-\(aspect.rawValue)-v\(lockScreenVideoVersion)-f30")
+            .appendingPathExtension("mov")
         if FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.none], ofItemAtPath: url.path
+            )
             await logVideoSpecs(url, cached: true)
             return url
         }
 
         let frames = sequence.frames
         guard let first = frames.first else { return nil }
-        // Upscale to lock-screen canvas size.
-        let decoded = max(2, Int(max(first.size.width * first.scale, first.size.height * first.scale)))
-        let base = max(decoded, 1080)
-        // 3:4 portrait; HEVC wants even dimensions
-        let height = base % 2 == 0 ? base : base + 1
-        let width = max(2, { let w = Int((Double(height) * 3.0 / 4.0).rounded()); return w % 2 == 0 ? w : w + 1 }())
-        let size = CGSize(width: width, height: height)
+        let size = videoCanvasSize(for: first, aspect: aspect)
+        let width = Int(size.width)
+        let height = Int(size.height)
 
         try? FileManager.default.removeItem(at: url)
         guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mov) else { return nil }
@@ -717,8 +758,13 @@ actor ArtworkLoader {
             bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
         ) else { return nil }
         context.clear(CGRect(origin: .zero, size: size))
+        // CVPixelBuffer rows are consumed top-to-bottom, while this bitmap
+        // CGContext uses Core Graphics' bottom-left origin. UIKit drawing into
+        // it without this transform produces a vertically inverted movie.
+        context.translateBy(x: 0, y: size.height)
+        context.scaleBy(x: 1, y: -1)
         UIGraphicsPushContext(context)
-        // Aspect-fill the portrait canvas.
+        // Aspect-fill the same canvas used for the system preview image.
         let scale = max(size.width / image.size.width, size.height / image.size.height)
         let drawSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
         let rect = CGRect(
@@ -730,6 +776,43 @@ actor ArtworkLoader {
         image.draw(in: rect)
         UIGraphicsPopContext()
         return buffer
+    }
+
+    private nonisolated static func videoCanvasSize(
+        for image: UIImage,
+        aspect: LockScreenArtworkAspect
+    ) -> CGSize {
+        // Use an even-sized 1080p-or-better canvas for efficient video encoding.
+        let decoded = max(2, Int(max(image.size.width * image.scale, image.size.height * image.scale)))
+        let base = max(decoded, 1080)
+        let height = base.isMultiple(of: 2) ? base : base + 1
+        let rawWidth: Int
+        switch aspect {
+        case .square:
+            rawWidth = height
+        case .portrait:
+            rawWidth = Int((Double(height) * 3.0 / 4.0).rounded())
+        }
+        let width = max(2, rawWidth.isMultiple(of: 2) ? rawWidth : rawWidth + 1)
+        return CGSize(width: width, height: height)
+    }
+
+    private nonisolated static func aspectFillImage(_ image: UIImage, size: CGSize) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            let scale = max(size.width / image.size.width, size.height / image.size.height)
+            let drawSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            image.draw(in: CGRect(
+                x: (size.width - drawSize.width) / 2,
+                y: (size.height - drawSize.height) / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            ))
+        }
     }
 
     func clearCache() {

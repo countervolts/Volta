@@ -69,6 +69,7 @@ extension SettingsView {
                         if mode == "off", audio.transitionMode == .automix {
                             audio.setTransitionMode(.crossfade)
                         }
+                        audio.refreshGaplessPlaybackMode()
                     }
                 }
 

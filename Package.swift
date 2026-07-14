@@ -22,6 +22,14 @@ let package = Package(
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-platform_version",
+                    "-Xlinker", "ios",
+                    "-Xlinker", "16.0",
+                    "-Xlinker", "26.5",
+                ], .when(platforms: [.iOS])),
             ]
         ),
     ]

@@ -305,6 +305,8 @@ final class AudioPlayer: ObservableObject {
     private var transitionSuppressedUntil = Date.distantPast
     // Muted pre-buffer on the inactive player.
     private var primedSongID: String?
+    private var primingSongID: String?
+    private var transitionPrimeTask: Task<Void, Never>?
     // Scheduled downbeat transition that has not fired yet.
     private var transitionArmTask: Task<Void, Never>?
     private var transitionArmed = false
@@ -314,6 +316,12 @@ final class AudioPlayer: ObservableObject {
 
     private var gaplessNextItem: AVPlayerItem? = nil
     private var gaplessNextSongID: String? = nil
+    private var gaplessNextSource: PlaybackURLSource? = nil
+    private var gaplessNextQueueIndex: Int? = nil
+    private var gaplessPreloadTask: Task<Void, Never>?
+    private var gaplessReadinessLoggedItemID: ObjectIdentifier?
+    private var gaplessTransitionMeasurementTask: Task<Void, Never>?
+    private var currentAudioProcessingTask: Task<Void, Never>?
     private var currentPlayerItem: AVPlayerItem? = nil
     // A paused restored session keeps metadata only until playback resumes.
     private var deferredRestoredTime: TimeInterval? = nil
@@ -352,6 +360,8 @@ final class AudioPlayer: ObservableObject {
         // Disable AVQueuePlayer's boundary wait; blend warmup has its own gate.
         primaryPlayer.automaticallyWaitsToMinimizeStalling = false
         secondaryPlayer.automaticallyWaitsToMinimizeStalling = false
+        primaryPlayer.actionAtItemEnd = .advance
+        secondaryPlayer.actionAtItemEnd = .advance
         autoplayMode = UserDefaults.standard.bool(forKey: "autoplayEnabled") ? .random : .off
         if let raw = UserDefaults.standard.string(forKey: "playbackTransitionMode"),
            let mode = PlaybackTransitionMode(rawValue: raw) {
@@ -374,42 +384,69 @@ final class AudioPlayer: ObservableObject {
             Task { @MainActor in
                 guard let self, let item = self.player.currentItem else { return }
                 self.applyEqualizer(to: item)
+                self.invalidatePreloadedNext()
+                self.scheduleGaplessPreload()
+                self.clearPriming()
             }
         }
     }
 
-    // Pick the time-stretch algorithm once; switching later audibly re-primes.
-    private func makePlayerItem(url: URL) -> AVPlayerItem {
-        let asset = AVURLAsset(
-            url: url,
-            options: [AVURLAssetPreferPreciseDurationAndTimingKey: true]
-        )
+    private func makePlayerItem(
+        playback urlInfo: (url: URL, source: PlaybackURLSource),
+        requiresTimePitchProcessing: Bool = false
+    ) -> AVPlayerItem {
+        // Precise duration probing is useful and cheap for local files, but can
+        // delay a remote item's initial buffering while AVFoundation inspects it.
+        let options: [String: Any]? = urlInfo.source == .stream
+            ? nil
+            : [AVURLAssetPreferPreciseDurationAndTimingKey: true]
+        let asset = AVURLAsset(url: urlInfo.url, options: options)
         let item = AVPlayerItem(asset: asset)
-        item.audioTimePitchAlgorithm = .timeDomain
+        if urlInfo.source == .stream {
+            item.preferredForwardBufferDuration = 15
+        }
+        if requiresTimePitchProcessing {
+            item.audioTimePitchAlgorithm = .timeDomain
+        }
         return item
     }
 
-    private func applyEqualizer(to item: AVPlayerItem) {
+    private var audioProcessingRequired: Bool {
+        AudioVisualizerEngine.shared.isActive
+            || (EqualizerEngine.shared.isAnyEffectActive && !PerformanceMode.bypassAudioEffects)
+    }
+
+    // Loading an audio track is asynchronous. Callers preparing an upcoming
+    // item await this before queue insertion so audioMix is never swapped at
+    // the handoff boundary.
+    private func prepareAudioProcessing(for item: AVPlayerItem) async -> Bool {
         let visualizerActive = AudioVisualizerEngine.shared.isActive
         let effectsActive = EqualizerEngine.shared.isAnyEffectActive && !PerformanceMode.bypassAudioEffects
         guard visualizerActive || effectsActive else {
-            item.audioMix = nil; return
+            item.audioMix = nil
+            return true
         }
-        Task { @MainActor [weak self] in
-            guard self != nil else { return }
-            let currentVisualizerActive = AudioVisualizerEngine.shared.isActive
-            let currentEffectsActive = EqualizerEngine.shared.isAnyEffectActive && !PerformanceMode.bypassAudioEffects
-            guard currentVisualizerActive || currentEffectsActive else {
-                item.audioMix = nil
-                return
-            }
-            guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first,
-                  let tap = EqualizerEngine.shared.makeTap(bypassEffects: !currentEffectsActive) else { return }
-            let params = AVMutableAudioMixInputParameters(track: track)
-            params.audioTapProcessor = tap
-            let mix = AVMutableAudioMix()
-            mix.inputParameters = [params]
-            item.audioMix = mix
+        guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first,
+              !Task.isCancelled,
+              let tap = EqualizerEngine.shared.makeTap(bypassEffects: !effectsActive) else { return false }
+        let params = AVMutableAudioMixInputParameters(track: track)
+        params.audioTapProcessor = tap
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [params]
+        item.audioMix = mix
+        return true
+    }
+
+    private func applyEqualizer(to item: AVPlayerItem) {
+        currentAudioProcessingTask?.cancel()
+        guard audioProcessingRequired else {
+            item.audioMix = nil
+            currentAudioProcessingTask = nil
+            return
+        }
+        currentAudioProcessingTask = Task { @MainActor [weak self, weak item] in
+            guard let self, let item else { return }
+            _ = await self.prepareAudioProcessing(for: item)
         }
     }
 
@@ -422,20 +459,18 @@ final class AudioPlayer: ObservableObject {
             && !PerformanceMode.bypassAudioEffects
     }
 
-    // Attach incoming-track bass-swap and return its tap id.
-    private func attachBassSwap(to item: AVPlayerItem) -> UInt64 {
+    // Prepare incoming-track bass-swap before the item is inserted.
+    private func prepareBassSwap(for item: AVPlayerItem) async -> UInt64 {
         guard bassSwapAvailable else { return 0 }
         let id = AutoMixBassSwap.shared.reserveID()
-        Task { @MainActor [weak self] in
-            guard self != nil else { return }
-            guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first,
-                  let tap = AutoMixBassSwap.shared.makeTap(id: id) else { return }
-            let params = AVMutableAudioMixInputParameters(track: track)
-            params.audioTapProcessor = tap
-            let mix = AVMutableAudioMix()
-            mix.inputParameters = [params]
-            item.audioMix = mix
-        }
+        guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first,
+              !Task.isCancelled,
+              let tap = AutoMixBassSwap.shared.makeTap(id: id) else { return 0 }
+        let params = AVMutableAudioMixInputParameters(track: track)
+        params.audioTapProcessor = tap
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [params]
+        item.audioMix = mix
         return id
     }
 
@@ -646,12 +681,18 @@ final class AudioPlayer: ObservableObject {
         artworkLoadTask?.cancel(); artworkLoadTask = nil
         durationLoadTask?.cancel(); durationLoadTask = nil
         warmStreamsTask?.cancel(); warmStreamsTask = nil
+        gaplessPreloadTask?.cancel(); gaplessPreloadTask = nil
+        gaplessTransitionMeasurementTask?.cancel(); gaplessTransitionMeasurementTask = nil
+        currentAudioProcessingTask?.cancel(); currentAudioProcessingTask = nil
         primaryPlayer.replaceCurrentItem(with: nil)
         secondaryPlayer.replaceCurrentItem(with: nil)
         currentPlayerItem = nil
         deferredRestoredTime = nil
         gaplessNextItem = nil
         gaplessNextSongID = nil
+        gaplessNextSource = nil
+        gaplessNextQueueIndex = nil
+        gaplessReadinessLoggedItemID = nil
         isPlaying = false
         hasActivePlaybackSession = false
         currentSong = nil
@@ -709,9 +750,9 @@ final class AudioPlayer: ObservableObject {
         if let item = player.currentItem {
             applyEqualizer(to: item)
         }
-        if let gaplessNextItem {
-            applyEqualizer(to: gaplessNextItem)
-        }
+        invalidatePreloadedNext()
+        scheduleGaplessPreload()
+        clearPriming()
     }
 
     func visualizerSnapshot() -> AudioVisualizerSnapshot {
@@ -930,7 +971,7 @@ final class AudioPlayer: ObservableObject {
             return false
         }
 
-        let item = makePlayerItem(url: urlInfo.url)
+        let item = makePlayerItem(playback: urlInfo)
         applyEqualizer(to: item)
         player.removeAllItems()
         player.insert(item, after: nil)
@@ -1020,6 +1061,9 @@ final class AudioPlayer: ObservableObject {
                 currentIndex += 1
             }
         }
+        resetPreparedTransitionPlan()
+        scheduleGaplessPreload()
+        prepareTransitionPlanIfNeeded()
         warmUpcomingStreams()
     }
 
@@ -1046,6 +1090,7 @@ final class AudioPlayer: ObservableObject {
         guard !queue.isEmpty else { play(song: song); return }
         queue.append(song)
         VoltaNotificationCenter.shared.post(L(.notif_added_to_queue), tone: .queue)
+        scheduleGaplessPreload()
         warmUpcomingStreams()
     }
 
@@ -1070,6 +1115,7 @@ final class AudioPlayer: ObservableObject {
         guard !songs.isEmpty else { return }
         guard !queue.isEmpty else { playQueue(songs, startIndex: 0, source: "Selection"); return }
         queue.append(contentsOf: songs)
+        scheduleGaplessPreload()
         warmUpcomingStreams()
     }
 
@@ -1105,6 +1151,8 @@ final class AudioPlayer: ObservableObject {
             if currentIndex >= queue.count { currentIndex = max(0, queue.count - 1) }
             if !queue.isEmpty { playCurrent() }
         }
+        scheduleGaplessPreload()
+        prepareTransitionPlanIfNeeded()
         warmUpcomingStreams()
     }
 
@@ -1137,6 +1185,9 @@ final class AudioPlayer: ObservableObject {
         case .all: repeatMode = .one
         case .one: repeatMode = .off
         }
+        resetPreparedTransitionPlan()
+        scheduleGaplessPreload()
+        prepareTransitionPlanIfNeeded()
     }
 
     func cycleAutoplay() {
@@ -1164,9 +1215,17 @@ final class AudioPlayer: ObservableObject {
         resetPreparedTransitionPlan()
         if nextMode == .off {
             cancelTransitionPlayback()
+            scheduleGaplessPreload()
         } else {
+            invalidatePreloadedNext()
+            clearPriming()
             prepareTransitionPlanIfNeeded()
         }
+    }
+
+    func refreshGaplessPlaybackMode() {
+        invalidatePreloadedNext()
+        scheduleGaplessPreload()
     }
     func toggleCrossfade() { cycleTransitionMode() }
 
@@ -1193,15 +1252,22 @@ final class AudioPlayer: ObservableObject {
         cancelSleepTimer()
         sleepEndsAtTrackEnd = true
         sleepTimerActive = true
+        // With actionAtItemEnd=.advance, removing the prepared item is what
+        // guarantees the next track cannot begin before the end callback pauses.
+        invalidatePreloadedNext()
         AppLogger.shared.log("Sleep timer set for end of track", category: .playback)
     }
 
-    func cancelSleepTimer() {
+    func cancelSleepTimer(resumeGaplessPreload: Bool = true) {
+        let wasEndingAtTrackEnd = sleepEndsAtTrackEnd
         sleepTimer?.invalidate()
         sleepTimer = nil
         sleepTimerActive = false
         sleepEndsAtTrackEnd = false
         sleepRemaining = 0
+        if wasEndingAtTrackEnd, resumeGaplessPreload {
+            scheduleGaplessPreload()
+        }
     }
 
     private func fireSleep() {
@@ -1521,9 +1587,10 @@ final class AudioPlayer: ObservableObject {
     private func warmUpcomingStreams() {
         guard let client else { return }
         var cacheCandidates = Array(queue.dropFirst(currentIndex + 1).prefix(5))
-        if let first = cacheCandidates.first,
-           first.id == gaplessNextSongID {
-            cacheCandidates.removeFirst()
+        if cacheCandidates.isEmpty,
+           let nextIndex = automaticNextQueueIndex(),
+           queue.indices.contains(nextIndex) {
+            cacheCandidates = [queue[nextIndex]]
         }
         PlaybackCacheService.shared.prefetch(cacheCandidates, client: client)
 
@@ -1543,14 +1610,33 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
+    // The single source of truth for an automatic, natural-end transition.
+    // Manual skips intentionally retain their existing repeat semantics.
+    private func automaticNextQueueIndex() -> Int? {
+        guard !queue.isEmpty,
+              queue.indices.contains(currentIndex),
+              repeatMode != .one else { return nil }
+        let nextIndex = currentIndex + 1
+        if queue.indices.contains(nextIndex) {
+            return nextIndex
+        }
+        return repeatMode == .all ? 0 : nil
+    }
+
     private func invalidatePreloadedNext() {
+        gaplessPreloadTask?.cancel()
+        gaplessPreloadTask = nil
         if let gaplessNextItem {
-            if gaplessNextItem !== currentPlayerItem {
+            if gaplessNextItem !== currentPlayerItem,
+               gaplessNextItem !== player.currentItem {
                 player.remove(gaplessNextItem)
             }
         }
         gaplessNextItem = nil
         gaplessNextSongID = nil
+        gaplessNextSource = nil
+        gaplessNextQueueIndex = nil
+        gaplessReadinessLoggedItemID = nil
     }
 
     private func startPlaying(song: Song) {
@@ -1564,7 +1650,6 @@ final class AudioPlayer: ObservableObject {
             return
         }
         recordCurrentSongInHistory(unless: song.id)
-        let url = urlInfo.url
         if urlInfo.source.isUserDownload { DownloadService.shared.markPlayed(song.id) }
         AppLogger.shared.log(
             "Track starting; title='\(song.title)'; artist='\(song.artist ?? "?")'; source=\(urlInfo.source.rawValue); index=\(currentIndex); queueCount=\(queue.count)",
@@ -1572,7 +1657,7 @@ final class AudioPlayer: ObservableObject {
         )
 
         invalidatePreloadedNext()
-        let item = makePlayerItem(url: url)
+        let item = makePlayerItem(playback: urlInfo)
 
         applyEqualizer(to: item)
         player.pause()
@@ -1612,19 +1697,27 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func scheduleGaplessPreload() {
-        if let gaplessNextItem, gaplessNextItem !== currentPlayerItem {
-            player.remove(gaplessNextItem)
-        }
-        gaplessNextItem = nil
-        gaplessNextSongID = nil
         guard transitionMode == .off,
               UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
-              repeatMode != .one,
+              !sleepEndsAtTrackEnd,
               let currentItem = player.currentItem,
-              currentItem === currentPlayerItem else { return }
-        let nextIndex = currentIndex + 1
-        guard nextIndex < queue.count else { return }
+              currentItem === currentPlayerItem,
+              let nextIndex = automaticNextQueueIndex() else {
+            invalidatePreloadedNext()
+            return
+        }
         let nextSong = queue[nextIndex]
+
+        // Keep an already-buffering item, even if its cache download completes
+        // later. Replacing it near the boundary would throw away useful data.
+        if gaplessNextSongID == nextSong.id,
+           let gaplessNextItem,
+           player.items().contains(where: { $0 === gaplessNextItem }) {
+            gaplessNextQueueIndex = nextIndex
+            return
+        }
+
+        invalidatePreloadedNext()
         guard let urlInfo = playbackURL(for: nextSong) else {
             AppLogger.shared.log(
                 "Gapless pre-buffer skipped: no stream URL for '\(nextSong.title)'",
@@ -1633,34 +1726,90 @@ final class AudioPlayer: ObservableObject {
             )
             return
         }
-        let url = urlInfo.url
-        let nextItem = makePlayerItem(url: url)
-        applyEqualizer(to: nextItem)
+        let nextItem = makePlayerItem(playback: urlInfo)
+        gaplessNextSongID = nextSong.id
+        gaplessNextSource = urlInfo.source
+        gaplessNextQueueIndex = nextIndex
+
+        if audioProcessingRequired {
+            gaplessPreloadTask = Task { @MainActor [weak self, weak currentItem, weak nextItem] in
+                guard let self, let currentItem, let nextItem else { return }
+                let processingReady = await self.prepareAudioProcessing(for: nextItem)
+                guard !Task.isCancelled, processingReady else {
+                    if !Task.isCancelled {
+                        AppLogger.shared.log(
+                            "Gapless pre-buffer skipped: audio processing was not ready for '\(nextSong.title)'",
+                            category: .playback,
+                            level: .warning
+                        )
+                        self.invalidatePreloadedNext()
+                    }
+                    return
+                }
+                self.insertPreparedGaplessItem(
+                    nextItem,
+                    after: currentItem,
+                    song: nextSong,
+                    index: nextIndex,
+                    source: urlInfo.source
+                )
+            }
+        } else {
+            insertPreparedGaplessItem(
+                nextItem,
+                after: currentItem,
+                song: nextSong,
+                index: nextIndex,
+                source: urlInfo.source
+            )
+        }
+    }
+
+    private func insertPreparedGaplessItem(
+        _ nextItem: AVPlayerItem,
+        after currentItem: AVPlayerItem,
+        song: Song,
+        index: Int,
+        source: PlaybackURLSource
+    ) {
+        gaplessPreloadTask = nil
+        guard transitionMode == .off,
+              UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
+              !sleepEndsAtTrackEnd,
+              player.currentItem === currentItem,
+              currentPlayerItem === currentItem,
+              automaticNextQueueIndex() == index,
+              queue.indices.contains(index),
+              queue[index].id == song.id,
+              gaplessNextSongID == song.id,
+              gaplessNextQueueIndex == index else { return }
         guard player.canInsert(nextItem, after: currentItem) else {
             AppLogger.shared.log(
-                "Gapless pre-buffer skipped: AVQueuePlayer rejected next item for '\(nextSong.title)'",
+                "Gapless pre-buffer skipped: AVQueuePlayer rejected next item for '\(song.title)'",
                 category: .playback,
                 level: .warning
             )
+            invalidatePreloadedNext()
             return
         }
         gaplessNextItem = nextItem
-        gaplessNextSongID = nextSong.id
         player.insert(nextItem, after: currentItem)
         AppLogger.shared.log(
-            "Gapless pre-buffer queued; title='\(nextSong.title)'; index=\(nextIndex)",
+            "Gapless next item inserted; title='\(song.title)'; index=\(index); source=\(source.rawValue); effects=\(nextItem.audioMix == nil ? "off" : "prepared"); preferredBuffer=\(String(format: "%.0f", nextItem.preferredForwardBufferDuration))s",
             category: .playback
         )
     }
 
-    private func completeQueuedGaplessHandoff(finishedItem: AVPlayerItem) -> Bool {
+    private func completeQueuedGaplessHandoff(
+        finishedItem: AVPlayerItem,
+        outgoingEndedAt: TimeInterval
+    ) async -> Bool {
         guard transitionMode == .off,
               UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
-              repeatMode == .off,
-              currentIndex + 1 < queue.count,
-              let queuedItem = gaplessNextItem else { return false }
+              let nextIndex = automaticNextQueueIndex(),
+              let queuedItem = gaplessNextItem,
+              gaplessNextQueueIndex == nextIndex else { return false }
 
-        let nextIndex = currentIndex + 1
         let song = queue[nextIndex]
         guard gaplessNextSongID == song.id else {
             AppLogger.shared.log(
@@ -1672,7 +1821,27 @@ final class AudioPlayer: ObservableObject {
             return false
         }
 
-        if player.currentItem === finishedItem {
+        var advancedAutomatically = player.currentItem === queuedItem
+        if !advancedAutomatically, player.currentItem === finishedItem {
+            // The end notification and AVQueuePlayer's internal queue mutation
+            // can arrive in the same run-loop turn. Give .advance a brief chance
+            // to finish before declaring it failed.
+            await Task.yield()
+            if player.currentItem === finishedItem {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            guard currentPlayerItem === finishedItem else { return true }
+            advancedAutomatically = player.currentItem === queuedItem
+        }
+
+        if !advancedAutomatically,
+           player.currentItem === finishedItem,
+           player.items().contains(where: { $0 === queuedItem }) {
+            AppLogger.shared.log(
+                "Gapless automatic advance failed; using AVQueuePlayer fallback for '\(song.title)'",
+                category: .playback,
+                level: .warning
+            )
             player.advanceToNextItem()
         }
 
@@ -1686,19 +1855,28 @@ final class AudioPlayer: ObservableObject {
             return false
         }
 
+        AppLogger.shared.log(
+            "Gapless handoff: AVQueuePlayer \(advancedAutomatically ? "advanced automatically" : "required fallback"); title='\(song.title)'",
+            category: .playback
+        )
         recordCurrentSongInHistory(unless: song.id)
         currentIndex = nextIndex
         currentPlayerItem = queuedItem
         gaplessNextItem = nil
         gaplessNextSongID = nil
+        gaplessNextSource = nil
+        gaplessNextQueueIndex = nil
+        gaplessReadinessLoggedItemID = nil
         if DownloadService.shared.localURL(for: song) != nil {
             DownloadService.shared.markPlayed(song.id)
         }
         applyReplayGain(for: song)
         hasActivePlaybackSession = true
         currentSong = song
-        currentSongStartedAt = Date()
-        currentTime = 0
+        let incomingTime = queuedItem.currentTime().seconds
+        let startedOffset = incomingTime.isFinite ? max(0, incomingTime) : 0
+        currentSongStartedAt = Date(timeIntervalSinceNow: -startedOffset)
+        currentTime = startedOffset
         duration = 0
         currentArtwork = nil
         currentAnimatedArtwork = nil
@@ -1723,6 +1901,7 @@ final class AudioPlayer: ObservableObject {
             try? AVAudioSession.sharedInstance().setActive(true)
             player.playImmediately(atRate: 1)
         }
+        measureGaplessStartDelay(for: queuedItem, outgoingEndedAt: outgoingEndedAt)
         scheduleGaplessPreload()
         return true
     }
@@ -1748,7 +1927,10 @@ final class AudioPlayer: ObservableObject {
         let key = "\(transitionMode.rawValue):\(current.id)->\(next.id)"
         guard transitionPlanKey != key else { return }
 
-        if primedSongID != nil, primedSongID != next.id { clearPriming() }
+        if (primedSongID != nil && primedSongID != next.id)
+            || (primingSongID != nil && primingSongID != next.id) {
+            clearPriming()
+        }
         resetPreparedTransitionPlan()
         transitionPlanKey = key
         let fallback = PlaybackTransitionPlan.fallback(mode: transitionMode, current: current, next: next)
@@ -1760,6 +1942,9 @@ final class AudioPlayer: ObservableObject {
             let plan = await self.makeAutoMixPlan(current: current, next: next, fallback: fallback)
             guard !Task.isCancelled, self.transitionPlanKey == key else { return }
             self.preparedTransitionPlan = plan
+            if abs(plan.oldRate - 1) >= 0.01 {
+                self.currentPlayerItem?.audioTimePitchAlgorithm = .timeDomain
+            }
             AppLogger.shared.log(
                 "AutoMix plan: \(current.title) > \(next.title), \(String(format: "%.1f", plan.duration))s, lead \(String(format: "%.1f", plan.startLead))s, seek \(String(format: "%.1f", plan.nextStart))s [\(plan.reason)]",
                 category: .playback
@@ -2048,12 +2233,64 @@ final class AudioPlayer: ObservableObject {
     // Muted pre-buffer on the inactive player.
     private func primeNext(_ song: Song, plan: PlaybackTransitionPlan) {
         guard primedSongID != song.id,
+              primingSongID != song.id,
               !isTransitioning,
               let urlInfo = playbackURL(for: song) else { return }
         let p = inactivePlayer
-        let item = makePlayerItem(url: urlInfo.url)
-        applyEqualizer(to: item)
-        primedBassID = attachBassSwap(to: item)
+        let item = makePlayerItem(
+            playback: urlInfo,
+            requiresTimePitchProcessing: abs(plan.nextRate - 1) >= 0.01
+        )
+        let needsProcessing = audioProcessingRequired
+        let needsBassSwap = bassSwapAvailable
+        if needsProcessing || needsBassSwap {
+            primingSongID = song.id
+            transitionPrimeTask = Task { @MainActor [weak self, weak p, weak item] in
+                guard let self, let p, let item else { return }
+                let processingReady = needsProcessing
+                    ? await self.prepareAudioProcessing(for: item)
+                    : true
+                let bassID = needsBassSwap
+                    ? await self.prepareBassSwap(for: item)
+                    : 0
+                guard !Task.isCancelled, processingReady else {
+                    if !Task.isCancelled {
+                        self.transitionPrimeTask = nil
+                        if self.primingSongID == song.id { self.primingSongID = nil }
+                        AppLogger.shared.log(
+                            "Transition pre-buffer skipped: audio processing was not ready for '\(song.title)'",
+                            category: .playback,
+                            level: .warning
+                        )
+                    }
+                    return
+                }
+                self.installPrimedItem(item, on: p, song: song, plan: plan, bassID: bassID)
+            }
+            return
+        }
+        installPrimedItem(item, on: p, song: song, plan: plan, bassID: 0)
+    }
+
+    private func installPrimedItem(
+        _ item: AVPlayerItem,
+        on p: AVQueuePlayer,
+        song: Song,
+        plan: PlaybackTransitionPlan,
+        bassID: UInt64
+    ) {
+        transitionPrimeTask = nil
+        guard !isTransitioning,
+              transitionMode != .off,
+              inactivePlayer === p,
+              currentIndex + 1 < queue.count,
+              queue[currentIndex + 1].id == song.id,
+              primingSongID == nil || primingSongID == song.id else {
+            if primingSongID == song.id { primingSongID = nil }
+            return
+        }
+        primingSongID = nil
+        primedBassID = bassID
         p.pause()
         p.removeAllItems()
         p.insert(item, after: nil)
@@ -2064,11 +2301,18 @@ final class AudioPlayer: ObservableObject {
         }
         p.play()   // muted warmup
         primedSongID = song.id
-        AppLogger.shared.log("Priming next track: '\(song.title)'", category: .playback)
+        AppLogger.shared.log(
+            "Priming next track: '\(song.title)'; effects=\(item.audioMix == nil ? "off" : "prepared")",
+            category: .playback
+        )
+        checkScheduledTransition()
     }
 
     private func clearPriming() {
-        guard primedSongID != nil else { return }
+        guard primedSongID != nil || primingSongID != nil else { return }
+        transitionPrimeTask?.cancel()
+        transitionPrimeTask = nil
+        primingSongID = nil
         primedSongID = nil
         if primedBassID != 0 { AutoMixBassSwap.shared.deactivate(primedBassID); primedBassID = 0 }
         if !isTransitioning {
@@ -2083,50 +2327,38 @@ final class AudioPlayer: ObservableObject {
               currentIndex + 1 < queue.count,
               let urlInfo = playbackURL(for: nextSong) else { return }
 
+        if primedSongID != nextSong.id {
+            primeNext(nextSong, plan: plan)
+        }
+        guard primedSongID == nextSong.id else { return }
+
         let oldPlayer = activePlayer
         let newPlayer = inactivePlayer
         // Non-unity rate means tempo bend; do not switch pitch algorithms mid-play.
         let tempoActive = abs(plan.oldRate - 1) >= 0.01 || abs(plan.nextRate - 1) >= 0.01
+        if abs(plan.oldRate - 1) >= 0.01 {
+            oldPlayer.currentItem?.audioTimePitchAlgorithm = .timeDomain
+        }
 
-        // Reuse a primed player when possible; otherwise build the item now.
-        let nextItem: AVPlayerItem
+        guard let nextItem = newPlayer.currentItem else { return }
         var incomingStart = plan.nextStart
         // Pre-compensate the tiny drift before the tempo bend engages.
         let lockShift = beatLockSeekShift(plan: plan)
         let inGrid: AutoMixBeatGrid? = (plan.beatAligned && plan.inBeatPeriod > 0.2)
             ? AutoMixBeatGrid(bpm: 60.0 / plan.inBeatPeriod, phase: plan.inBeatPhase, firstStrongBeat: 0)
             : nil
-        if primedSongID == nextSong.id, let primed = newPlayer.currentItem {
-            nextItem = primed
-            newPlayer.volume = 0
-            currentBassID = primedBassID
-            primedBassID = 0
-            // Nudge the muted primed track onto its next downbeat.
-            if let inGrid {
-                let pIn = newPlayer.currentTime().seconds
-                if pIn.isFinite {
-                    let db = max(0, inGrid.downbeat(atOrAfter: pIn + 0.02, beatsPerBar: plan.beatsPerBar) + lockShift)
-                    let tol = CMTime(seconds: 0.012, preferredTimescale: 600)
-                    newPlayer.seek(to: CMTime(seconds: db, preferredTimescale: 600), toleranceBefore: tol, toleranceAfter: tol)
-                    incomingStart = db
-                }
+        newPlayer.volume = 0
+        currentBassID = primedBassID
+        primedBassID = 0
+        // Nudge the muted primed track onto its next downbeat.
+        if let inGrid {
+            let pIn = newPlayer.currentTime().seconds
+            if pIn.isFinite {
+                let db = max(0, inGrid.downbeat(atOrAfter: pIn + 0.02, beatsPerBar: plan.beatsPerBar) + lockShift)
+                let tol = CMTime(seconds: 0.012, preferredTimescale: 600)
+                newPlayer.seek(to: CMTime(seconds: db, preferredTimescale: 600), toleranceBefore: tol, toleranceAfter: tol)
+                incomingStart = db
             }
-        } else {
-            nextItem = makePlayerItem(url: urlInfo.url)
-            applyEqualizer(to: nextItem)
-            currentBassID = attachBassSwap(to: nextItem)
-            newPlayer.pause()
-            newPlayer.removeAllItems()
-            newPlayer.insert(nextItem, after: nil)
-            newPlayer.volume = 0
-            if inGrid != nil { incomingStart = max(0, incomingStart + lockShift) }
-            if incomingStart > 0 {
-                // Small tolerance keeps this seek fast.
-                let seekTime = CMTime(seconds: incomingStart, preferredTimescale: 600)
-                let tol = CMTime(seconds: 0.05, preferredTimescale: 600)
-                newPlayer.seek(to: seekTime, toleranceBefore: tol, toleranceAfter: tol)
-            }
-            newPlayer.play()
         }
         primedSongID = nil
         AutoMixBassSwap.shared.activate(currentBassID)
@@ -2241,7 +2473,6 @@ final class AudioPlayer: ObservableObject {
         }
         guard let client,
               let streamURL = client.streamURL(id: song.id) else { return nil }
-        PlaybackCacheService.shared.cancelPrefetch(for: song, client: client)
         return (streamURL, .stream)
     }
 
@@ -2255,6 +2486,9 @@ final class AudioPlayer: ObservableObject {
         isMixing = false
         if currentBassID != 0 { AutoMixBassSwap.shared.deactivate(currentBassID); currentBassID = 0 }
         if primedBassID != 0 { AutoMixBassSwap.shared.deactivate(primedBassID); primedBassID = 0 }
+        transitionPrimeTask?.cancel()
+        transitionPrimeTask = nil
+        primingSongID = nil
         primedSongID = nil
         let shouldKeepPaused = keepPaused || !isPlaying
         primaryPlayer.rate = shouldKeepPaused ? 0 : 1
@@ -2308,7 +2542,19 @@ final class AudioPlayer: ObservableObject {
         // Do not make the visible animation wait for lock-screen video encoding.
         guard !Task.isCancelled,
               live != nil, let liveURL, LiveArtworkSettings.prepareVideoAsset else { return }
-        let videoReady = await ArtworkLoader.shared.liveArtwork(for: liveURL, includeVideo: true)
+        guard let videoAspect = await waitForSupportedLockScreenArtworkAspect() else {
+            AppLogger.shared.log(
+                "Lock-screen artwork preparation skipped: no supported animated-artwork key",
+                category: .playback,
+                level: .warning
+            )
+            return
+        }
+        let videoReady = await ArtworkLoader.shared.liveArtwork(
+            for: liveURL,
+            includeVideo: true,
+            videoAspect: videoAspect
+        )
         guard !Task.isCancelled, currentSong?.id == song.id else { return }
         if let videoReady {
             currentLiveArtwork = videoReady
@@ -2350,6 +2596,27 @@ final class AudioPlayer: ObservableObject {
         return (live, live == nil ? nil : albumURL)
     }
 
+    private func supportedLockScreenArtworkAspect() -> LockScreenArtworkAspect? {
+        guard #available(iOS 26.0, *) else { return nil }
+        let supported = MPNowPlayingInfoCenter.supportedAnimatedArtworkKeys
+        if supported.contains(MPNowPlayingInfoProperty3x4AnimatedArtwork) { return .portrait }
+        if supported.contains(MPNowPlayingInfoProperty1x1AnimatedArtwork) { return .square }
+        // Developer raw mode intentionally bypasses platform capability checks.
+        return LiveArtworkSettings.rawAnimatedArtworkEnabled ? .portrait : nil
+    }
+
+    private func waitForSupportedLockScreenArtworkAspect() async -> LockScreenArtworkAspect? {
+        if let aspect = supportedLockScreenArtworkAspect() { return aspect }
+        // The collection can be empty briefly after a cold launch. Keep visible
+        // artwork responsive while waiting to prepare the system-only video.
+        for delayNanoseconds in [250_000_000, 500_000_000, 1_000_000_000, 2_000_000_000] as [UInt64] {
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
+            guard !Task.isCancelled else { return nil }
+            if let aspect = supportedLockScreenArtworkAspect() { return aspect }
+        }
+        return nil
+    }
+
     // Animated-artwork keys can appear a beat after song start; retry attachment.
     private func scheduleAnimatedArtworkReattach(for song: Song) {
         guard #available(iOS 26.0, *) else { return }
@@ -2389,6 +2656,57 @@ final class AudioPlayer: ObservableObject {
         )
     }
 
+    private func logGaplessReadinessIfNeeded(force: Bool = false) {
+        guard let item = gaplessNextItem,
+              let songID = gaplessNextSongID else { return }
+        let itemID = ObjectIdentifier(item)
+        guard gaplessReadinessLoggedItemID != itemID else { return }
+        if !force {
+            let remaining = liveDuration() - liveTime()
+            guard remaining.isFinite, remaining > 0, remaining <= 2 else { return }
+        }
+
+        gaplessReadinessLoggedItemID = itemID
+        let bufferedEnd = item.loadedTimeRanges
+            .compactMap { $0.timeRangeValue.end.seconds }
+            .filter(\.isFinite)
+            .max() ?? 0
+        let itemTime = item.currentTime().seconds
+        let bufferedAhead = max(0, bufferedEnd - (itemTime.isFinite ? itemTime : 0))
+        AppLogger.shared.log(
+            "Gapless readiness; songID=\(songID); source=\(gaplessNextSource?.rawValue ?? "unknown"); status=\(item.status.rawValue); likelyToKeepUp=\(item.isPlaybackLikelyToKeepUp); bufferFull=\(item.isPlaybackBufferFull); bufferEmpty=\(item.isPlaybackBufferEmpty); bufferedAhead=\(String(format: "%.2f", bufferedAhead))s",
+            category: .playback
+        )
+    }
+
+    private func measureGaplessStartDelay(for item: AVPlayerItem, outgoingEndedAt: TimeInterval) {
+        gaplessTransitionMeasurementTask?.cancel()
+        gaplessTransitionMeasurementTask = Task { @MainActor [weak self, weak item] in
+            guard let self, let item else { return }
+            for _ in 0..<80 {
+                guard !Task.isCancelled, self.currentPlayerItem === item else { return }
+                let itemTime = item.currentTime().seconds
+                if (itemTime.isFinite && itemTime > 0) || self.player.timeControlStatus == .playing {
+                    let delayMS = max(0, ProcessInfo.processInfo.systemUptime - outgoingEndedAt) * 1_000
+                    AppLogger.shared.log(
+                        "Gapless incoming audio observed; delayMs=\(String(format: "%.1f", delayMS)); itemTime=\(String(format: "%.3f", itemTime.isFinite ? itemTime : 0))s",
+                        category: .playback
+                    )
+                    self.gaplessTransitionMeasurementTask = nil
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 25_000_000)
+            }
+            guard !Task.isCancelled, self.currentPlayerItem === item else { return }
+            AppLogger.shared.log(
+                "Gapless incoming audio was not observed within 2s; status=\(item.status.rawValue); waiting=\(String(describing: self.player.reasonForWaitingToPlay))",
+                category: .playback,
+                level: .warning
+            )
+            self.gaplessTransitionMeasurementTask = nil
+        }
+    }
+
     private func addTimeObservers() {
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         primaryTimeObserverToken = primaryPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
@@ -2397,6 +2715,7 @@ final class AudioPlayer: ObservableObject {
                 guard self.activePlayer === self.primaryPlayer else { return }
                 self.currentTime = self.player.currentTime().seconds
                 self.checkLogPlay()
+                self.logGaplessReadinessIfNeeded()
                 self.checkScheduledTransition()
                 self.autosaveLastPlaybackSessionIfNeeded()
             }
@@ -2407,6 +2726,7 @@ final class AudioPlayer: ObservableObject {
                 guard self.activePlayer === self.secondaryPlayer else { return }
                 self.currentTime = self.player.currentTime().seconds
                 self.checkLogPlay()
+                self.logGaplessReadinessIfNeeded()
                 self.checkScheduledTransition()
                 self.autosaveLastPlaybackSessionIfNeeded()
             }
@@ -2451,14 +2771,24 @@ final class AudioPlayer: ObservableObject {
                 guard finishedItem === self.currentPlayerItem else {
                     return
                 }
+                let outgoingEndedAt = ProcessInfo.processInfo.systemUptime
+                self.logGaplessReadinessIfNeeded(force: true)
                 if self.sleepEndsAtTrackEnd {
                     self.player.pause()
                     self.isPlaying = false
-                    self.cancelSleepTimer()
+                    self.cancelSleepTimer(resumeGaplessPreload: false)
                     self.updateNowPlaying()
                     return
                 }
-                if self.completeQueuedGaplessHandoff(finishedItem: finishedItem) {
+                if await self.completeQueuedGaplessHandoff(
+                    finishedItem: finishedItem,
+                    outgoingEndedAt: outgoingEndedAt
+                ) {
+                    return
+                }
+                guard self.currentPlayerItem === finishedItem else { return }
+                if self.repeatMode == .one {
+                    self.playCurrent()
                     return
                 }
                 self.skipNext()
@@ -2616,26 +2946,28 @@ final class AudioPlayer: ObservableObject {
 
     @available(iOS 26.0, *)
     private func addSupportedAnimatedArtwork(to info: inout [String: Any], live: LiveArtworkAsset?) {
-        // iOS 26/27 expose the PORTRAIT 3x4 lock-screen slot (square 1x1 isn't
-        // offered); prefer it, fall back to 1x1 only if that's all the OS lists.
         let candidateKeys = [
             MPNowPlayingInfoProperty3x4AnimatedArtwork,
             MPNowPlayingInfoProperty1x1AnimatedArtwork
         ]
         for k in candidateKeys { info.removeValue(forKey: k) }
         let supportedKeys = MPNowPlayingInfoCenter.supportedAnimatedArtworkKeys
-        let key = candidateKeys.first { supportedKeys.contains($0) }
-            ?? (LiveArtworkSettings.rawAnimatedArtworkEnabled ? MPNowPlayingInfoProperty3x4AnimatedArtwork : nil)
-        guard let live, let videoURL = live.videoURL else {
-            AppLogger.shared.log("Lock-screen animated artwork: not attached (live=\(live != nil), video=\(live?.videoURL != nil), supportedKeys=\(supportedKeys))", category: .playback)
+        guard let live, let videoURL = live.videoURL, let videoAspect = live.videoAspect else {
+            AppLogger.shared.log("Lock-screen animated artwork: not attached (live=\(live != nil), video=\(live?.videoURL != nil), aspect=\(String(describing: live?.videoAspect)), supportedKeys=\(supportedKeys))", category: .playback)
             return
         }
-        guard let key else {
-            AppLogger.shared.log("Lock-screen animated artwork: OS reports no usable key — animated now-playing won't show (supportedKeys=\(supportedKeys))", category: .playback, level: .warning)
+        let key = videoAspect == .portrait
+            ? MPNowPlayingInfoProperty3x4AnimatedArtwork
+            : MPNowPlayingInfoProperty1x1AnimatedArtwork
+        guard supportedKeys.contains(key) || LiveArtworkSettings.rawAnimatedArtworkEnabled else {
+            AppLogger.shared.log("Lock-screen animated artwork: prepared \(videoAspect.rawValue), but OS does not support its key (supportedKeys=\(supportedKeys))", category: .playback, level: .warning)
             return
         }
-        AppLogger.shared.log("Lock-screen animated artwork attached; key=\(key); file=\(videoURL.lastPathComponent)", category: .playback)
         let preview = live.previewImage
+        AppLogger.shared.log(
+            "Lock-screen animated artwork attached; key=\(key); preview=\(Int(preview.size.width))x\(Int(preview.size.height)); file=\(videoURL.lastPathComponent)",
+            category: .playback
+        )
         // If the system never requests the video, it is gating animation, not format.
         let animated = MPMediaItemAnimatedArtwork(
             artworkID: live.artworkID,

@@ -27,9 +27,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.2.1</string>
+	<string>1.3.0</string>
 	<key>CFBundleVersion</key>
-	<string>8</string>
+	<string>9</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>INIntentsSupported</key>
@@ -77,6 +77,19 @@
 	<string>Volta uses motion for device detection.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Volta scans nearby AirPods broadcasts to identify the active output model.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Volta scans your local network to find compatible music servers.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_navidrome._tcp</string>
+		<string>_subsonic._tcp</string>
+		<string>_airsonic._tcp</string>
+		<string>_jellyfin._tcp</string>
+		<string>_emby._tcp</string>
+		<string>_plexmediasvr._tcp</string>
+		<string>_http._tcp</string>
+		<string>_https._tcp</string>
+	</array>
 	<key>NSSiriUsageDescription</key>
 	<string>Volta uses Siri to play and control music from your connected server.</string>
 	<key>UISupportedInterfaceOrientations~ipad</key>
