@@ -738,9 +738,11 @@ final class PlexClient: MusicService, @unchecked Sendable {
 
     func lyricsBySongId(id: String) async throws -> LyricsList? {
         guard let meta = try? await metadata("/library/metadata/\(id)").first else { return nil }
-        let streams = meta.Media?.flatMap { media in
-            media.Part?.flatMap { $0.Stream ?? [] } ?? []
-        }.filter { ($0.streamType ?? 0) == 4 } ?? []
+        let mediaItems: [PXMedia] = meta.Media ?? []
+        let parts: [PXPart] = mediaItems.flatMap { $0.Part ?? [] }
+        let streams: [PXStream] = parts
+            .flatMap { $0.Stream ?? [] }
+            .filter { $0.streamType == 4 }
 
         // Plex normally exposes LRC/TXT, but custom providers may expose TTML.
         // Try every lyric stream and sniff the bytes when codec metadata is

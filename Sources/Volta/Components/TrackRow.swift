@@ -76,7 +76,7 @@ struct TrackRow<Trailing: View>: View {
     }
 
     private var rowContent: some View {
-        HStack(spacing: 14) {
+        HStack(alignment: .center, spacing: 14) {
             Button(action: performTap) {
                 HStack(spacing: 14) {
                     leadingContent
@@ -90,6 +90,10 @@ struct TrackRow<Trailing: View>: View {
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            if hasExplicitBadge {
+                ExplicitBadge()
+            }
 
             trailing()
         }
@@ -141,14 +145,9 @@ struct TrackRow<Trailing: View>: View {
 
     private var titleContent: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                trackTitle
-                    .layoutPriority(1)
-                if showsExplicitBadge, explicitOverride ?? song.isExplicit {
-                    ExplicitBadge()
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            trackTitle
+                .layoutPriority(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
             if let subtitle {
                 Text(subtitle)
                     .font(.caption)
@@ -157,6 +156,10 @@ struct TrackRow<Trailing: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var hasExplicitBadge: Bool {
+        showsExplicitBadge && (explicitOverride ?? song.isExplicit)
     }
 
     @ViewBuilder

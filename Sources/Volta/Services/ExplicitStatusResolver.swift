@@ -54,10 +54,7 @@ actor ExplicitStatusResolver {
             .joined(separator: " ")
             .lowercased()
 
-            guard keyText.contains("itunesadvisory")
-                    || keyText.contains("contentadvisory")
-                    || keyText.contains("explicitstatus")
-                    || keyText.contains("rtng") else { continue }
+            guard Self.isContentAdvisoryKey(keyText) else { continue }
 
             if let number = try? await item.load(.numberValue),
                let result = Self.result(for: number.stringValue) {
@@ -73,6 +70,14 @@ actor ExplicitStatusResolver {
 
         cache[songID] = .unavailable
         return nil
+    }
+
+    private static func isContentAdvisoryKey(_ keyText: String) -> Bool {
+        keyText.contains("itunesadvisory")
+            || keyText.contains("contentadvisory")
+            || keyText.contains("explicitstatus")
+            || keyText.contains("rtng")
+            || keyText.contains("explicit")
     }
 
     private static func result(for rawValue: String) -> Result? {
