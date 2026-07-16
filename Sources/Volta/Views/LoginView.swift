@@ -836,10 +836,10 @@ struct LoginView: View {
             subtitle: "Stream from your Plex Media Server",
             icon: "play.tv.fill",
             tint: Color(red: 0.90, green: 0.62, blue: 0.04),
-            serverPlaceholder: "http://192.168.1.10:32400",
+            serverPlaceholder: "Server URL (optional for hosted sign-in)",
             usernamePlaceholder: "Plex account email",
             passwordPlaceholder: "Password or Plex token",
-            hint: "Use hosted Plex sign-in for Google, Apple, or 2FA. You can also enter your Plex email and password. For a raw X-Plex-Token, use Plex as the username."
+            hint: "Hosted Plex sign-in automatically finds an available server. Enter a server URL only to override discovery. You can also connect manually with your Plex email and password, or use Plex as the username with a raw X-Plex-Token."
         ),
     ]
 

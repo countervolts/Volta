@@ -1,6 +1,14 @@
 import SwiftUI
 import UIKit
 
+enum AlbumTrackTitleDisplayMode: String, CaseIterable, Identifiable {
+    case truncate
+    case sliding
+    case newLine
+
+    var id: String { rawValue }
+}
+
 struct TrackRow<Trailing: View>: View {
     let song: Song
     let index: Int
@@ -8,6 +16,9 @@ struct TrackRow<Trailing: View>: View {
     var onTap: () -> Void = {}
     var showDownloadState: Bool = true
     var showArtist: Bool = false
+    var titleDisplayMode: AlbumTrackTitleDisplayMode = .truncate
+    var showsExplicitBadge: Bool = false
+    var explicitOverride: Bool? = nil
     // cover art in the track-number slot
     var leadingArtwork: Bool = false
     // custom swipe, since these rows are not List rows
@@ -130,16 +141,48 @@ struct TrackRow<Trailing: View>: View {
 
     private var titleContent: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(song.title)
-                .font(.body)
-                .foregroundStyle(isCurrentlyPlaying ? Theme.accent : Theme.primaryText)
-                .lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                trackTitle
+                    .layoutPriority(1)
+                if showsExplicitBadge, explicitOverride ?? song.isExplicit {
+                    ExplicitBadge()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             if let subtitle {
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
-                    .lineLimit(1)
+                .lineLimit(1)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var trackTitle: some View {
+        let color = isCurrentlyPlaying ? Theme.accent : Theme.primaryText
+        switch titleDisplayMode {
+        case .truncate:
+            Text(song.title)
+                .font(.body)
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .sliding:
+            OverflowSlidingText(
+                text: song.title,
+                font: .body,
+                uiFont: .preferredFont(forTextStyle: .body),
+                color: color
+            )
+                .frame(maxWidth: .infinity)
+        case .newLine:
+            Text(song.title)
+                .font(.body)
+                .foregroundStyle(color)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -231,6 +274,83 @@ struct TrackRow<Trailing: View>: View {
 
     private func formatDuration(_ seconds: Int) -> String {
         String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+private struct ExplicitBadge: View {
+    var body: some View {
+        Text("E")
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .foregroundStyle(Color.black.opacity(0.68))
+            .frame(width: 16, height: 15)
+            .background {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color.white.opacity(0.58))
+            }
+            .accessibilityLabel("Explicit")
+    }
+}
+
+struct OverflowSlidingText: View {
+    let text: String
+    let font: Font
+    let uiFont: UIFont
+    let color: Color
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var startedAt = Date()
+
+    private let pointsPerSecond: CGFloat = 28
+    private let pause: TimeInterval = 1.25
+
+    private var textWidth: CGFloat {
+        ceil((text as NSString).size(withAttributes: [
+            .font: uiFont
+        ]).width)
+    }
+
+    private var lineHeight: CGFloat {
+        ceil(uiFont.lineHeight)
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let overflow = max(0, textWidth - proxy.size.width)
+            if overflow > 1, !reduceMotion {
+                TimelineView(.animation) { context in
+                    Text(text)
+                        .font(font)
+                        .foregroundStyle(color)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .offset(x: -offset(at: context.date, overflow: overflow))
+                }
+            } else {
+                Text(text)
+                    .font(font)
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+            }
+        }
+        .frame(height: lineHeight)
+        .clipped()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
+        .onAppear { startedAt = Date() }
+        .onChangeCompat(of: text) { _, _ in startedAt = Date() }
+    }
+
+    private func offset(at date: Date, overflow: CGFloat) -> CGFloat {
+        let travel = TimeInterval(overflow / pointsPerSecond)
+        guard travel > 0 else { return 0 }
+        let cycle = pause + travel + pause + travel
+        let elapsed = max(0, date.timeIntervalSince(startedAt)).truncatingRemainder(dividingBy: cycle)
+
+        if elapsed < pause { return 0 }
+        if elapsed < pause + travel {
+            return overflow * CGFloat((elapsed - pause) / travel)
+        }
+        if elapsed < pause + travel + pause { return overflow }
+        return overflow * (1 - CGFloat((elapsed - pause - travel - pause) / travel))
     }
 }
 

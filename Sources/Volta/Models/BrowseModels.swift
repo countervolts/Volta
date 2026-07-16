@@ -50,15 +50,17 @@ struct Child: Decodable, Sendable {
     let size: Int?
     let contentType: String?
     let suffix: String?
+    let codec: String?
     let bitRate: Int?
     let path: String?
     let playCount: Int?
+    let explicitStatus: String?
     let starred: String?
 
     enum CodingKeys: String, CodingKey {
         case id, isDir, title, album, artist, albumArtist, albumId, artistId, albumArtistId, coverArt
-        case duration, track, discNumber, year, genre, size, contentType, suffix
-        case bitRate, path, playCount, starred
+        case duration, track, discNumber, year, genre, size, contentType, suffix, codec
+        case bitRate, path, playCount, explicitStatus, starred
     }
 
     init(from decoder: Decoder) throws {
@@ -81,9 +83,11 @@ struct Child: Decodable, Sendable {
         size = try? c.decode(Int.self, forKey: .size)
         contentType = try? c.decode(String.self, forKey: .contentType)
         suffix = try? c.decode(String.self, forKey: .suffix)
+        codec = try? c.decode(String.self, forKey: .codec)
         bitRate = try? c.decode(Int.self, forKey: .bitRate)
         path = try? c.decode(String.self, forKey: .path)
         playCount = try? c.decode(Int.self, forKey: .playCount)
+        explicitStatus = try? c.decode(String.self, forKey: .explicitStatus)
         starred = try? c.decode(String.self, forKey: .starred)
     }
 
@@ -91,8 +95,9 @@ struct Child: Decodable, Sendable {
         Song(id: id, title: title, album: album, artist: artist, albumArtist: albumArtist, albumId: albumId,
              artistId: artistId, albumArtistId: albumArtistId, coverArt: coverArt, duration: duration, track: track,
              discNumber: discNumber, year: year, genre: genre, size: size,
-             contentType: contentType, suffix: suffix, bitRate: bitRate, path: path,
-             playCount: playCount, bpm: nil, starred: starred, contributes: nil, replayGain: nil,
+             contentType: contentType, suffix: suffix, codec: codec, bitRate: bitRate, path: path,
+             playCount: playCount, bpm: nil, explicitStatus: explicitStatus, starred: starred,
+             contributes: nil, replayGain: nil,
              samplingRate: nil, bitDepth: nil, channelCount: nil, displayComposer: nil,
              contributors: nil)
     }

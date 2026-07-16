@@ -351,7 +351,10 @@ extension SettingsView {
                     .buttonStyle(.plain)
                 } else {
                     Button {
-                        if let client = appState.client { lyricsDownloader.start(client: client) }
+                        if let client = appState.client {
+                            let source = LyricsDownloadSource(rawValue: lyricsDownloadSource) ?? .lrclib
+                            lyricsDownloader.start(client: client, source: source)
+                        }
                     } label: {
                         Text("Download")
                             .font(.subheadline.weight(.semibold))
@@ -362,6 +365,14 @@ extension SettingsView {
                     .opacity(appState.client == nil ? 0.45 : 1)
                 }
             }
+
+            Picker("Lyrics Source", selection: $lyricsDownloadSource) {
+                ForEach(LyricsDownloadSource.allCases) { source in
+                    Text(source.displayName).tag(source.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(lyricsDownloader.isRunning)
 
             if lyricsDownloader.isRunning {
                 ProgressView(value: lyricsDownloader.fraction)

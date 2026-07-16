@@ -59,7 +59,6 @@ final class LoginViewModel: ObservableObject {
 
     var canStartPlexHostedSignIn: Bool {
         selectedBackend == .plex &&
-        !serverAddress.trimmingCharacters(in: .whitespaces).isEmpty &&
         !isConnecting &&
         !isPlexHostedSigningIn
     }
@@ -199,6 +198,24 @@ final class LoginViewModel: ObservableObject {
         case unreachable(SubsonicError?)
     }
 
+    private struct PlexConnectionAttempt {
+        let serverName: String
+        let url: URL
+        let token: String
+        let connections: [PlexConnectionEndpoint]
+    }
+
+    private struct ResolvedPlexServer {
+        let name: String
+        let config: SubsonicConfig
+    }
+
+    private enum PlexConnectionFailure: Error {
+        case noServers
+        case accessDenied
+        case unreachable(SubsonicError?)
+    }
+
     // Try candidate roots in order; auth failure stops the search.
     private func probe(
         candidates: [URL],
@@ -271,65 +288,230 @@ final class LoginViewModel: ObservableObject {
         credentialsError = nil
 
         let address = serverAddress
-        let candidates = SubsonicConfig.candidateURLs(from: serverAddress, kind: .plex)
-        guard !candidates.isEmpty else {
-            failServer()
-            return .completed
-        }
-        guard !needsImmediateInsecureHTTPConfirmation(candidates: candidates, allowInsecureHTTP: allowInsecureHTTP) else {
-            return .needsInsecureHTTPConfirmation
-        }
-        let credentialCandidates = candidatesForCredentialProbe(candidates, allowInsecureHTTP: allowInsecureHTTP)
-        guard !credentialCandidates.isEmpty else {
-            failServer()
-            return .completed
+        let hasManualAddress = !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let manualCandidates = hasManualAddress
+            ? SubsonicConfig.candidateURLs(from: address, kind: .plex)
+            : []
+        if hasManualAddress {
+            guard !manualCandidates.isEmpty else {
+                failServer()
+                return .completed
+            }
+            guard !needsImmediateInsecureHTTPConfirmation(
+                candidates: manualCandidates,
+                allowInsecureHTTP: allowInsecureHTTP
+            ) else {
+                return .needsInsecureHTTPConfirmation
+            }
         }
 
         isPlexHostedSigningIn = true
         defer { isPlexHostedSigningIn = false }
 
         do {
-            let token: String
+            let accountToken: String
             if let pendingPlexHostedToken {
-                token = pendingPlexHostedToken
+                accountToken = pendingPlexHostedToken
             } else {
                 let authSession = try await PlexHostedAuth.start()
                 openAuthURL(authSession.authURL)
                 VoltaNotificationCenter.shared.post(L(.plex_finish_sign_in), tone: .info)
-                token = try await PlexHostedAuth.waitForToken(session: authSession)
-                pendingPlexHostedToken = token
+                accountToken = try await PlexHostedAuth.waitForToken(session: authSession)
+                pendingPlexHostedToken = accountToken
             }
+
+            let resources = try await PlexHostedAuth.servers(
+                forAccountToken: accountToken,
+                session: Self.probeSession
+            )
+            guard !resources.isEmpty else { throw PlexConnectionFailure.noServers }
 
             isConnecting = true
             defer { isConnecting = false }
-            let config = try await probe(candidates: credentialCandidates, kind: .plex) {
-                SubsonicConfig(baseURL: $0, username: PlexClient.tokenUsername, password: token)
+            let resolved: ResolvedPlexServer
+            do {
+                resolved = try await connectToPlexServer(
+                    resources: resources,
+                    manualCandidates: manualCandidates,
+                    allowInsecureHTTP: allowInsecureHTTP
+                )
+            } catch PlexConnectionFailure.unreachable(let error) {
+                if await shouldOfferInsecurePlexFallback(
+                    resources: resources,
+                    manualCandidates: manualCandidates,
+                    address: address,
+                    allowInsecureHTTP: allowInsecureHTTP
+                ) {
+                    return .needsInsecureHTTPConfirmation
+                }
+                throw PlexConnectionFailure.unreachable(error)
             }
+
             pendingPlexHostedToken = nil
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            appState.completeLogin(config: config, kind: .plex)
+            appState.completeLogin(config: resolved.config, kind: .plex, displayName: resolved.name)
             didCompleteLogin = true
             return .completed
         } catch PlexHostedAuth.AuthError.timedOut {
             pendingPlexHostedToken = nil
             failCredentials(message: L(.error_plex_timeout))
             return .completed
-        } catch ProbeFailure.authFailure {
+        } catch PlexConnectionFailure.noServers {
             pendingPlexHostedToken = nil
-            failCredentials()
+            failServer(message: L(.error_plex_no_servers))
             return .completed
-        } catch ProbeFailure.unreachable(let error) {
-            if await shouldOfferInsecureHTTPFallback(candidates: candidates, address: address, allowInsecureHTTP: allowInsecureHTTP) {
-                return .needsInsecureHTTPConfirmation
-            }
+        } catch PlexConnectionFailure.accessDenied {
+            pendingPlexHostedToken = nil
+            failServer(message: L(.error_plex_access_denied))
+            return .completed
+        } catch PlexConnectionFailure.unreachable(let error) {
             pendingPlexHostedToken = nil
             failServer(message: error?.errorDescription)
+            return .completed
+        } catch let error as SubsonicError {
+            pendingPlexHostedToken = nil
+            if error.isAuthFailure {
+                failCredentials(message: L(.error_plex_failed))
+            } else {
+                failServer(message: error.errorDescription)
+            }
             return .completed
         } catch {
             pendingPlexHostedToken = nil
             failCredentials(message: L(.error_plex_failed))
             return .completed
         }
+    }
+
+    private func connectToPlexServer(
+        resources: [PlexServerResource],
+        manualCandidates: [URL],
+        allowInsecureHTTP: Bool
+    ) async throws -> ResolvedPlexServer {
+        let attempts = plexConnectionAttempts(
+            resources: resources,
+            manualCandidates: manualCandidates,
+            allowInsecureHTTP: allowInsecureHTTP
+        )
+        var lastError: SubsonicError?
+        var sawAccessDenied = false
+
+        for attempt in attempts {
+            try Task.checkCancellation()
+            let config = SubsonicConfig(
+                baseURL: attempt.url,
+                username: PlexClient.tokenUsername,
+                password: attempt.token,
+                plexConnections: attempt.connections
+            )
+            do {
+                let validated = try await AuthService.validate(
+                    config: config,
+                    kind: .plex,
+                    session: Self.probeSession
+                )
+                return ResolvedPlexServer(name: attempt.serverName, config: validated)
+            } catch let error as SubsonicError {
+                if error.isAuthFailure {
+                    sawAccessDenied = true
+                } else {
+                    lastError = error
+                }
+            }
+        }
+
+        if let lastError { throw PlexConnectionFailure.unreachable(lastError) }
+        if sawAccessDenied { throw PlexConnectionFailure.accessDenied }
+        throw PlexConnectionFailure.unreachable(nil)
+    }
+
+    private func plexConnectionAttempts(
+        resources: [PlexServerResource],
+        manualCandidates: [URL],
+        allowInsecureHTTP: Bool
+    ) -> [PlexConnectionAttempt] {
+        let orderedResources = resources.enumerated().sorted { lhs, rhs in
+            let leftPresent = lhs.element.presence == true
+            let rightPresent = rhs.element.presence == true
+            return leftPresent == rightPresent ? lhs.offset < rhs.offset : leftPresent
+        }.map(\.element)
+
+        var attempts: [PlexConnectionAttempt] = []
+        if manualCandidates.isEmpty {
+            for resource in orderedResources {
+                guard let token = resource.usableAccessToken else { continue }
+                let connections = uniquePlexConnections(
+                    resource.preferredConnections.compactMap(\.endpoint).filter {
+                        allowInsecureHTTP || $0.url.scheme?.lowercased() != "http"
+                    }
+                )
+                guard let connection = connections.first else { continue }
+                // PlexClient cycles through this server's routes itself, so
+                // validate once per server token rather than retrying the same
+                // complete route list for every advertised URL.
+                attempts.append(PlexConnectionAttempt(
+                    serverName: resource.displayName,
+                    url: connection.url,
+                    token: token,
+                    connections: connections
+                ))
+            }
+        } else {
+            // A manually supplied URL is an override. Try each server-specific
+            // token at that URL so shared and multi-server accounts still work.
+            let connections = uniquePlexConnections(manualCandidates.compactMap { url in
+                guard allowInsecureHTTP || url.scheme?.lowercased() != "http" else { return nil }
+                return PlexConnectionEndpoint(url: url, kind: .manual)
+            })
+            guard let connection = connections.first else { return [] }
+            for resource in orderedResources {
+                guard let token = resource.usableAccessToken else { continue }
+                attempts.append(PlexConnectionAttempt(
+                    serverName: resource.displayName,
+                    url: connection.url,
+                    token: token,
+                    connections: connections
+                ))
+            }
+        }
+
+        var seen = Set<String>()
+        return attempts.filter { attempt in
+            let key = "\(attempt.url.absoluteString)|\(attempt.token)"
+            guard seen.insert(key).inserted else { return false }
+            return true
+        }
+    }
+
+    private func uniquePlexConnections(
+        _ connections: [PlexConnectionEndpoint]
+    ) -> [PlexConnectionEndpoint] {
+        var seen = Set<String>()
+        return connections.filter { seen.insert($0.url.absoluteString).inserted }
+    }
+
+    private func shouldOfferInsecurePlexFallback(
+        resources: [PlexServerResource],
+        manualCandidates: [URL],
+        address: String,
+        allowInsecureHTTP: Bool
+    ) async -> Bool {
+        guard !allowInsecureHTTP, address == serverAddress else { return false }
+        let insecureURLs = plexConnectionAttempts(
+            resources: resources,
+            manualCandidates: manualCandidates,
+            allowInsecureHTTP: true
+        ).flatMap(\.connections).map(\.url).filter { $0.scheme?.lowercased() == "http" }
+
+        var seen = Set<String>()
+        for url in insecureURLs where seen.insert(url.absoluteString).inserted {
+            guard address == serverAddress else { return false }
+            if await Self.hostResponds(url) {
+                reachability = .reachable(insecure: true)
+                return true
+            }
+        }
+        return false
     }
 
     private func failServer(message: String? = nil) {

@@ -125,7 +125,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .streaming:
             return [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["download quality", "download", "bitrate"], ["transcoding format", "transcode", "format", "mp3", "aac", "opus"], ["download mode", "multithreaded", "threads", "single", "parallel"], ["download speed limit", "speed", "limit", "throttle"], ["storage cap", "cap", "max size", "storage"], ["auto-evict", "auto evict", "evict"]]
         case .appearance:
-            return [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["accent color", "accent", "color", "colour", "theme"]]
+            return [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]
         case .server:
             return [["connected to", "server url", "cellular url", "data", "wifi", "username", "edit connection", "test connection", "log out", "logout", "sign out"], ["server health & speed test", "speed test", "server health", "latency", "connection"]]
         case .storage:
@@ -180,8 +180,10 @@ struct SettingsView: View {
     @AppStorage("stylizedPlayerCover") var stylizedPlayerCover = false
     @AppStorage("themeMode")           var themeMode           = "dark"
     @AppStorage("showLosslessBadge")   var showLosslessBadge   = true
+    @AppStorage("showExplicitBadge")   var showExplicitBadge   = true
     @AppStorage("dynamicBackground")   var dynamicBackground   = true
     @AppStorage("showTrackArtwork")    var showTrackArtwork    = true
+    @AppStorage("albumTrackTitleDisplayMode") var albumTrackTitleDisplayMode = AlbumTrackTitleDisplayMode.truncate.rawValue
     @AppStorage("accentColorName")     var accentColorName     = "purple"
     @AppStorage("customAccentRed")      var customAccentRed     = 0.55
     @AppStorage("customAccentGreen")    var customAccentGreen   = 0.36
@@ -197,6 +199,7 @@ struct SettingsView: View {
     @AppStorage("showWarningNotifications") var showWarningNotifications = false
     @AppStorage("autoPlaylistBackupEnabled") var autoPlaylistBackupEnabled = true
     @AppStorage("saveLyricsLocally") var saveLyricsLocally = true
+    @AppStorage("lyricsDownloadSource") var lyricsDownloadSource = LyricsDownloadSource.lrclib.rawValue
     @AppStorage("hasConfirmedDownloadAllMissingSongs") var hasConfirmedDownloadAllMissingSongs = false
 
     @State var downloadsSize: String  = "…"

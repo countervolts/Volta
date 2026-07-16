@@ -22,6 +22,9 @@ final class PlexClient: MusicService, @unchecked Sendable {
     private let lock = NSLock()
     private var partCache: [String: String] = [:]
     private var genreCache: [String: String] = [:]   // lowercased genre name -> filter key
+    private let connections: [PlexConnectionEndpoint]
+    private var activeBaseURL: URL
+    private var connectionRefreshGeneration = 0
 
     static let product = "Volta"
     static let version = "1.0"
@@ -35,6 +38,8 @@ final class PlexClient: MusicService, @unchecked Sendable {
         self.machineId = machineId
         self.sectionKey = sectionKey
         self.session = session
+        connections = Self.connectionEndpoints(for: config)
+        activeBaseURL = config.baseURL
     }
 
     // MARK: - Connection / auth
@@ -44,8 +49,7 @@ final class PlexClient: MusicService, @unchecked Sendable {
 
         let token: String
         if config.username.caseInsensitiveCompare(Self.tokenUsername) == .orderedSame {
-            guard let candidate = config.password.nonBlank,
-                  await Self.tokenWorks(candidate, baseURL: config.baseURL, clientId: clientId, session: session) else {
+            guard let candidate = config.password.nonBlank else {
                 throw SubsonicError.invalidCredentials
             }
             token = candidate
@@ -54,15 +58,77 @@ final class PlexClient: MusicService, @unchecked Sendable {
                                              clientId: clientId, session: session)
         }
 
-        let machineId = try await Self.serverMachineId(baseURL: config.baseURL, token: token,
-                                                       clientId: clientId, session: session)
-        guard let section = try await Self.firstMusicSection(baseURL: config.baseURL, token: token,
-                                                             clientId: clientId, session: session) else {
-            throw SubsonicError.server(code: 0, message: "No music library found on this Plex server")
+        let connections = Self.orderedConnections(
+            Self.connectionEndpoints(for: config),
+            preferLocal: !UserDefaults.standard.bool(forKey: "networkIsCellular")
+        )
+        var lastError: SubsonicError?
+        for connection in connections {
+            do {
+                let machineId = try await Self.serverMachineId(
+                    baseURL: connection.url,
+                    token: token,
+                    clientId: clientId,
+                    session: session,
+                    timeout: connection.kind == .local ? 4 : 12
+                )
+                guard let section = try await Self.firstMusicSection(
+                    baseURL: connection.url,
+                    token: token,
+                    clientId: clientId,
+                    session: session,
+                    timeout: connection.kind == .local ? 4 : 12
+                ) else {
+                    throw SubsonicError.server(
+                        code: 0,
+                        message: "No music library found on this Plex server"
+                    )
+                }
+                let tokenConfig = SubsonicConfig(
+                    baseURL: connection.url,
+                    username: Self.tokenUsername,
+                    password: token,
+                    plexConnections: connections
+                )
+                return PlexClient(
+                    config: tokenConfig,
+                    token: token,
+                    clientId: clientId,
+                    machineId: machineId,
+                    sectionKey: section,
+                    session: session
+                )
+            } catch let error as SubsonicError {
+                if error.isAuthFailure { throw error }
+                lastError = error
+            }
         }
-        let tokenConfig = SubsonicConfig(baseURL: config.baseURL, username: Self.tokenUsername, password: token)
-        return PlexClient(config: tokenConfig, token: token, clientId: clientId, machineId: machineId,
-                          sectionKey: section, session: session)
+        throw lastError ?? SubsonicError.serverUnreachable
+    }
+
+    static func connectionEndpoints(for config: SubsonicConfig) -> [PlexConnectionEndpoint] {
+        var endpoints = config.plexConnections
+        if let baseIndex = endpoints.firstIndex(where: {
+            $0.url.absoluteString == config.baseURL.absoluteString
+        }) {
+            let base = endpoints.remove(at: baseIndex)
+            endpoints.insert(base, at: 0)
+        } else {
+            endpoints.insert(PlexConnectionEndpoint(url: config.baseURL, kind: .manual), at: 0)
+        }
+        var seen = Set<String>()
+        return endpoints.filter { seen.insert($0.url.absoluteString).inserted }
+    }
+
+    static func orderedConnections(
+        _ connections: [PlexConnectionEndpoint],
+        preferLocal: Bool
+    ) -> [PlexConnectionEndpoint] {
+        connections.enumerated().sorted { lhs, rhs in
+            let leftRank = lhs.element.preferenceRank(preferLocal: preferLocal)
+            let rightRank = rhs.element.preferenceRank(preferLocal: preferLocal)
+            return leftRank == rightRank ? lhs.offset < rhs.offset : leftRank < rightRank
+        }.map(\.element)
     }
 
     static func clientID() -> String {
@@ -81,19 +147,6 @@ final class PlexClient: MusicService, @unchecked Sendable {
             "X-Plex-Platform": "iOS",
             "Accept": "application/json",
         ]
-    }
-
-    private static func tokenWorks(_ token: String, baseURL: URL, clientId: String, session: URLSession) async -> Bool {
-        guard var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return false }
-        comps.path = (comps.path.hasSuffix("/") ? String(comps.path.dropLast()) : comps.path) + "/identity"
-        comps.queryItems = [URLQueryItem(name: "X-Plex-Token", value: token)]
-        guard let url = comps.url else { return false }
-        var req = URLRequest(url: url)
-        for (k, v) in plexHeaders(clientId: clientId) { req.setValue(v, forHTTPHeaderField: k) }
-        req.timeoutInterval = 15
-        guard let (_, resp) = try? await session.data(for: req),
-              let http = resp as? HTTPURLResponse else { return false }
-        return (200...299).contains(http.statusCode)
     }
 
     private static func plexSignIn(login: String, password: String, clientId: String, session: URLSession) async throws -> String {
@@ -120,18 +173,51 @@ final class PlexClient: MusicService, @unchecked Sendable {
         return token
     }
 
-    private static func serverMachineId(baseURL: URL, token: String, clientId: String, session: URLSession) async throws -> String {
-        let container = try await rawGet("/identity", baseURL: baseURL, token: token, clientId: clientId, session: session)
+    private static func serverMachineId(
+        baseURL: URL,
+        token: String,
+        clientId: String,
+        session: URLSession,
+        timeout: TimeInterval = 20
+    ) async throws -> String {
+        let container = try await rawGet(
+            "/identity",
+            baseURL: baseURL,
+            token: token,
+            clientId: clientId,
+            session: session,
+            timeout: timeout
+        )
         return container.machineIdentifier ?? ""
     }
 
-    private static func firstMusicSection(baseURL: URL, token: String, clientId: String, session: URLSession) async throws -> String? {
-        let container = try await rawGet("/library/sections", baseURL: baseURL, token: token, clientId: clientId, session: session)
+    private static func firstMusicSection(
+        baseURL: URL,
+        token: String,
+        clientId: String,
+        session: URLSession,
+        timeout: TimeInterval = 20
+    ) async throws -> String? {
+        let container = try await rawGet(
+            "/library/sections",
+            baseURL: baseURL,
+            token: token,
+            clientId: clientId,
+            session: session,
+            timeout: timeout
+        )
         return (container.Directory ?? []).first { $0.type == "artist" }?.key
     }
 
     // Bare GET for pre-instance connect checks.
-    private static func rawGet(_ path: String, baseURL: URL, token: String, clientId: String, session: URLSession) async throws -> PXContainer {
+    private static func rawGet(
+        _ path: String,
+        baseURL: URL,
+        token: String,
+        clientId: String,
+        session: URLSession,
+        timeout: TimeInterval = 20
+    ) async throws -> PXContainer {
         guard var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { throw SubsonicError.invalidResponse }
         let base = comps.path.hasSuffix("/") ? String(comps.path.dropLast()) : comps.path
         comps.path = base + path
@@ -139,15 +225,14 @@ final class PlexClient: MusicService, @unchecked Sendable {
         guard let url = comps.url else { throw SubsonicError.invalidResponse }
         var req = URLRequest(url: url)
         for (k, v) in plexHeaders(clientId: clientId) { req.setValue(v, forHTTPHeaderField: k) }
-        req.timeoutInterval = 20
+        req.timeoutInterval = timeout
         let data: Data
         let resp: URLResponse
         do { (data, resp) = try await session.data(for: req) }
         catch { throw SubsonicError.serverUnreachable }
-        if let http = resp as? HTTPURLResponse {
-            if http.statusCode == 401 { throw SubsonicError.invalidCredentials }
-            if !(200...299).contains(http.statusCode) { throw SubsonicError.server(code: http.statusCode, message: "HTTP \(http.statusCode)") }
-        }
+        guard let http = resp as? HTTPURLResponse else { throw SubsonicError.invalidResponse }
+        if http.statusCode == 401 || http.statusCode == 403 { throw SubsonicError.invalidCredentials }
+        if !(200...299).contains(http.statusCode) { throw SubsonicError.server(code: http.statusCode, message: "HTTP \(http.statusCode)") }
         guard let decoded = try? JSONDecoder().decode(PXResponse.self, from: data),
               let container = decoded.MediaContainer else { throw SubsonicError.invalidResponse }
         return container
@@ -156,41 +241,139 @@ final class PlexClient: MusicService, @unchecked Sendable {
     // MARK: - URL + request plumbing
 
     func url(_ path: String, query: [URLQueryItem] = []) -> URL? {
-        guard var comps = URLComponents(url: config.baseURL, resolvingAgainstBaseURL: false) else { return nil }
+        makeURL(path, query: query, baseURL: currentBaseURL())
+    }
+
+    private func makeURL(
+        _ path: String,
+        query: [URLQueryItem],
+        baseURL: URL
+    ) -> URL? {
+        guard var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
         let base = comps.path.hasSuffix("/") ? String(comps.path.dropLast()) : comps.path
         comps.path = base + path
         comps.queryItems = query + [URLQueryItem(name: "X-Plex-Token", value: token)]
         return comps.url
     }
 
+    private func currentBaseURL() -> URL {
+        lock.withLock { activeBaseURL }
+    }
+
+    private func requestConnections(activeFirst: Bool) -> [PlexConnectionEndpoint] {
+        let active = currentBaseURL()
+        var ordered = Self.orderedConnections(
+            connections,
+            preferLocal: !UserDefaults.standard.bool(forKey: "networkIsCellular")
+        )
+        guard activeFirst,
+              let activeIndex = ordered.firstIndex(where: { $0.url.absoluteString == active.absoluteString }) else {
+            return ordered
+        }
+        let activeConnection = ordered.remove(at: activeIndex)
+        ordered.insert(activeConnection, at: 0)
+        return ordered
+    }
+
+    private func setActiveConnection(_ url: URL, reason: String) {
+        let previous = lock.withLock { () -> URL in
+            let previous = activeBaseURL
+            activeBaseURL = url
+            return previous
+        }
+        guard previous.absoluteString != url.absoluteString else { return }
+        AppLogger.shared.log(
+            "Plex connection switched; from=\(previous.absoluteString); to=\(url.absoluteString); reason=\(reason)",
+            category: .networking
+        )
+    }
+
+    // Called after Wi-Fi/cellular transitions so a healthy LAN route can take
+    // over immediately instead of waiting for the public route to fail.
+    func refreshConnection(preferLocal: Bool) async {
+        let generation = lock.withLock { () -> Int in
+            connectionRefreshGeneration += 1
+            return connectionRefreshGeneration
+        }
+        for connection in Self.orderedConnections(connections, preferLocal: preferLocal) {
+            do {
+                let identity = try await Self.rawGet(
+                    "/identity",
+                    baseURL: connection.url,
+                    token: token,
+                    clientId: clientId,
+                    session: session,
+                    timeout: 4
+                )
+                guard machineId.isEmpty || identity.machineIdentifier == machineId else { continue }
+                let isCurrentGeneration = lock.withLock {
+                    generation == connectionRefreshGeneration
+                }
+                guard isCurrentGeneration else { return }
+                setActiveConnection(connection.url, reason: "network changed")
+                return
+            } catch {
+                continue
+            }
+        }
+    }
+
     @discardableResult
     private func send(_ method: String, _ path: String, query: [URLQueryItem] = []) async throws -> PXContainer? {
         try await DeveloperSimulation.prepareRequest(endpoint: path)
         let started = ProcessInfo.processInfo.systemUptime
-        guard let url = url(path, query: query) else { throw SubsonicError.invalidResponse }
-        var req = URLRequest(url: url)
-        req.httpMethod = method
-        req.timeoutInterval = 20
-        req.cachePolicy = .reloadIgnoringLocalCacheData
-        for (k, v) in Self.plexHeaders(clientId: clientId) { req.setValue(v, forHTTPHeaderField: k) }
         AppLogger.shared.log("Request started: [Plex] \(method) \(path)", category: .networking)
-        let data: Data
-        let resp: URLResponse
-        do { (data, resp) = try await session.data(for: req) }
-        catch {
-            AppLogger.shared.log("Request failed: [Plex] \(method) \(path); error=\(error.localizedDescription)", category: .networking, level: .error)
-            throw SubsonicError.serverUnreachable
+        let canRetry = method == "GET" || method == "HEAD"
+        let attempts = canRetry ? requestConnections(activeFirst: true) : requestConnections(activeFirst: true).prefix(1).map { $0 }
+        var lastError: SubsonicError = .serverUnreachable
+
+        for (index, connection) in attempts.enumerated() {
+            guard let url = makeURL(path, query: query, baseURL: connection.url) else {
+                lastError = .invalidResponse
+                continue
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = method
+            req.timeoutInterval = connection.kind == .local ? 5 : 20
+            req.cachePolicy = .reloadIgnoringLocalCacheData
+            for (k, v) in Self.plexHeaders(clientId: clientId) { req.setValue(v, forHTTPHeaderField: k) }
+
+            let data: Data
+            let resp: URLResponse
+            do {
+                (data, resp) = try await session.data(for: req)
+            } catch {
+                AppLogger.shared.log(
+                    "Request failed: [Plex] \(method) \(path); endpoint=\(connection.kind.rawValue); error=\(error.localizedDescription)",
+                    category: .networking,
+                    level: .error
+                )
+                lastError = .serverUnreachable
+                if !canRetry {
+                    Task { await self.refreshConnection(preferLocal: !UserDefaults.standard.bool(forKey: "networkIsCellular")) }
+                }
+                continue
+            }
+            if let http = resp as? HTTPURLResponse {
+                AppLogger.shared.log(
+                    "Response received: [Plex] \(method) \(path); endpoint=\(connection.kind.rawValue); status=\(http.statusCode); bytes=\(data.count); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                    category: .networking,
+                    level: (200...299).contains(http.statusCode) ? .info : .warning
+                )
+                if http.statusCode == 401 || http.statusCode == 403 {
+                    throw SubsonicError.invalidCredentials
+                }
+                if !(200...299).contains(http.statusCode) {
+                    lastError = .server(code: http.statusCode, message: "HTTP \(http.statusCode)")
+                    let isRetryableGatewayFailure = [502, 503, 504].contains(http.statusCode)
+                    if canRetry && isRetryableGatewayFailure && index < attempts.count - 1 { continue }
+                    throw lastError
+                }
+            }
+            setActiveConnection(connection.url, reason: index == 0 ? "request succeeded" : "request failover")
+            return (try? JSONDecoder().decode(PXResponse.self, from: data))?.MediaContainer
         }
-        if let http = resp as? HTTPURLResponse {
-            AppLogger.shared.log(
-                "Response received: [Plex] \(method) \(path); status=\(http.statusCode); bytes=\(data.count); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
-                category: .networking,
-                level: (200...299).contains(http.statusCode) ? .info : .warning
-            )
-            if http.statusCode == 401 { throw SubsonicError.invalidCredentials }
-            if !(200...299).contains(http.statusCode) { throw SubsonicError.server(code: http.statusCode, message: "HTTP \(http.statusCode)") }
-        }
-        return (try? JSONDecoder().decode(PXResponse.self, from: data))?.MediaContainer
+        throw lastError
     }
 
     private func get(_ path: String, query: [URLQueryItem] = []) async throws -> PXContainer {
@@ -235,10 +418,12 @@ final class PlexClient: MusicService, @unchecked Sendable {
             size: part?.size,
             contentType: nil,
             suffix: container?.lowercased(),
+            codec: (audio?.codec ?? media?.audioCodec)?.lowercased(),
             bitRate: media?.bitrate,
             path: part?.file,
             playCount: m.viewCount,
             bpm: nil,                          // Plex does not expose BPM
+            explicitStatus: nil,
             starred: m.starredMarker,
             contributes: nil,
             replayGain: nil,                   // Plex does not expose ReplayGain
@@ -549,18 +734,36 @@ final class PlexClient: MusicService, @unchecked Sendable {
         return (await a, await al, await s)
     }
 
-    // MARK: - Lyrics (best-effort: find a lyric stream and parse its LRC)
+    // MARK: - Lyrics
 
     func lyricsBySongId(id: String) async throws -> LyricsList? {
-        guard let meta = try? await metadata("/library/metadata/\(id)").first,
-              let lyricStream = meta.Media?.first?.Part?.first?.Stream?.first(where: { ($0.streamType ?? 0) == 4 }),
-              let streamKey = lyricStream.key,
-              let url = url(streamKey) else { return nil }
-        var req = URLRequest(url: url)
-        for (k, v) in Self.plexHeaders(clientId: clientId) { req.setValue(v, forHTTPHeaderField: k) }
-        guard let (data, _) = try? await session.data(for: req),
-              let text = String(data: data, encoding: .utf8) else { return nil }
-        return Self.parseLRC(text)
+        guard let meta = try? await metadata("/library/metadata/\(id)").first else { return nil }
+        let streams = meta.Media?.flatMap { media in
+            media.Part?.flatMap { $0.Stream ?? [] } ?? []
+        }.filter { ($0.streamType ?? 0) == 4 } ?? []
+
+        // Plex normally exposes LRC/TXT, but custom providers may expose TTML.
+        // Try every lyric stream and sniff the bytes when codec metadata is
+        // absent or inaccurate instead of assuming the first stream is LRC.
+        var plainFallback: LyricsList?
+        for stream in streams {
+            guard let streamKey = stream.key, let streamURL = url(streamKey) else { continue }
+            var request = URLRequest(url: streamURL)
+            for (key, value) in Self.plexHeaders(clientId: clientId) {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            guard let (data, response) = try? await session.data(for: request),
+                  let http = response as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode) else { continue }
+            let hint = stream.codec ?? stream.format ?? http.value(forHTTPHeaderField: "Content-Type")
+            if let parsed = LyricsParser.parse(data: data, formatHint: hint) {
+                if parsed.lines.allSatisfy({ $0.time >= 0 }) {
+                    return parsed.lyricsList
+                }
+                if plainFallback == nil { plainFallback = parsed.lyricsList }
+            }
+        }
+        return plainFallback
     }
 
     func lyrics(artist: String, title: String) async throws -> String? { nil }
@@ -649,37 +852,4 @@ final class PlexClient: MusicService, @unchecked Sendable {
         ])
     }
 
-    // MARK: - LRC parsing
-
-    private static func parseLRC(_ text: String) -> LyricsList {
-        var lines: [StructuredLyricLine] = []
-        var synced = false
-        let pattern = try? NSRegularExpression(pattern: "\\[(\\d{1,2}):(\\d{2})(?:[.:](\\d{1,3}))?\\]")
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = String(raw)
-            let ns = line as NSString
-            let matches = pattern?.matches(in: line, range: NSRange(location: 0, length: ns.length)) ?? []
-            let content = pattern?.stringByReplacingMatches(in: line, range: NSRange(location: 0, length: ns.length), withTemplate: "")
-                .trimmingCharacters(in: .whitespaces) ?? line
-            if matches.isEmpty {
-                if !content.isEmpty { lines.append(StructuredLyricLine(start: nil, value: content)) }
-                continue
-            }
-            synced = true
-            for m in matches {
-                let min = Int(ns.substring(with: m.range(at: 1))) ?? 0
-                let sec = Int(ns.substring(with: m.range(at: 2))) ?? 0
-                var ms = 0
-                if m.range(at: 3).location != NSNotFound {
-                    let frac = ns.substring(with: m.range(at: 3))
-                    ms = (Int(frac) ?? 0) * (frac.count == 2 ? 10 : 1)
-                }
-                lines.append(StructuredLyricLine(start: (min * 60 + sec) * 1000 + ms, value: content))
-            }
-        }
-        lines.sort { ($0.start ?? 0) < ($1.start ?? 0) }
-        let structured = StructuredLyrics(displayArtist: nil, displayTitle: nil, lang: nil,
-                                          synced: synced, line: lines)
-        return LyricsList(structuredLyrics: [structured])
-    }
 }

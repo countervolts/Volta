@@ -9,6 +9,7 @@ final class AlbumDetailViewModel: ObservableObject {
     @Published private(set) var moreBySameArtist: [Album] = []
     @Published private(set) var isLoading = false
     @Published private(set) var dominantColor: UIColor = .black
+    @Published private(set) var explicitSongIDs = Set<String>()
 
     @Published private(set) var isDescriptionExpanded = false
 
@@ -100,6 +101,30 @@ final class AlbumDetailViewModel: ObservableObject {
             }
         }
         moreBySameArtist = relatedAlbums.filter { $0.id != album.id }
+    }
+
+    func resolveExplicitStatuses(client: any MusicService) async {
+        explicitSongIDs.formUnion(songs.filter(\.isExplicit).map(\.id))
+        let unresolved = songs.filter { !$0.hasKnownExplicitStatus }
+        guard !unresolved.isEmpty else { return }
+
+        let resolved = await DeveloperExperiments.runConcurrently(
+            unresolved,
+            defaultMaxConcurrent: 3
+        ) { song in
+            let value = await ExplicitStatusResolver.shared.isExplicit(
+                songID: song.id,
+                localURL: DownloadService.shared.localURL(for: song),
+                remoteURL: client.originalStreamURL(id: song.id),
+                requestHeaders: client.mediaRequestHeaders()
+            )
+            return value == true ? song.id : nil
+        }
+        explicitSongIDs.formUnion(resolved.compactMap { $0 })
+        AppLogger.shared.log(
+            "Album explicit metadata resolved; albumID=\(album.id); server=\(songs.filter(\.isExplicit).count); embedded=\(resolved.compactMap { $0 }.count)",
+            category: .other
+        )
     }
 
     func setDominantColor(_ color: UIColor) {

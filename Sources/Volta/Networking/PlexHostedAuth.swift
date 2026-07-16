@@ -66,6 +66,64 @@ enum PlexHostedAuth {
         throw AuthError.timedOut
     }
 
+    // Resolve the signed-in account into Plex Media Servers. Plex returns a
+    // different access token for each server along with its local, remote, and
+    // relay connection URLs; the account token must not be used as the PMS
+    // token directly.
+    static func servers(
+        forAccountToken accountToken: String,
+        session: URLSession = .shared
+    ) async throws -> [PlexServerResource] {
+        guard var components = URLComponents(string: "https://clients.plex.tv/api/v2/resources") else {
+            throw AuthError.invalidResponse
+        }
+        components.queryItems = [
+            URLQueryItem(name: "includeHttps", value: "1"),
+            URLQueryItem(name: "includeRelay", value: "1"),
+            URLQueryItem(name: "includeIPv6", value: "1"),
+        ]
+        guard let url = components.url else { throw AuthError.invalidResponse }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        for (key, value) in PlexClient.plexHeaders(clientId: PlexClient.clientID()) {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        request.setValue(accountToken, forHTTPHeaderField: "X-Plex-Token")
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw SubsonicError.serverUnreachable
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw AuthError.invalidResponse
+        }
+        if http.statusCode == 401 || http.statusCode == 403 {
+            throw SubsonicError.invalidCredentials
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw SubsonicError.server(code: http.statusCode, message: "Plex resource discovery returned HTTP \(http.statusCode)")
+        }
+
+        let decoder = JSONDecoder()
+        let resources: [PlexServerResource]
+        if let decoded = try? decoder.decode([PlexServerResource].self, from: data) {
+            resources = decoded
+        } else if let envelope = try? decoder.decode(PlexResourceEnvelope.self, from: data) {
+            resources = envelope.MediaContainer?.Device ?? []
+        } else {
+            throw AuthError.invalidResponse
+        }
+
+        return resources.filter {
+            $0.isMediaServer && $0.usableAccessToken != nil && !$0.preferredConnections.isEmpty
+        }
+    }
+
     private static func poll(
         _ authSession: PlexHostedAuthSession,
         session: URLSession

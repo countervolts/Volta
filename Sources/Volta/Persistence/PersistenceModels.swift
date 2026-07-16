@@ -15,6 +15,9 @@ struct ServerRecord: Codable, Identifiable, Hashable {
     var addedAt: Date
     // Server protocol for this connection.
     var backend: MusicBackendKind
+    // Alternate routes Plex advertised for this same server. Empty for all
+    // other backends and for Plex records saved by older app versions.
+    var plexConnections: [PlexConnectionEndpoint]
 
     init(id: String = UUID().uuidString,
          displayName: String,
@@ -26,7 +29,8 @@ struct ServerRecord: Codable, Identifiable, Hashable {
          isDefault: Bool = false,
          isFallback: Bool = false,
          addedAt: Date = .now,
-         backend: MusicBackendKind = .subsonic) {
+         backend: MusicBackendKind = .subsonic,
+         plexConnections: [PlexConnectionEndpoint] = []) {
         self.id = id
         self.displayName = displayName
         self.urlString = urlString
@@ -38,11 +42,12 @@ struct ServerRecord: Codable, Identifiable, Hashable {
         self.isFallback = isFallback
         self.addedAt = addedAt
         self.backend = backend
+        self.plexConnections = plexConnections
     }
 
     enum CodingKeys: String, CodingKey {
         case id, displayName, urlString, cellularURLString, cellularUsername
-        case username, isCurrent, isDefault, isFallback, addedAt, backend
+        case username, isCurrent, isDefault, isFallback, addedAt, backend, plexConnections
     }
 
     // Older servers.json files have no backend/default/fallback keys.
@@ -59,6 +64,10 @@ struct ServerRecord: Codable, Identifiable, Hashable {
         isFallback = try c.decodeIfPresent(Bool.self, forKey: .isFallback) ?? false
         addedAt = try c.decode(Date.self, forKey: .addedAt)
         backend = try c.decodeIfPresent(MusicBackendKind.self, forKey: .backend) ?? .subsonic
+        plexConnections = try c.decodeIfPresent(
+            [PlexConnectionEndpoint].self,
+            forKey: .plexConnections
+        ) ?? []
     }
 }
 

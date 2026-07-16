@@ -688,11 +688,13 @@ struct NowPlayingScreen: View {
     private var landscapeTrackHeader: some View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(audio.currentSong?.title ?? " ")
-                    .font(.system(size: 25, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                OverflowSlidingText(
+                    text: audio.currentSong?.title ?? " ",
+                    font: .system(size: 25, weight: .bold),
+                    uiFont: .systemFont(ofSize: 25, weight: .bold),
+                    color: .white
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Button { presentArtistAlbumPicker() } label: {
                     Text(audio.currentSong?.artist ?? " ")
@@ -1637,10 +1639,13 @@ struct NowPlayingScreen: View {
 
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(audio.currentSong?.title ?? " ")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
+                    OverflowSlidingText(
+                        text: audio.currentSong?.title ?? " ",
+                        font: .headline,
+                        uiFont: .preferredFont(forTextStyle: .headline),
+                        color: .white
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     Button {
                         guard let song = audio.currentSong, let artistId = song.artistId else { return }
                         guard !isFetchingArtist else { return }
@@ -1801,10 +1806,16 @@ struct NowPlayingScreen: View {
                     .background(Capsule().fill(Theme.accent.opacity(0.16)))
                     .transition(.opacity.combined(with: .scale))
                 }
-                Text(audio.currentSong?.title ?? " ")
-                    .font(.title2.bold())
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                OverflowSlidingText(
+                    text: audio.currentSong?.title ?? " ",
+                    font: .title2.bold(),
+                    uiFont: .systemFont(
+                        ofSize: UIFont.preferredFont(forTextStyle: .title2).pointSize,
+                        weight: .bold
+                    ),
+                    color: .white
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Button { presentArtistAlbumPicker() } label: {
                     Text(audio.currentSong?.artist ?? " ")
                         .font(.body)
@@ -2315,10 +2326,16 @@ private struct AudioVisualizerScreen: View {
                 Spacer()
 
                 VStack(spacing: 8) {
-                    Text(audio.currentSong?.title ?? L(.player_not_playing))
-                        .font(.title2.bold())
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
+                    OverflowSlidingText(
+                        text: audio.currentSong?.title ?? L(.player_not_playing),
+                        font: .title2.bold(),
+                        uiFont: .systemFont(
+                            ofSize: UIFont.preferredFont(forTextStyle: .title2).pointSize,
+                            weight: .bold
+                        ),
+                        color: .white
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     Text(audio.currentSong?.artist ?? " ")
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.65))
