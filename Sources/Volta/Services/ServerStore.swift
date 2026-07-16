@@ -52,7 +52,12 @@ final class ServerStore {
         guard let url = URL(string: chosen),
               let mainPassword = KeychainService.password(for: record.id) else { return nil }
         let password = cellular ? (cellularPassword(for: record) ?? mainPassword) : mainPassword
-        return SubsonicConfig(baseURL: url, username: username, password: password)
+        return SubsonicConfig(
+            baseURL: url,
+            username: username,
+            password: password,
+            plexConnections: record.plexConnections
+        )
     }
 
     func cellularPassword(for record: ServerRecord) -> String? {
@@ -82,9 +87,17 @@ final class ServerStore {
     @discardableResult
     func upsert(config: SubsonicConfig, displayName: String, backend: MusicBackendKind = .subsonic) -> ServerRecord {
         let urlString = config.baseURL.absoluteString
-        if let idx = servers.firstIndex(where: { $0.urlString == urlString && $0.username == config.username }) {
+        let incomingPlexURLs = Set(config.plexConnections.map { $0.url.absoluteString })
+        if let idx = servers.firstIndex(where: { record in
+            if record.urlString == urlString && record.username == config.username { return true }
+            guard backend == .plex, record.backend == .plex, record.username == config.username,
+                  !incomingPlexURLs.isEmpty else { return false }
+            return record.plexConnections.contains { incomingPlexURLs.contains($0.url.absoluteString) }
+        }) {
             servers[idx].displayName = displayName
             servers[idx].backend = backend
+            servers[idx].urlString = urlString
+            servers[idx].plexConnections = config.plexConnections
             if !servers.contains(where: \.isDefault) {
                 servers[idx].isDefault = true
             }
@@ -92,7 +105,13 @@ final class ServerStore {
             setCurrent(servers[idx])
             return servers[idx]
         }
-        var record = ServerRecord(displayName: displayName, urlString: urlString, username: config.username, backend: backend)
+        var record = ServerRecord(
+            displayName: displayName,
+            urlString: urlString,
+            username: config.username,
+            backend: backend,
+            plexConnections: config.plexConnections
+        )
         record.isDefault = !servers.contains(where: \.isDefault)
         KeychainService.save(password: config.password, for: record.id)
         servers.append(record)
@@ -139,6 +158,7 @@ final class ServerStore {
         guard let idx = servers.firstIndex(where: { $0.id == record.id }) else { return record }
         servers[idx].urlString = config.baseURL.absoluteString
         servers[idx].username = config.username
+        servers[idx].plexConnections = config.plexConnections
         if let displayName { servers[idx].displayName = displayName }
         if let backend { servers[idx].backend = backend }
         KeychainService.save(password: config.password, for: servers[idx].id)

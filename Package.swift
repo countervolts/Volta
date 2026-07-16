@@ -32,5 +32,9 @@ let package = Package(
                 ], .when(platforms: [.iOS])),
             ]
         ),
+        .testTarget(
+            name: "VoltaTests",
+            dependencies: ["Volta"]
+        ),
     ]
 )

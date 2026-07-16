@@ -98,8 +98,9 @@ enum FakeStatsGenerator {
                     artistId: artistID, albumArtistId: artistID,
                     coverArt: nil, duration: Int.random(in: 140...320), track: t + 1,
                     discNumber: 1, year: Int.random(in: 1995...2024), genre: genre, size: nil,
-                    contentType: nil, suffix: nil, bitRate: nil, path: nil, playCount: nil,
-                    bpm: nil, starred: nil, contributes: nil, replayGain: nil, samplingRate: nil,
+                    contentType: nil, suffix: nil, codec: nil, bitRate: nil, path: nil, playCount: nil,
+                    bpm: nil, explicitStatus: nil, starred: nil, contributes: nil,
+                    replayGain: nil, samplingRate: nil,
                     bitDepth: nil, channelCount: nil, displayComposer: nil, contributors: nil
                 )
                 result.append(PoolSong(song: song, genre: genre))

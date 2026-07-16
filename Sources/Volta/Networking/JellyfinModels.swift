@@ -219,10 +219,12 @@ extension JFItem {
             size: source?.Size,
             contentType: nil,
             suffix: container?.lowercased(),
+            codec: audio?.Codec?.lowercased(),
             bitRate: bitrateKbps,
             path: Path,
             playCount: UserData?.PlayCount,
             bpm: nil,                       // Jellyfin does not expose BPM metadata
+            explicitStatus: nil,
             starred: starredMarker,
             contributes: nil,
             replayGain: nil,

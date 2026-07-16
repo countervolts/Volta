@@ -23,7 +23,7 @@ final class LyricsBulkDownloader: ObservableObject {
         return min(1, Double(completed) / Double(total))
     }
 
-    func start(client: any MusicService) {
+    func start(client: any MusicService, source: LyricsDownloadSource) {
         guard !isRunning else { return }
         // Demo servers are stream-only; don't bulk-pull their lyrics to disk.
         if DemoServers.isDemo(client.config.baseURL) {
@@ -32,22 +32,22 @@ final class LyricsBulkDownloader: ObservableObject {
         }
         isRunning = true
         completed = 0; found = 0; total = 0; skipped = 0
-        statusText = "Scanning library…"
-        task = Task { await run(client: client) }
+        statusText = "Scanning library for \(source.displayName)…"
+        task = Task { await run(client: client, source: source) }
     }
 
     func cancel() {
         task?.cancel()
     }
 
-    private func run(client: any MusicService) async {
+    private func run(client: any MusicService, source: LyricsDownloadSource) async {
         let songs = await Self.allSongs(client: client)
         if Task.isCancelled { finish(cancelled: true); return }
 
         // only fetch songs that don't already have lyrics on device, so re-running
         // (or adding songs to the server) only downloads what's missing
-        statusText = "Checking existing lyrics…"
-        let pending = await LyricsService.shared.songsMissingLyrics(songs)
+        statusText = "Checking existing \(source.displayName) lyrics…"
+        let pending = await LyricsService.shared.songsMissingLyrics(songs, source: source)
         if Task.isCancelled { finish(cancelled: true); return }
         skipped = songs.count - pending.count
         total = pending.count
@@ -60,25 +60,25 @@ final class LyricsBulkDownloader: ObservableObject {
             VoltaNotificationCenter.shared.post(L(.notif_lyrics_up_to_date), tone: .success)
             return
         }
-        statusText = "Downloading \(total) missing…"
+        statusText = "Downloading \(total) from \(source.displayName)…"
 
         await withTaskGroup(of: Bool.self) { group in
             var iterator = pending.makeIterator()
             let maxConcurrent = DeveloperExperiments.constrainedConcurrency(default: Self.maxConcurrent)
             for _ in 0..<maxConcurrent {
                 guard let song = iterator.next() else { break }
-                group.addTask { await Self.fetch(song, client: client) }
+                group.addTask { await Self.fetch(song, client: client, source: source) }
             }
             while let hadLyrics = await group.next() {
                 completed += 1
                 if hadLyrics { found += 1 }
-                statusText = "Downloading missing… \(completed)/\(total)"
+                statusText = "Downloading from \(source.displayName)… \(completed)/\(total)"
                 if Task.isCancelled {
                     group.cancelAll()
                     break
                 }
                 if let song = iterator.next() {
-                    group.addTask { await Self.fetch(song, client: client) }
+                    group.addTask { await Self.fetch(song, client: client, source: source) }
                 }
             }
         }
@@ -99,8 +99,19 @@ final class LyricsBulkDownloader: ObservableObject {
     }
 
     // fetch (and persist) lyrics for one song; true when any were found
-    private nonisolated static func fetch(_ song: Song, client: any MusicService) async -> Bool {
-        let lines = await LyricsService.shared.lyrics(for: song, client: client)
+    private nonisolated static func fetch(
+        _ song: Song,
+        client: any MusicService,
+        source: LyricsDownloadSource
+    ) async -> Bool {
+        // The explicit Download All action persists even if the automatic
+        // "Save Lyrics Locally" toggle is off.
+        let lines = await LyricsService.shared.lyrics(
+            for: song,
+            client: client,
+            forceSave: true,
+            downloadSource: source
+        )
         return !lines.isEmpty
     }
 

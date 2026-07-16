@@ -563,6 +563,7 @@ struct JellyfinClient: MusicService {
             displayArtist: nil,
             displayTitle: nil,
             lang: nil,
+            offset: nil,
             synced: synced,
             line: lines.map { StructuredLyricLine(start: $0.Start.map { Int($0 / 10_000) }, value: $0.Text ?? "") }
         )

@@ -73,8 +73,13 @@ final class AppState: ObservableObject {
         }
     }
 
-    func completeLogin(config: SubsonicConfig, kind: MusicBackendKind = .subsonic) {
-        let name = config.baseURL.host ?? "Server"
+    func completeLogin(
+        config: SubsonicConfig,
+        kind: MusicBackendKind = .subsonic,
+        displayName: String? = nil
+    ) {
+        let trimmedName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = (trimmedName?.isEmpty == false ? trimmedName : nil) ?? config.baseURL.host ?? "Server"
         let record = store.upsert(config: config, displayName: name, backend: kind)
         // Reuse any stored cellular override for this record.
         let cellular = NetworkMonitor.shared.isCellular
@@ -104,6 +109,14 @@ final class AppState: ObservableObject {
     private func reapplyNetworkURL() {
         guard phase == .authenticated, let record = currentServer,
               let config = store.config(for: record, cellular: activeIsCellular) else { return }
+        if config == client?.config, let plex = client as? PlexClient {
+            AppLogger.shared.log(
+                "Refreshing Plex connection preference for \(activeIsCellular ? "cellular" : "Wi-Fi")",
+                category: .networking
+            )
+            Task { await plex.refreshConnection(preferLocal: !activeIsCellular) }
+            return
+        }
         // Rebuild only when the effective base URL changes.
         guard config != client?.config else { return }
         AppLogger.shared.log("Network URL switching to \(activeIsCellular ? "cellular" : "Wi-Fi"): \(config.baseURL.absoluteString)", category: .networking)

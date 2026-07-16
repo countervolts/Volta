@@ -27,6 +27,8 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case error_bad_credentials
     case error_plex_timeout
     case error_plex_failed
+    case error_plex_no_servers
+    case error_plex_access_denied
     case plex_finish_sign_in
 
     // Tab bar
@@ -142,9 +144,14 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     // Appearance section rows
     case appearance_theme
     case appearance_lossless_badge
+    case appearance_explicit_badge
     case appearance_live_artwork
     case appearance_stylized_cover
     case appearance_song_artwork_lists
+    case appearance_long_track_titles
+    case track_titles_truncate
+    case track_titles_sliding
+    case track_titles_new_line
     case appearance_dynamic_background
     case appearance_accent_color
     case appearance_hidden_albums
@@ -842,6 +849,12 @@ enum Strings {
             .japanese: "Plex のサインインを完了できませんでした。",
             .korean: "Plex 로그인을 완료할 수 없습니다.",
         ],
+        .error_plex_no_servers: [
+            .english: "No Plex Media Server is available for this Plex account.",
+        ],
+        .error_plex_access_denied: [
+            .english: "Plex sign-in succeeded, but this account could not access an available Plex Media Server.",
+        ],
         .plex_finish_sign_in: [
             .english: "Finish signing in with Plex",
             .spanish: "Termina de iniciar sesión con Plex",
@@ -1335,6 +1348,14 @@ enum Strings {
             .danish: "Vis lossless-mærke", .finnish: "Näytä lossless-merkki", .chinese: "显示无损标记",
             .japanese: "ロスレスバッジを表示", .korean: "무손실 배지 표시",
         ],
+        .appearance_explicit_badge: [
+            .english: "Show Explicit Badge", .spanish: "Mostrar insignia de contenido explícito", .french: "Afficher le badge explicite",
+            .german: "Explicit-Abzeichen anzeigen", .portuguese: "Mostrar selo de conteúdo explícito", .italian: "Mostra badge esplicito",
+            .dutch: "Explicit-badge tonen", .russian: "Показывать значок Explicit", .polish: "Pokaż plakietkę Explicit",
+            .turkish: "Explicit rozetini göster", .swedish: "Visa explicit-märke", .norwegian: "Vis explicit-merke",
+            .danish: "Vis explicit-mærke", .finnish: "Näytä explicit-merkki", .chinese: "显示限制级标记",
+            .japanese: "Explicitバッジを表示", .korean: "유해 콘텐츠 배지 표시",
+        ],
         .appearance_live_artwork: [
             .english: "Live Artwork", .spanish: "Carátula animada", .french: "Pochette animée", .german: "Live-Cover",
             .portuguese: "Capa animada", .italian: "Copertina animata", .dutch: "Live albumhoes", .russian: "Живая обложка",
@@ -1356,6 +1377,32 @@ enum Strings {
             .turkish: "Listelerde şarkı kapağı", .swedish: "Omslag i listor", .norwegian: "Omslag i lister",
             .danish: "Omslag i lister", .finnish: "Kansikuvat luetteloissa", .chinese: "列表中显示歌曲封面",
             .japanese: "リストに曲のアートワークを表示", .korean: "목록에 곡 아트워크 표시",
+        ],
+        .appearance_long_track_titles: [
+            .english: "Long Track Titles", .spanish: "Títulos largos de canciones", .french: "Titres de morceaux longs",
+            .german: "Lange Songtitel", .portuguese: "Títulos longos das faixas", .italian: "Titoli lunghi dei brani",
+            .dutch: "Lange tracktitels", .russian: "Длинные названия треков", .polish: "Długie tytuły utworów",
+            .turkish: "Uzun parça adları", .swedish: "Långa låttitlar", .norwegian: "Lange sangtitler",
+            .danish: "Lange sangtitler", .finnish: "Pitkät kappaleiden nimet", .chinese: "长歌曲标题",
+            .japanese: "長い曲名", .korean: "긴 곡 제목",
+        ],
+        .track_titles_truncate: [
+            .english: "Truncate", .spanish: "Truncar", .french: "Tronquer", .german: "Kürzen",
+            .portuguese: "Truncar", .italian: "Tronca", .dutch: "Afkappen", .russian: "Обрезать",
+            .polish: "Skróć", .turkish: "Kısalt", .swedish: "Korta av", .norwegian: "Forkort",
+            .danish: "Forkort", .finnish: "Lyhennä", .chinese: "截断", .japanese: "省略", .korean: "말줄임",
+        ],
+        .track_titles_sliding: [
+            .english: "Sliding", .spanish: "Deslizante", .french: "Défilement", .german: "Lauftext",
+            .portuguese: "Deslizante", .italian: "Scorrimento", .dutch: "Schuivend", .russian: "Прокрутка",
+            .polish: "Przewijanie", .turkish: "Kayan", .swedish: "Rullande", .norwegian: "Rullende",
+            .danish: "Rullende", .finnish: "Vierivä", .chinese: "滚动", .japanese: "スクロール", .korean: "스크롤",
+        ],
+        .track_titles_new_line: [
+            .english: "New Line", .spanish: "Nueva línea", .french: "Nouvelle ligne", .german: "Neue Zeile",
+            .portuguese: "Nova linha", .italian: "Nuova riga", .dutch: "Nieuwe regel", .russian: "Новая строка",
+            .polish: "Nowy wiersz", .turkish: "Yeni satır", .swedish: "Ny rad", .norwegian: "Ny linje",
+            .danish: "Ny linje", .finnish: "Uusi rivi", .chinese: "换行", .japanese: "改行", .korean: "줄바꿈",
         ],
         .appearance_dynamic_background: [
             .english: "Dynamic Player Background", .spanish: "Fondo dinámico del reproductor", .french: "Arrière-plan dynamique du lecteur",

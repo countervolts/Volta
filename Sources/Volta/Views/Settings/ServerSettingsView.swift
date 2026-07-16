@@ -211,8 +211,16 @@ struct EditConnectionView: View {
             defer { isSaving = false }
             var lastError: Error?
             do {
+                let shouldKeepPlexDiscovery = backend == .plex && candidateURLs.contains {
+                    $0.absoluteString == currentServer.urlString
+                }
                 for url in candidateURLs {
-                    let config = SubsonicConfig(baseURL: url, username: username, password: pwd)
+                    let config = SubsonicConfig(
+                        baseURL: url,
+                        username: username,
+                        password: pwd,
+                        plexConnections: shouldKeepPlexDiscovery ? currentServer.plexConnections : []
+                    )
                     do {
                         let testClient = try await MusicServiceFactory.make(config: config, kind: backend)
                         try await testClient.ping()

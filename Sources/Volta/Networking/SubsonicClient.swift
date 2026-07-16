@@ -4,6 +4,36 @@ struct SubsonicConfig: Sendable, Hashable, Codable {
     var baseURL: URL
     var username: String
     var password: String
+    // Populated only for Plex account discovery. Other backends leave this
+    // empty and continue to use a single base URL.
+    var plexConnections: [PlexConnectionEndpoint]
+
+    init(
+        baseURL: URL,
+        username: String,
+        password: String,
+        plexConnections: [PlexConnectionEndpoint] = []
+    ) {
+        self.baseURL = baseURL
+        self.username = username
+        self.password = password
+        self.plexConnections = plexConnections
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case baseURL, username, password, plexConnections
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        baseURL = try container.decode(URL.self, forKey: .baseURL)
+        username = try container.decode(String.self, forKey: .username)
+        password = try container.decode(String.self, forKey: .password)
+        plexConnections = try container.decodeIfPresent(
+            [PlexConnectionEndpoint].self,
+            forKey: .plexConnections
+        ) ?? []
+    }
 
     // Normalize user-entered server roots. Defaults to https when no scheme is given.
     static func normalizedURL(from raw: String, kind: MusicBackendKind? = nil) -> URL? {

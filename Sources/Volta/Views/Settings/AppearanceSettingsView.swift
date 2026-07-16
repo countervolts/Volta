@@ -64,7 +64,7 @@ extension SettingsView {
     @ViewBuilder
     var appearanceSection: some View {
         let s = "Appearance"
-        if sectionVisible(s, [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["accent color", "accent", "color", "colour", "theme"]]) {
+        if sectionVisible(s, [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]) {
             Section {
                 if rowVisible(s, ["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"]) {
                     NavigationLink(value: SettingsRoute.language) {
@@ -103,6 +103,13 @@ extension SettingsView {
                     .tint(Theme.accent)
                 }
 
+                if rowVisible(s, ["show explicit badge", "explicit", "parental advisory", "badge"]) {
+                    Toggle(isOn: $showExplicitBadge) {
+                        Label(L(.appearance_explicit_badge), systemImage: "e.square.fill")
+                    }
+                    .tint(Theme.accent)
+                }
+
                 if rowVisible(s, ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"]) {
                     if LiveArtworkSettings.supportsAnimatedArtwork {
                         Toggle(isOn: $liveArtwork) {
@@ -129,6 +136,17 @@ extension SettingsView {
                 if rowVisible(s, ["song artwork in lists", "artwork", "thumbnail", "cover", "track"]) {
                     Toggle(isOn: $showTrackArtwork) {
                         Label(L(.appearance_song_artwork_lists), systemImage: "photo")
+                    }
+                    .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"]) {
+                    Picker(selection: $albumTrackTitleDisplayMode) {
+                        Text(L(.track_titles_truncate)).tag(AlbumTrackTitleDisplayMode.truncate.rawValue)
+                        Text(L(.track_titles_sliding)).tag(AlbumTrackTitleDisplayMode.sliding.rawValue)
+                        Text(L(.track_titles_new_line)).tag(AlbumTrackTitleDisplayMode.newLine.rawValue)
+                    } label: {
+                        Label(L(.appearance_long_track_titles), systemImage: "text.alignleft")
                     }
                     .tint(Theme.accent)
                 }

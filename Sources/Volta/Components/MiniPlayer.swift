@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // Mini player used by both the tab accessory and fallback bar.
 struct MiniPlayerAccessory: View {
@@ -17,10 +18,16 @@ struct MiniPlayerAccessory: View {
                     artwork
 
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(song.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
+                        OverflowSlidingText(
+                            text: song.title,
+                            font: .subheadline.weight(.semibold),
+                            uiFont: .systemFont(
+                                ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize,
+                                weight: .semibold
+                            ),
+                            color: .primary
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         Text(song.artist ?? "")
                             .font(.caption2)
                             .foregroundStyle(.secondary)

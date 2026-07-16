@@ -16,6 +16,8 @@ struct AlbumDetailView: View {
     @State private var drillArtist: Artist? = nil
     @State private var showAlbumLosslessInfo = false
     @State private var animatedCover: UIImage?
+    @AppStorage("albumTrackTitleDisplayMode") private var albumTrackTitleDisplayMode = AlbumTrackTitleDisplayMode.truncate.rawValue
+    @AppStorage("showExplicitBadge") private var showExplicitBadge = true
 
     // when opened from an artist profile, the animated header gets the same
     // pull-to-zoom (stretchy) behaviour the artist profile header has
@@ -89,6 +91,9 @@ struct AlbumDetailView: View {
                 async let cover: Void = loadAnimatedCover()
                 if let c = appState.client { await vm.load(client: c) }
                 await cover
+            }
+            if showExplicitBadge, let client = appState.client {
+                await vm.resolveExplicitStatuses(client: client)
             }
             AppLogger.shared.log(
                 "Album detail load finished; albumID=\(vm.album.id); songs=\(vm.songs.count); animatedCover=\(animatedCover != nil); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
@@ -416,7 +421,8 @@ struct AlbumDetailView: View {
     }
 
     private func trackRows(_ songs: [Song]) -> some View {
-        ForEach(Array(songs.enumerated()), id: \.element.id) { i, song in
+        let titleDisplayMode = AlbumTrackTitleDisplayMode(rawValue: albumTrackTitleDisplayMode) ?? .truncate
+        return ForEach(Array(songs.enumerated()), id: \.element.id) { i, song in
             TrackRow(
                 song: song,
                 index: song.track ?? (i + 1),
@@ -426,6 +432,9 @@ struct AlbumDetailView: View {
                         appState.audioPlayer.playQueue(vm.songs, startIndex: idx, source: vm.album.name, album: vm.album)
                     }
                 },
+                titleDisplayMode: titleDisplayMode,
+                showsExplicitBadge: showExplicitBadge,
+                explicitOverride: vm.explicitSongIDs.contains(song.id) ? true : nil,
                 onSwipePlayNext: {
                     appState.audioPlayer.playNext(song)
                 }
