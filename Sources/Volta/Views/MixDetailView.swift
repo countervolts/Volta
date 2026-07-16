@@ -22,7 +22,9 @@ struct MixDetailView: View {
     @State private var activeSheet: MixSheet? = nil
     @State private var toastMessage: String? = nil
     @State private var isSavingMix = false
+    @State private var explicitSongIDs = Set<String>()
     @AppStorage("showTrackArtwork") private var showTrackArtwork = true
+    @AppStorage("showExplicitBadge") private var showExplicitBadge = true
 
     private var bg: Color { Color(ColorExtractor.backgroundVariant(of: dominantColor)) }
 
@@ -74,6 +76,12 @@ struct MixDetailView: View {
                         } }
                 }
                 .preferredColorScheme(Theme.colorScheme)
+            }
+        }
+        .task(id: mix.id) {
+            explicitSongIDs = Set(mix.songs.filter(\.isExplicit).map(\.id))
+            if showExplicitBadge, let client = appState.client {
+                await resolveExplicitStatuses(client: client)
             }
         }
     }
@@ -182,6 +190,8 @@ struct MixDetailView: View {
                         appState.audioPlayer.playQueue(mix.songs, startIndex: i, source: mix.localizedTitle)
                     },
                     showArtist: true,
+                    showsExplicitBadge: showExplicitBadge,
+                    explicitOverride: explicitSongIDs.contains(song.id) ? true : nil,
                     leadingArtwork: showTrackArtwork,
                     onSwipePlayNext: {
                         appState.audioPlayer.playNext(song)
@@ -198,6 +208,29 @@ struct MixDetailView: View {
             }
         }
         .padding(.horizontal, 20)
+    }
+
+    private func resolveExplicitStatuses(client: any MusicService) async {
+        let unresolved = mix.songs.filter { !$0.hasKnownExplicitStatus }
+        guard !unresolved.isEmpty else { return }
+
+        let resolved = await DeveloperExperiments.runConcurrently(
+            unresolved,
+            defaultMaxConcurrent: 3
+        ) { song in
+            let value = await ExplicitStatusResolver.shared.isExplicit(
+                songID: song.id,
+                localURL: DownloadService.shared.localURL(for: song),
+                remoteURL: client.originalStreamURL(id: song.id),
+                requestHeaders: client.mediaRequestHeaders()
+            )
+            return value == true ? song.id : nil
+        }
+        explicitSongIDs.formUnion(resolved.compactMap { $0 })
+        AppLogger.shared.log(
+            "Mix explicit metadata resolved; mixID=\(mix.id); server=\(mix.songs.filter(\.isExplicit).count); embedded=\(resolved.compactMap { $0 }.count)",
+            category: .other
+        )
     }
 
     private func showToast(_ message: String) {
