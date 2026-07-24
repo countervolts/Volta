@@ -44,13 +44,15 @@ private enum PlaybackHistoryStore {
     }
 }
 
-private enum PlaybackURLSource: String {
+private enum PlaybackURLSource: String, Equatable {
     case download
     case playbackCache = "cache"
     case stream
 
     var isUserDownload: Bool { self == .download }
 }
+
+private typealias PlaybackURLInfo = (url: URL, source: PlaybackURLSource, usesTranscode: Bool)
 
 // User-tunable infinite-play fill style.
 enum InfinitePlayStyle: String, CaseIterable, Identifiable, Sendable {
@@ -258,6 +260,7 @@ final class AudioPlayer: ObservableObject {
     @Published private(set) var currentArtwork: UIImage?
     @Published private(set) var currentAnimatedArtwork: UIImage?
     @Published private(set) var currentLiveArtwork: LiveArtworkAsset?
+    @Published private(set) var currentPlaybackUsesTranscode = false
 
     @Published private(set) var queue: [Song] = []
     @Published private(set) var currentIndex: Int = 0
@@ -313,16 +316,20 @@ final class AudioPlayer: ObservableObject {
     // Bass-swap tap ids; 0 means inactive.
     private var primedBassID: UInt64 = 0
     private var currentBassID: UInt64 = 0
+    private var primedSongUsesTranscode = false
 
     private var gaplessNextItem: AVPlayerItem? = nil
     private var gaplessNextSongID: String? = nil
     private var gaplessNextSource: PlaybackURLSource? = nil
+    private var gaplessNextUsesTranscode = false
     private var gaplessNextQueueIndex: Int? = nil
     private var gaplessPreloadTask: Task<Void, Never>?
     private var gaplessReadinessLoggedItemID: ObjectIdentifier?
     private var gaplessTransitionMeasurementTask: Task<Void, Never>?
     private var currentAudioProcessingTask: Task<Void, Never>?
     private var currentPlayerItem: AVPlayerItem? = nil
+    private var currentPlaybackSource: PlaybackURLSource?
+    private var prematureTranscodeEndRetries: [String: Int] = [:]
     // A paused restored session keeps metadata only until playback resumes.
     private var deferredRestoredTime: TimeInterval? = nil
     // Lets deferred play requests detect newer track changes.
@@ -331,6 +338,7 @@ final class AudioPlayer: ObservableObject {
     // Per-song loads, cancelled on track change so rapid skips don't pile up.
     private var artworkLoadTask: Task<Void, Never>?
     private var durationLoadTask: Task<Void, Never>?
+    private var startupDiagnosticsTask: Task<Void, Never>?
     private var warmStreamsTask: Task<Void, Never>?
     private let autoplayPreloadThreshold = 1
     private var currentServerID: String?
@@ -392,7 +400,7 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func makePlayerItem(
-        playback urlInfo: (url: URL, source: PlaybackURLSource),
+        playback urlInfo: PlaybackURLInfo,
         requiresTimePitchProcessing: Bool = false
     ) -> AVPlayerItem {
         // Precise duration probing is useful and cheap for local files, but can
@@ -403,7 +411,8 @@ final class AudioPlayer: ObservableObject {
         let asset = AVURLAsset(url: urlInfo.url, options: options)
         let item = AVPlayerItem(asset: asset)
         if urlInfo.source == .stream {
-            item.preferredForwardBufferDuration = 15
+            item.preferredForwardBufferDuration = urlInfo.usesTranscode ? 18 : 3
+            item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         }
         if requiresTimePitchProcessing {
             item.audioTimePitchAlgorithm = .timeDomain
@@ -414,6 +423,20 @@ final class AudioPlayer: ObservableObject {
     private var audioProcessingRequired: Bool {
         AudioVisualizerEngine.shared.isActive
             || (EqualizerEngine.shared.isAnyEffectActive && !PerformanceMode.bypassAudioEffects)
+    }
+
+    private func sourceNeedsNetworkBuffer(source: PlaybackURLSource, usesTranscode: Bool) -> Bool {
+        source == .stream && usesTranscode
+    }
+
+    private func startPlayer(_ target: AVQueuePlayer, source: PlaybackURLSource, usesTranscode: Bool) {
+        let shouldWaitForNetworkBuffer = sourceNeedsNetworkBuffer(source: source, usesTranscode: usesTranscode)
+        target.automaticallyWaitsToMinimizeStalling = shouldWaitForNetworkBuffer
+        if shouldWaitForNetworkBuffer {
+            target.play()
+        } else {
+            target.playImmediately(atRate: 1)
+        }
     }
 
     // Loading an audio track is asynchronous. Callers preparing an upcoming
@@ -503,6 +526,7 @@ final class AudioPlayer: ObservableObject {
         }
         self.client = client
         currentServerID = serverID
+        TrackPairingStore.shared.selectServer(serverID)
         if previousServerID != serverID {
             loadPlaybackHistory(for: serverID)
         }
@@ -533,11 +557,12 @@ final class AudioPlayer: ObservableObject {
         autoplayArtistName = nil
         autoplayArtistId = nil
         infinitePlaySeed = []
-        queue = songs
+        let pairedQueue = queueWithTrackPairings(songs, startIndex: startIndex)
+        queue = pairedQueue.songs
         queueSourceTitle = source
         queueSourceAlbum = album
         queueSourcePlaylist = playlist
-        currentIndex = startIndex
+        currentIndex = pairedQueue.startIndex
         if isShuffle { shuffleUpcoming() }
         playCurrent()
     }
@@ -680,6 +705,7 @@ final class AudioPlayer: ObservableObject {
         cancelTransitionPlayback(keepPaused: true)
         artworkLoadTask?.cancel(); artworkLoadTask = nil
         durationLoadTask?.cancel(); durationLoadTask = nil
+        startupDiagnosticsTask?.cancel(); startupDiagnosticsTask = nil
         warmStreamsTask?.cancel(); warmStreamsTask = nil
         gaplessPreloadTask?.cancel(); gaplessPreloadTask = nil
         gaplessTransitionMeasurementTask?.cancel(); gaplessTransitionMeasurementTask = nil
@@ -687,10 +713,14 @@ final class AudioPlayer: ObservableObject {
         primaryPlayer.replaceCurrentItem(with: nil)
         secondaryPlayer.replaceCurrentItem(with: nil)
         currentPlayerItem = nil
+        currentPlaybackSource = nil
+        currentPlaybackUsesTranscode = false
+        prematureTranscodeEndRetries.removeAll()
         deferredRestoredTime = nil
         gaplessNextItem = nil
         gaplessNextSongID = nil
         gaplessNextSource = nil
+        gaplessNextUsesTranscode = false
         gaplessNextQueueIndex = nil
         gaplessReadinessLoggedItemID = nil
         isPlaying = false
@@ -801,11 +831,9 @@ final class AudioPlayer: ObservableObject {
     func playbackTimeSnapshot() -> PlaybackTimeSnapshot {
         let itemDuration = player.currentItem?.duration.seconds ?? .nan
         // The server's reported duration is reliable; AVPlayer's item duration is a
-        // header-based estimate that under-reports VBR-encoded originals, which made
-        // the bar hit 0:00 remaining while the song kept playing.
-        let metadataDuration = duration > 0
-            ? duration
-            : Double(currentSong?.duration ?? 0)
+        // header-based estimate for streamed transcodes. It can under- or over-report
+        // depending on container/bitrate, especially for on-the-fly Opus streams.
+        let metadataDuration = resolvedPlaybackDuration(avDuration: itemDuration)
 
         let playerTime = player.currentTime().seconds
         let sampledTime = deferredRestoredTime
@@ -813,11 +841,35 @@ final class AudioPlayer: ObservableObject {
         let rawElapsed = max(0, sampledTime)
 
         // Duration cannot fall behind live playback.
-        var total = max(itemDuration.isFinite ? itemDuration : 0, max(0, metadataDuration))
+        var total = max(0, metadataDuration)
         total = max(total, rawElapsed)
 
         let elapsed = total > 0 ? min(rawElapsed, total) : rawElapsed
         return PlaybackTimeSnapshot(elapsed: elapsed, duration: total)
+    }
+
+    private func resolvedPlaybackDuration(avDuration: TimeInterval) -> TimeInterval {
+        let serverDuration = Double(currentSong?.duration ?? 0)
+        let storedDuration = duration > 0 ? duration : serverDuration
+        guard avDuration.isFinite, avDuration > 0 else {
+            return max(0, storedDuration)
+        }
+        if shouldPreferServerDuration(avDuration: avDuration, serverDuration: serverDuration) {
+            return serverDuration
+        }
+        return max(storedDuration, avDuration)
+    }
+
+    private func shouldPreferServerDuration(
+        avDuration: TimeInterval,
+        serverDuration: TimeInterval,
+        source: PlaybackURLSource? = nil
+    ) -> Bool {
+        guard serverDuration > 0 else { return false }
+        let activeSource = source ?? currentPlaybackSource
+        guard activeSource == .stream || activeSource == .playbackCache else { return false }
+        let tolerance = max(3.0, serverDuration * 0.05)
+        return abs(avDuration - serverDuration) > tolerance
     }
 
     func persistLastPlaybackSession(synchronize: Bool = false) {
@@ -904,8 +956,8 @@ final class AudioPlayer: ObservableObject {
 
         let song = restoredQueue[restoredIndex]
         if DownloadService.shared.localURL(for: song) == nil,
-           client?.streamMetadataReady(id: song.id) == false {
-            await client?.prepareForPlayback(id: song.id)
+           client?.streamMetadataReady(for: song) == false {
+            await client?.prepareForPlayback(song: song)
         }
 
         guard currentSong == nil, !hasActivePlaybackSession else { return }
@@ -934,6 +986,9 @@ final class AudioPlayer: ObservableObject {
         queueSourceTitle = session.queueSourceTitle
         queueSourceAlbum = session.queueSourceAlbum
         queueSourcePlaylist = session.queueSourcePlaylist
+        currentArtwork = nil
+        currentAnimatedArtwork = nil
+        currentLiveArtwork = nil
         hasActivePlaybackSession = true
         currentSong = song
         isPlaying = false
@@ -944,9 +999,7 @@ final class AudioPlayer: ObservableObject {
         duration = total
         deferredRestoredTime = elapsed
         currentPlayerItem = nil
-        currentArtwork = nil
-        currentAnimatedArtwork = nil
-        currentLiveArtwork = nil
+        currentPlaybackUsesTranscode = false
         loggedSongIDs.remove(song.id)
         if song.starred != nil { starredIDs.insert(song.id) }
 
@@ -972,10 +1025,13 @@ final class AudioPlayer: ObservableObject {
         }
 
         let item = makePlayerItem(playback: urlInfo)
+        startupDiagnosticsTask?.cancel()
         applyEqualizer(to: item)
         player.removeAllItems()
         player.insert(item, after: nil)
         currentPlayerItem = item
+        currentPlaybackSource = urlInfo.source
+        currentPlaybackUsesTranscode = urlInfo.usesTranscode
         applyReplayGain(for: song)
         try? AVAudioSession.sharedInstance().setActive(true)
         isPlaying = true
@@ -988,7 +1044,7 @@ final class AudioPlayer: ObservableObject {
             self.deferredRestoredTime = nil
             self.currentTime = elapsed
             if self.isPlaying {
-                self.player.playImmediately(atRate: 1)
+                self.startPlayer(self.player, source: urlInfo.source, usesTranscode: urlInfo.usesTranscode)
             }
         }
         if elapsed > 0 {
@@ -1006,6 +1062,7 @@ final class AudioPlayer: ObservableObject {
         persistLastPlaybackSession()
         durationLoadTask?.cancel()
         durationLoadTask = Task { [weak self] in await self?.loadDuration(from: item) }
+        monitorStartup(for: item, song: song, source: urlInfo.source)
         scheduleGaplessPreload()
         ensureAutoplayPreloadedIfNeeded()
         warmUpcomingStreams()
@@ -1072,14 +1129,14 @@ final class AudioPlayer: ObservableObject {
         // centre dedupes a burst of identical posts (album "Play Next") into one.
         VoltaNotificationCenter.shared.post(L(.notif_playing_next), tone: .queue)
         guard !queue.isEmpty else {
-            queue = [song]
+            queue = queueWithTrackPairings([song]).songs
             currentIndex = 0
             queueSourceTitle = "Play Next"
             AppLogger.shared.log("Queued next while idle: '\(song.title)'", category: .playback)
             return
         }
         invalidatePreloadedNext()
-        insertSongsNext([song])
+        insertSongsNext(queueWithTrackPairings([song]).songs)
         resetPreparedTransitionPlan()
         scheduleGaplessPreload()
         prepareTransitionPlanIfNeeded()
@@ -1088,7 +1145,7 @@ final class AudioPlayer: ObservableObject {
 
     func addToQueue(_ song: Song) {
         guard !queue.isEmpty else { play(song: song); return }
-        queue.append(song)
+        queue.append(contentsOf: queueWithTrackPairings([song]).songs)
         VoltaNotificationCenter.shared.post(L(.notif_added_to_queue), tone: .queue)
         scheduleGaplessPreload()
         warmUpcomingStreams()
@@ -1097,14 +1154,14 @@ final class AudioPlayer: ObservableObject {
     func playNext(_ songs: [Song]) {
         guard !songs.isEmpty else { return }
         guard !queue.isEmpty else {
-            queue = songs
+            queue = queueWithTrackPairings(songs).songs
             currentIndex = 0
             queueSourceTitle = "Selection"
             AppLogger.shared.log("Queued \(songs.count) next while idle", category: .playback)
             return
         }
         invalidatePreloadedNext()
-        insertSongsNext(songs)
+        insertSongsNext(queueWithTrackPairings(songs).songs)
         resetPreparedTransitionPlan()
         scheduleGaplessPreload()
         prepareTransitionPlanIfNeeded()
@@ -1114,7 +1171,7 @@ final class AudioPlayer: ObservableObject {
     func addToQueue(_ songs: [Song]) {
         guard !songs.isEmpty else { return }
         guard !queue.isEmpty else { playQueue(songs, startIndex: 0, source: "Selection"); return }
-        queue.append(contentsOf: songs)
+        queue.append(contentsOf: queueWithTrackPairings(songs).songs)
         scheduleGaplessPreload()
         warmUpcomingStreams()
     }
@@ -1139,6 +1196,58 @@ final class AudioPlayer: ObservableObject {
         insertionIndex = min(max(currentIndex + 1, insertionIndex), queue.count)
         queue.insert(contentsOf: songs, at: insertionIndex)
         AppLogger.shared.log("Queued \(songs.count) next at index \(insertionIndex)", category: .playback)
+    }
+
+    private func queueWithTrackPairings(_ songs: [Song], startIndex: Int = 0) -> (songs: [Song], startIndex: Int) {
+        guard !songs.isEmpty else { return (songs, startIndex) }
+        var expanded: [Song] = []
+        var adjustedStartIndex = min(max(0, startIndex), songs.count - 1)
+
+        for (index, song) in songs.enumerated() {
+            if index == startIndex { adjustedStartIndex = expanded.count }
+            expanded.append(song)
+            let originalNext = songs.indices.contains(index + 1) ? songs[index + 1] : nil
+            appendTrackPairingChain(after: song, to: &expanded, originalNext: originalNext)
+        }
+
+        return (expanded, adjustedStartIndex)
+    }
+
+    private func appendTrackPairingChain(after song: Song, to expanded: inout [Song], originalNext: Song?) {
+        var seen: Set<String> = [song.id]
+        var cursor = song
+
+        while let paired = TrackPairingStore.shared.pairedSong(after: cursor) {
+            if originalNext?.id == paired.id { return }
+            guard !seen.contains(paired.id) else { return }
+            expanded.append(paired)
+            seen.insert(paired.id)
+            cursor = paired
+        }
+    }
+
+    private func pairedShuffleGroups(_ songs: [Song]) -> [[Song]] {
+        guard !songs.isEmpty else { return [] }
+        var groups: [[Song]] = []
+        var index = 0
+
+        while index < songs.count {
+            var group = [songs[index]]
+            var cursor = songs[index]
+            index += 1
+
+            while index < songs.count,
+                  let paired = TrackPairingStore.shared.pairedSong(after: cursor),
+                  songs[index].id == paired.id {
+                group.append(songs[index])
+                cursor = songs[index]
+                index += 1
+            }
+
+            groups.append(group)
+        }
+
+        return groups
     }
 
     func removeQueueItem(at index: Int) {
@@ -1174,9 +1283,19 @@ final class AudioPlayer: ObservableObject {
     private func shuffleUpcoming() {
         let start = currentIndex + 1
         guard start < queue.count else { return }
-        var rest = Array(queue[start...])
-        rest.shuffle()
-        queue.replaceSubrange(start..., with: rest)
+        var anchorEnd = start
+        var cursor = queue[currentIndex]
+        while anchorEnd < queue.count,
+              let paired = TrackPairingStore.shared.pairedSong(after: cursor),
+              queue[anchorEnd].id == paired.id {
+            cursor = queue[anchorEnd]
+            anchorEnd += 1
+        }
+
+        let anchoredPairing = Array(queue[start..<anchorEnd])
+        var groups = pairedShuffleGroups(Array(queue[anchorEnd...]))
+        groups.shuffle()
+        queue.replaceSubrange(start..., with: anchoredPairing + groups.flatMap { $0 })
     }
 
     func cycleRepeat() {
@@ -1388,7 +1507,7 @@ final class AudioPlayer: ObservableObject {
         }
 
         guard !fresh.isEmpty else { return }
-        queue.append(contentsOf: Array(fresh.prefix(30)))
+        queue.append(contentsOf: queueWithTrackPairings(Array(fresh.prefix(30))).songs)
         scheduleGaplessPreload()
     }
 
@@ -1559,6 +1678,7 @@ final class AudioPlayer: ObservableObject {
 
     private func playCurrent() {
         guard !queue.isEmpty, currentIndex < queue.count else { return }
+        enforceTrackPairingChainAfterCurrent()
         let song = queue[currentIndex]
         playRequestID &+= 1
         let token = playRequestID
@@ -1569,9 +1689,9 @@ final class AudioPlayer: ObservableObject {
         // synchronous, so playback latency is unchanged.
         if let client,
            DownloadService.shared.localURL(for: song) == nil,
-           !client.streamMetadataReady(id: song.id) {
+           !client.streamMetadataReady(for: song) {
             Task { @MainActor [weak self] in
-                await client.prepareForPlayback(id: song.id)
+                await client.prepareForPlayback(song: song)
                 guard let self, token == self.playRequestID else { return }
                 self.startPlaying(song: song)
                 self.warmUpcomingStreams()
@@ -1581,6 +1701,43 @@ final class AudioPlayer: ObservableObject {
 
         startPlaying(song: song)
         warmUpcomingStreams()
+    }
+
+    private func enforceTrackPairingChainAfterCurrent() {
+        guard queue.indices.contains(currentIndex) else { return }
+        var insertionIndex = currentIndex + 1
+        var cursor = queue[currentIndex]
+        var seen: Set<String> = [cursor.id]
+        var changed = false
+
+        while let paired = TrackPairingStore.shared.pairedSong(after: cursor) {
+            guard !seen.contains(paired.id) else { break }
+            seen.insert(paired.id)
+
+            if queue.indices.contains(insertionIndex), queue[insertionIndex].id == paired.id {
+                cursor = queue[insertionIndex]
+                insertionIndex += 1
+                continue
+            }
+
+            if insertionIndex < queue.count,
+               let existingIndex = queue[insertionIndex...].firstIndex(where: { $0.id == paired.id }) {
+                let existing = queue.remove(at: existingIndex)
+                queue.insert(existing, at: insertionIndex)
+            } else {
+                queue.insert(paired, at: insertionIndex)
+            }
+
+            changed = true
+            cursor = paired
+            insertionIndex += 1
+        }
+
+        if changed {
+            invalidatePreloadedNext()
+            resetPreparedTransitionPlan()
+            AppLogger.shared.log("Track pairing enforced after current song; index=\(currentIndex)", category: .playback)
+        }
     }
 
     // Best-effort metadata warmup for upcoming original streams.
@@ -1596,16 +1753,15 @@ final class AudioPlayer: ObservableObject {
 
         let upper = min(currentIndex + 3, queue.count)
         guard currentIndex + 1 < upper else { return }
-        let ids = queue[(currentIndex + 1)..<upper]
-            .filter { DownloadService.shared.localURL(for: $0) == nil && !client.streamMetadataReady(id: $0.id) }
-            .map(\.id)
-        guard !ids.isEmpty else { return }
+        let songs = Array(queue[(currentIndex + 1)..<upper]
+            .filter { DownloadService.shared.localURL(for: $0) == nil && !client.streamMetadataReady(for: $0) })
+        guard !songs.isEmpty else { return }
         // Cancel the prior warmup so a skip burst doesn't flood the server.
         warmStreamsTask?.cancel()
         warmStreamsTask = Task { @MainActor in
-            for id in ids {
+            for song in songs {
                 if Task.isCancelled { return }
-                await client.prepareForPlayback(id: id)
+                await client.prepareForPlayback(song: song)
             }
         }
     }
@@ -1635,6 +1791,7 @@ final class AudioPlayer: ObservableObject {
         gaplessNextItem = nil
         gaplessNextSongID = nil
         gaplessNextSource = nil
+        gaplessNextUsesTranscode = false
         gaplessNextQueueIndex = nil
         gaplessReadinessLoggedItemID = nil
     }
@@ -1649,10 +1806,12 @@ final class AudioPlayer: ObservableObject {
             AppLogger.shared.log("Playback failed: no stream URL for '\(song.title)'", category: .playback, level: .error)
             return
         }
+        startupDiagnosticsTask?.cancel()
         recordCurrentSongInHistory(unless: song.id)
         if urlInfo.source.isUserDownload { DownloadService.shared.markPlayed(song.id) }
+        prematureTranscodeEndRetries.removeValue(forKey: song.id)
         AppLogger.shared.log(
-            "Track starting; title='\(song.title)'; artist='\(song.artist ?? "?")'; source=\(urlInfo.source.rawValue); index=\(currentIndex); queueCount=\(queue.count)",
+            "Track starting; title='\(song.title)'; artist='\(song.artist ?? "?")'; source=\(urlInfo.source.rawValue); index=\(currentIndex); queueCount=\(queue.count); stream=\(Self.streamingPreferenceSummary(for: song))",
             category: .playback
         )
 
@@ -1664,18 +1823,20 @@ final class AudioPlayer: ObservableObject {
         player.removeAllItems()
         player.insert(item, after: nil)
         currentPlayerItem = item
+        currentPlaybackSource = urlInfo.source
+        currentPlaybackUsesTranscode = urlInfo.usesTranscode
         try? AVAudioSession.sharedInstance().setActive(true)
-        player.playImmediately(atRate: 1)
+        startPlayer(player, source: urlInfo.source, usesTranscode: urlInfo.usesTranscode)
         applyReplayGain(for: song)
+        currentArtwork = nil
+        currentAnimatedArtwork = nil
+        currentLiveArtwork = nil
         hasActivePlaybackSession = true
         currentSong = song
         currentSongStartedAt = Date()
         isPlaying = true
         currentTime = 0
-        duration = 0
-        currentArtwork = nil
-        currentAnimatedArtwork = nil
-        currentLiveArtwork = nil
+        duration = Double(song.duration ?? 0)
         loggedSongIDs.remove(song.id)
 
         if song.starred != nil {
@@ -1689,6 +1850,7 @@ final class AudioPlayer: ObservableObject {
         artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: song) }
         durationLoadTask?.cancel()
         durationLoadTask = Task { [weak self] in await self?.loadDuration(from: item) }
+        monitorStartup(for: item, song: song, source: urlInfo.source)
         scheduleGaplessPreload()
         ensureAutoplayPreloadedIfNeeded()
         if Date() >= transitionSuppressedUntil {
@@ -1697,12 +1859,12 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func scheduleGaplessPreload() {
-        guard transitionMode == .off,
-              UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
+        guard UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
               !sleepEndsAtTrackEnd,
               let currentItem = player.currentItem,
               currentItem === currentPlayerItem,
-              let nextIndex = automaticNextQueueIndex() else {
+              let nextIndex = automaticNextQueueIndex(),
+              canUseGaplessForCurrentTransition(nextIndex: nextIndex) else {
             invalidatePreloadedNext()
             return
         }
@@ -1729,6 +1891,7 @@ final class AudioPlayer: ObservableObject {
         let nextItem = makePlayerItem(playback: urlInfo)
         gaplessNextSongID = nextSong.id
         gaplessNextSource = urlInfo.source
+        gaplessNextUsesTranscode = urlInfo.usesTranscode
         gaplessNextQueueIndex = nextIndex
 
         if audioProcessingRequired {
@@ -1765,6 +1928,21 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
+    private func canUseGaplessForCurrentTransition(nextIndex: Int) -> Bool {
+        if transitionMode == .off { return true }
+        guard transitionMode == .automix,
+              queue.indices.contains(currentIndex),
+              queue.indices.contains(nextIndex) else { return false }
+        return shouldBypassAutoMixForPairing(current: queue[currentIndex], next: queue[nextIndex])
+    }
+
+    private func shouldBypassAutoMixForPairing(current: Song, next: Song) -> Bool {
+        guard transitionMode == .automix,
+              TrackPairingStore.bypassAutoMixEnabled,
+              let paired = TrackPairingStore.shared.pairedSong(after: current) else { return false }
+        return paired.id == next.id
+    }
+
     private func insertPreparedGaplessItem(
         _ nextItem: AVPlayerItem,
         after currentItem: AVPlayerItem,
@@ -1773,12 +1951,12 @@ final class AudioPlayer: ObservableObject {
         source: PlaybackURLSource
     ) {
         gaplessPreloadTask = nil
-        guard transitionMode == .off,
-              UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
+        guard UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
               !sleepEndsAtTrackEnd,
               player.currentItem === currentItem,
               currentPlayerItem === currentItem,
               automaticNextQueueIndex() == index,
+              canUseGaplessForCurrentTransition(nextIndex: index),
               queue.indices.contains(index),
               queue[index].id == song.id,
               gaplessNextSongID == song.id,
@@ -1804,9 +1982,9 @@ final class AudioPlayer: ObservableObject {
         finishedItem: AVPlayerItem,
         outgoingEndedAt: TimeInterval
     ) async -> Bool {
-        guard transitionMode == .off,
-              UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
+        guard UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
               let nextIndex = automaticNextQueueIndex(),
+              canUseGaplessForCurrentTransition(nextIndex: nextIndex),
               let queuedItem = gaplessNextItem,
               gaplessNextQueueIndex == nextIndex else { return false }
 
@@ -1860,27 +2038,34 @@ final class AudioPlayer: ObservableObject {
             category: .playback
         )
         recordCurrentSongInHistory(unless: song.id)
+        let activeSource = gaplessNextSource ?? .stream
+        let activeUsesTranscode = gaplessNextUsesTranscode
+        startupDiagnosticsTask?.cancel()
         currentIndex = nextIndex
         currentPlayerItem = queuedItem
+        currentPlaybackSource = activeSource
+        currentPlaybackUsesTranscode = activeUsesTranscode
+        prematureTranscodeEndRetries.removeValue(forKey: song.id)
         gaplessNextItem = nil
         gaplessNextSongID = nil
         gaplessNextSource = nil
+        gaplessNextUsesTranscode = false
         gaplessNextQueueIndex = nil
         gaplessReadinessLoggedItemID = nil
         if DownloadService.shared.localURL(for: song) != nil {
             DownloadService.shared.markPlayed(song.id)
         }
         applyReplayGain(for: song)
+        currentArtwork = nil
+        currentAnimatedArtwork = nil
+        currentLiveArtwork = nil
         hasActivePlaybackSession = true
         currentSong = song
         let incomingTime = queuedItem.currentTime().seconds
         let startedOffset = incomingTime.isFinite ? max(0, incomingTime) : 0
         currentSongStartedAt = Date(timeIntervalSinceNow: -startedOffset)
         currentTime = startedOffset
-        duration = 0
-        currentArtwork = nil
-        currentAnimatedArtwork = nil
-        currentLiveArtwork = nil
+        duration = Double(song.duration ?? 0)
         loggedSongIDs.remove(song.id)
         if song.starred != nil { starredIDs.insert(song.id) }
 
@@ -1895,11 +2080,12 @@ final class AudioPlayer: ObservableObject {
         artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: song) }
         durationLoadTask?.cancel()
         durationLoadTask = Task { [weak self] in await self?.loadDuration(from: queuedItem) }
+        monitorStartup(for: queuedItem, song: song, source: activeSource)
         ensureAutoplayPreloadedIfNeeded()
         warmUpcomingStreams()
         if isPlaying, player.rate == 0 {
             try? AVAudioSession.sharedInstance().setActive(true)
-            player.playImmediately(atRate: 1)
+            startPlayer(player, source: activeSource, usesTranscode: activeUsesTranscode)
         }
         measureGaplessStartDelay(for: queuedItem, outgoingEndedAt: outgoingEndedAt)
         scheduleGaplessPreload()
@@ -1924,6 +2110,10 @@ final class AudioPlayer: ObservableObject {
             return
         }
         let next = queue[currentIndex + 1]
+        guard !shouldBypassAutoMixForPairing(current: current, next: next) else {
+            resetPreparedTransitionPlan()
+            return
+        }
         let key = "\(transitionMode.rawValue):\(current.id)->\(next.id)"
         guard transitionPlanKey != key else { return }
 
@@ -2180,6 +2370,10 @@ final class AudioPlayer: ObservableObject {
               let current = currentSong else { return }
 
         let next = queue[currentIndex + 1]
+        guard !shouldBypassAutoMixForPairing(current: current, next: next) else {
+            clearPriming()
+            return
+        }
         prepareTransitionPlanIfNeeded()
         let plan = preparedTransitionPlan ?? PlaybackTransitionPlan.fallback(
             mode: transitionMode,
@@ -2265,11 +2459,27 @@ final class AudioPlayer: ObservableObject {
                     }
                     return
                 }
-                self.installPrimedItem(item, on: p, song: song, plan: plan, bassID: bassID)
+                self.installPrimedItem(
+                    item,
+                    on: p,
+                    song: song,
+                    plan: plan,
+                    bassID: bassID,
+                    source: urlInfo.source,
+                    usesTranscode: urlInfo.usesTranscode
+                )
             }
             return
         }
-        installPrimedItem(item, on: p, song: song, plan: plan, bassID: 0)
+        installPrimedItem(
+            item,
+            on: p,
+            song: song,
+            plan: plan,
+            bassID: 0,
+            source: urlInfo.source,
+            usesTranscode: urlInfo.usesTranscode
+        )
     }
 
     private func installPrimedItem(
@@ -2277,7 +2487,9 @@ final class AudioPlayer: ObservableObject {
         on p: AVQueuePlayer,
         song: Song,
         plan: PlaybackTransitionPlan,
-        bassID: UInt64
+        bassID: UInt64,
+        source: PlaybackURLSource,
+        usesTranscode: Bool
     ) {
         transitionPrimeTask = nil
         guard !isTransitioning,
@@ -2290,11 +2502,13 @@ final class AudioPlayer: ObservableObject {
             return
         }
         primingSongID = nil
+        primedSongUsesTranscode = usesTranscode
         primedBassID = bassID
         p.pause()
         p.removeAllItems()
         p.insert(item, after: nil)
         p.volume = 0
+        p.automaticallyWaitsToMinimizeStalling = sourceNeedsNetworkBuffer(source: source, usesTranscode: usesTranscode)
         if plan.nextStart > 0 {
             let tol = CMTime(seconds: 0.05, preferredTimescale: 600)
             p.seek(to: CMTime(seconds: plan.nextStart, preferredTimescale: 600), toleranceBefore: tol, toleranceAfter: tol)
@@ -2314,6 +2528,7 @@ final class AudioPlayer: ObservableObject {
         transitionPrimeTask = nil
         primingSongID = nil
         primedSongID = nil
+        primedSongUsesTranscode = false
         if primedBassID != 0 { AutoMixBassSwap.shared.deactivate(primedBassID); primedBassID = 0 }
         if !isTransitioning {
             inactivePlayer.pause()
@@ -2360,7 +2575,9 @@ final class AudioPlayer: ObservableObject {
                 incomingStart = db
             }
         }
+        let activeUsesTranscode = primedSongUsesTranscode
         primedSongID = nil
+        primedSongUsesTranscode = false
         AutoMixBassSwap.shared.activate(currentBassID)
 
         if urlInfo.source.isUserDownload { DownloadService.shared.markPlayed(nextSong.id) }
@@ -2373,16 +2590,19 @@ final class AudioPlayer: ObservableObject {
         activePlayer = newPlayer
         currentPlayerItem = nextItem
         targetVolume = newTargetVolume
-        currentIndex += 1
-        hasActivePlaybackSession = true
-        currentSong = nextSong
-        currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, incomingStart))
-        isPlaying = true
-        currentTime = incomingStart
-        duration = 0
+        startupDiagnosticsTask?.cancel()
         currentArtwork = nil
         currentAnimatedArtwork = nil
         currentLiveArtwork = nil
+        currentIndex += 1
+        hasActivePlaybackSession = true
+        currentSong = nextSong
+        currentPlaybackSource = urlInfo.source
+        currentPlaybackUsesTranscode = activeUsesTranscode
+        currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, incomingStart))
+        isPlaying = true
+        currentTime = incomingStart
+        duration = Double(nextSong.duration ?? 0)
         loggedSongIDs.remove(nextSong.id)
         if nextSong.starred != nil { starredIDs.insert(nextSong.id) }
         resetPreparedTransitionPlan()
@@ -2396,6 +2616,7 @@ final class AudioPlayer: ObservableObject {
         artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: nextSong) }
         durationLoadTask?.cancel()
         durationLoadTask = Task { [weak self] in await self?.loadDuration(from: nextItem) }
+        monitorStartup(for: nextItem, song: nextSong, source: urlInfo.source)
         ensureAutoplayPreloadedIfNeeded()
         prepareTransitionPlanIfNeeded()
 
@@ -2463,17 +2684,49 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
-    private func playbackURL(for song: Song) -> (url: URL, source: PlaybackURLSource)? {
+    private func playbackURL(for song: Song) -> PlaybackURLInfo? {
         if let localURL = DownloadService.shared.localURL(for: song) {
-            return (localURL, .download)
+            return (localURL, .download, false)
         }
-        if let client,
-           let cachedURL = PlaybackCacheService.shared.cachedURL(for: song, client: client) {
-            return (cachedURL, .playbackCache)
+        if let client {
+            let streamURL = client.streamURL(for: song)
+            let usesTranscode = streamURL.map(Self.streamURLUsesTranscode) ?? false
+            if let cachedURL = PlaybackCacheService.shared.cachedURL(for: song, client: client) {
+                return (cachedURL, .playbackCache, usesTranscode)
+            }
+            guard let streamURL else { return nil }
+            return (streamURL, .stream, usesTranscode)
         }
-        guard let client,
-              let streamURL = client.streamURL(id: song.id) else { return nil }
-        return (streamURL, .stream)
+        return nil
+    }
+
+    private static func streamURLUsesTranscode(_ url: URL) -> Bool {
+        let path = url.path.lowercased()
+        if path.contains("/transcode/") || path.contains("/universal") || path.contains("/gettranscodestream") {
+            return true
+        }
+
+        guard let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else {
+            return false
+        }
+
+        for item in queryItems {
+            let name = item.name.lowercased()
+            let value = item.value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+            switch name {
+            case "format":
+                if let value, value != "raw" { return true }
+            case "maxbitrate", "bitrate", "maxstreamingbitrate", "audiocodec", "transcodingcontainer", "transcodingprotocol", "transcodeparams":
+                return true
+            case "static":
+                if value == "false" { return true }
+            default:
+                continue
+            }
+        }
+
+        return false
     }
 
     private func cancelTransitionPlayback(keepPaused: Bool = false) {
@@ -2576,9 +2829,17 @@ final class AudioPlayer: ObservableObject {
             return (nil, nil)
         }
 
-        let songURL = client?.coverArtURL(id: song.coverArt)
-        if let live = await ArtworkLoader.shared.liveArtwork(for: songURL, includeVideo: false) {
-            return (live, songURL)
+        if let result = await firstLiveArtwork(for: client?.liveArtworkURLs(id: song.coverArt) ?? []) {
+            return result
+        }
+        // Emby songs commonly inherit their album's Primary image. Try the
+        // resolved cover-art item first so a song without its own image does
+        // not produce a full set of 404 probes before the album cover. Keep
+        // the raw song item as a fallback for servers with track-specific art.
+        if client?.backendKind == .emby,
+           song.coverArt != song.id,
+           let result = await firstLiveArtwork(for: client?.liveArtworkURLs(id: song.id) ?? []) {
+            return result
         }
         guard let albumID = song.albumId else { return (nil, nil) }
 
@@ -2591,9 +2852,17 @@ final class AudioPlayer: ObservableObject {
             albumCoverArt = nil
         }
         guard albumCoverArt != song.coverArt else { return (nil, nil) }
-        let albumURL = client?.coverArtURL(id: albumCoverArt)
-        let live = await ArtworkLoader.shared.liveArtwork(for: albumURL, includeVideo: false)
-        return (live, live == nil ? nil : albumURL)
+        return await firstLiveArtwork(for: client?.liveArtworkURLs(id: albumCoverArt) ?? []) ?? (nil, nil)
+    }
+
+    private func firstLiveArtwork(for urls: [URL]) async -> (LiveArtworkAsset?, URL?)? {
+        for url in urls {
+            guard !Task.isCancelled else { return nil }
+            if let live = await ArtworkLoader.shared.liveArtwork(for: url, includeVideo: false) {
+                return (live, url)
+            }
+        }
+        return nil
     }
 
     private func supportedLockScreenArtworkAspect() -> LockScreenArtworkAspect? {
@@ -2639,11 +2908,22 @@ final class AudioPlayer: ObservableObject {
             if Task.isCancelled { return }
             let d = item.duration
             if d.isNumeric, d.seconds > 0 {
-                duration = d.seconds
-                AppLogger.shared.log(
-                    "Playback duration ready; duration=\(String(format: "%.4f", d.seconds))s; attempts=\(attempt + 1); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
-                    category: .playback
-                )
+                let serverDuration = Double(currentSong?.duration ?? 0)
+                let corrected = shouldPreferServerDuration(avDuration: d.seconds, serverDuration: serverDuration)
+                let effectiveDuration = corrected ? serverDuration : d.seconds
+                duration = effectiveDuration
+                if corrected {
+                    AppLogger.shared.log(
+                        "Playback duration corrected from stream estimate; av=\(String(format: "%.4f", d.seconds))s; server=\(String(format: "%.4f", serverDuration))s; source=\(currentPlaybackSource?.rawValue ?? "unknown"); attempts=\(attempt + 1); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                        category: .playback,
+                        level: .warning
+                    )
+                } else {
+                    AppLogger.shared.log(
+                        "Playback duration ready; duration=\(String(format: "%.4f", effectiveDuration))s; source=\(currentPlaybackSource?.rawValue ?? "unknown"); attempts=\(attempt + 1); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                        category: .playback
+                    )
+                }
                 updateNowPlayingTime()
                 return
             }
@@ -2654,6 +2934,53 @@ final class AudioPlayer: ObservableObject {
             category: .playback,
             level: .warning
         )
+    }
+
+    private func monitorStartup(for item: AVPlayerItem, song: Song, source: PlaybackURLSource) {
+        startupDiagnosticsTask?.cancel()
+        guard source == .stream else { return }
+        let started = ProcessInfo.processInfo.systemUptime
+        startupDiagnosticsTask = Task { @MainActor [weak self, weak item] in
+            for delay in [3.0, 10.0, 30.0] {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard !Task.isCancelled,
+                      let self,
+                      let item,
+                      self.currentPlayerItem === item,
+                      self.currentSong?.id == song.id else { return }
+
+                let playerTime = self.player.currentTime().seconds
+                let hasProgress = playerTime.isFinite && playerTime > 0.25
+                let playing = self.player.timeControlStatus == .playing && self.player.rate > 0
+                if hasProgress && playing { return }
+
+                let elapsedMs = Int((ProcessInfo.processInfo.systemUptime - started) * 1000)
+                AppLogger.shared.log(
+                    "Stream startup waiting; title='\(song.title)'; elapsedMs=\(elapsedMs); itemStatus=\(item.status.rawValue); itemError=\(item.error?.localizedDescription ?? "none"); playerStatus=\(self.player.timeControlStatus.rawValue); waiting=\(String(describing: self.player.reasonForWaitingToPlay)); rate=\(String(format: "%.2f", self.player.rate)); time=\(String(format: "%.3f", max(0, playerTime.isFinite ? playerTime : 0))); buffered=\(Self.bufferedRangeSummary(item))",
+                    category: .playback,
+                    level: delay >= 10 ? .warning : .info
+                )
+            }
+        }
+    }
+
+    private static func bufferedRangeSummary(_ item: AVPlayerItem) -> String {
+        let ranges = item.loadedTimeRanges.map(\.timeRangeValue)
+        guard let range = ranges.max(by: { lhs, rhs in
+            (lhs.start.seconds + lhs.duration.seconds) < (rhs.start.seconds + rhs.duration.seconds)
+        }) else { return "none" }
+        let start = range.start.seconds
+        let end = range.start.seconds + range.duration.seconds
+        guard start.isFinite, end.isFinite else { return "unknown" }
+        return "\(String(format: "%.2f", start))-\(String(format: "%.2f", end))"
+    }
+
+    private static func streamingPreferenceSummary(for song: Song) -> String {
+        let decision = StreamingPreferences.streamDecision(for: song)
+        let format = decision.format ?? (decision.wantsTranscode ? "automatic" : "raw")
+        let source = decision.sourceKind?.rawValue ?? "unknown"
+        let rule = decision.ruleTarget?.rawValue ?? "none"
+        return "bitrateKbps=\(decision.bitrateKbps); requestedBitrateKbps=\(decision.requestedBitrateKbps); format=\(format); sourceType=\(source); rule=\(rule)"
     }
 
     private func logGaplessReadinessIfNeeded(force: Bool = false) {
@@ -2773,6 +3100,9 @@ final class AudioPlayer: ObservableObject {
                 }
                 let outgoingEndedAt = ProcessInfo.processInfo.systemUptime
                 self.logGaplessReadinessIfNeeded(force: true)
+                if self.retryPrematureTranscodeEndIfNeeded(finishedItem: finishedItem) {
+                    return
+                }
                 if self.sleepEndsAtTrackEnd {
                     self.player.pause()
                     self.isPlaying = false
@@ -2794,6 +3124,87 @@ final class AudioPlayer: ObservableObject {
                 self.skipNext()
             }
         }
+    }
+
+    private func retryPrematureTranscodeEndIfNeeded(finishedItem: AVPlayerItem) -> Bool {
+        guard currentPlaybackSource == .stream,
+              currentPlaybackUsesTranscode,
+              isPlaying,
+              let song = currentSong else { return false }
+
+        let elapsed = finishedItem.currentTime().seconds
+        let expectedDuration = max(duration, Double(song.duration ?? 0))
+        guard elapsed.isFinite,
+              expectedDuration.isFinite,
+              expectedDuration > 0,
+              elapsed > 0.25,
+              expectedDuration - elapsed > 12 else { return false }
+
+        let retryCount = prematureTranscodeEndRetries[song.id, default: 0]
+        guard retryCount < 1 else {
+            AppLogger.shared.log(
+                "Transcoded stream ended early after retry; title='\(song.title)'; elapsed=\(String(format: "%.3f", elapsed))s; expected=\(String(format: "%.3f", expectedDuration))s; buffered=\(Self.bufferedRangeSummary(finishedItem))",
+                category: .playback,
+                level: .warning
+            )
+            return false
+        }
+
+        prematureTranscodeEndRetries[song.id] = retryCount + 1
+        AppLogger.shared.log(
+            "Transcoded stream ended early; title='\(song.title)'; elapsed=\(String(format: "%.3f", elapsed))s; expected=\(String(format: "%.3f", expectedDuration))s; retrying",
+            category: .playback,
+            level: .warning
+        )
+        restartCurrentStream(song: song, at: elapsed)
+        return true
+    }
+
+    private func restartCurrentStream(song: Song, at elapsed: TimeInterval) {
+        invalidatePreloadedNext()
+        guard let urlInfo = playbackURL(for: song) else {
+            AppLogger.shared.log(
+                "Transcoded stream retry failed: no stream URL for '\(song.title)'",
+                category: .playback,
+                level: .error
+            )
+            isPlaying = false
+            updateNowPlaying()
+            return
+        }
+
+        let item = makePlayerItem(playback: urlInfo)
+        startupDiagnosticsTask?.cancel()
+        applyEqualizer(to: item)
+        player.pause()
+        player.removeAllItems()
+        player.insert(item, after: nil)
+        currentPlayerItem = item
+        currentPlaybackSource = urlInfo.source
+        currentPlaybackUsesTranscode = urlInfo.usesTranscode
+        currentTime = elapsed
+        try? AVAudioSession.sharedInstance().setActive(true)
+
+        let resume = { [weak self, weak item] in
+            guard let self, let item,
+                  self.currentPlayerItem === item,
+                  self.currentSong?.id == song.id else { return }
+            if self.isPlaying {
+                self.startPlayer(self.player, source: urlInfo.source, usesTranscode: urlInfo.usesTranscode)
+            }
+        }
+
+        let target = CMTime(seconds: elapsed, preferredTimescale: 600)
+        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { finished in
+            guard finished else { return }
+            Task { @MainActor in resume() }
+        }
+        updateNowPlaying()
+        persistLastPlaybackSession()
+        durationLoadTask?.cancel()
+        durationLoadTask = Task { [weak self] in await self?.loadDuration(from: item) }
+        monitorStartup(for: item, song: song, source: urlInfo.source)
+        scheduleGaplessPreload()
     }
 
     private func addInterruptionObserver() {
@@ -2986,7 +3397,8 @@ final class AudioPlayer: ObservableObject {
     private func updateNowPlayingTime() {
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-        if duration > 0 { info[MPMediaItemPropertyPlaybackDuration] = duration }
+        let effectiveDuration = resolvedPlaybackDuration(avDuration: player.currentItem?.duration.seconds ?? .nan)
+        if effectiveDuration > 0 { info[MPMediaItemPropertyPlaybackDuration] = effectiveDuration }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 }

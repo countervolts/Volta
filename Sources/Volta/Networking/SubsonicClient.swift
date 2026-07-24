@@ -125,9 +125,81 @@ struct SubsonicConfig: Sendable, Hashable, Codable {
     }
 }
 
+private struct SubsonicTranscodeCacheKey: Hashable {
+    let id: String
+    let bitrate: Int
+    let format: String
+}
+
+private enum SubsonicTranscodeResolution {
+    case negotiated(url: URL, expiresAt: Date)
+    case legacy
+}
+
+private final class SubsonicTranscodeCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var resolutions: [SubsonicTranscodeCacheKey: SubsonicTranscodeResolution] = [:]
+
+    func resolution(for key: SubsonicTranscodeCacheKey) -> SubsonicTranscodeResolution? {
+        lock.withLock {
+            guard let resolution = resolutions[key] else { return nil }
+            if case .negotiated(_, let expiresAt) = resolution, expiresAt <= .now {
+                resolutions.removeValue(forKey: key)
+                return nil
+            }
+            return resolution
+        }
+    }
+
+    func store(_ resolution: SubsonicTranscodeResolution, for key: SubsonicTranscodeCacheKey) {
+        lock.withLock { resolutions[key] = resolution }
+    }
+}
+
+private struct OpenSubsonicTranscodeClientInfo: Encodable {
+    struct Profile: Encodable {
+        let container: String
+        let audioCodec: String
+        let `protocol`: String
+        let maxAudioChannels: Int
+    }
+
+    let name = SubsonicClient.clientName
+    let platform = "iOS"
+    let maxAudioBitrate: Int
+    let maxTranscodingAudioBitrate: Int
+    let transcodingProfiles: [Profile]
+}
+
+private struct OpenSubsonicTranscodeEnvelope: Decodable {
+    struct Body: Decodable {
+        let status: String
+        let transcodeDecision: Decision?
+    }
+
+    struct Decision: Decodable {
+        let canTranscode: Bool
+        let transcodeParams: String?
+        let transcodeStream: StreamDetails?
+    }
+
+    struct StreamDetails: Decodable {
+        let container: String?
+        let codec: String?
+        let audioChannels: Int?
+    }
+
+    let response: Body
+
+    private enum CodingKeys: String, CodingKey {
+        case response = "subsonic-response"
+    }
+}
+
 struct SubsonicClient: Sendable {
     let config: SubsonicConfig
     let session: URLSession
+    private let transcodeCache: SubsonicTranscodeCache
 
     let backendKind: MusicBackendKind = .subsonic
     // Reference backend: most Volta features map directly here.
@@ -139,6 +211,7 @@ struct SubsonicClient: Sendable {
     init(config: SubsonicConfig, session: URLSession = .shared) {
         self.config = config
         self.session = session
+        transcodeCache = SubsonicTranscodeCache()
     }
 
     private func authQuery() -> [URLQueryItem] {
@@ -182,7 +255,14 @@ struct SubsonicClient: Sendable {
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: req)
+        } catch is CancellationError {
+            AppLogger.shared.log("Request cancelled: [Subsonic] \(endpoint)", category: .networking)
+            throw CancellationError()
         } catch {
+            if let urlError = error as? URLError, urlError.code == .cancelled {
+                AppLogger.shared.log("Request cancelled: [Subsonic] \(endpoint)", category: .networking)
+                throw CancellationError()
+            }
             AppLogger.shared.log("Request failed: \(endpoint): server unreachable - \(error.localizedDescription)", category: .networking, level: .error)
             throw SubsonicError.serverUnreachable
         }
@@ -224,24 +304,44 @@ struct SubsonicClient: Sendable {
     }
 
     func streamURL(id: String) -> URL? {
+        streamURL(id: id, decision: StreamingPreferences.streamDecision(for: nil))
+    }
+
+    func streamURL(for song: Song) -> URL? {
+        streamURL(id: song.id, decision: StreamingPreferences.streamDecision(for: song))
+    }
+
+    private func streamURL(id: String, decision: StreamingTranscodeDecision) -> URL? {
         var query = [URLQueryItem(name: "id", value: id)]
         // Shared quality resolver keeps every backend on the same rules.
-        let bitrate = StreamingPreferences.streamBitrateKbps
-        if bitrate > 0 {
-            query.append(URLQueryItem(name: "maxBitRate", value: String(bitrate)))
+        if let key = transcodeCacheKey(id: id, decision: decision),
+           case .negotiated(let url, _) = transcodeCache.resolution(for: key) {
+            return url
         }
-        appendStreamFormat(to: &query, bitrate: bitrate)
+        if decision.wantsTranscode {
+            query.append(URLQueryItem(name: "maxBitRate", value: String(decision.bitrateKbps)))
+        }
+        appendStreamFormat(to: &query, decision: decision)
+        appendTranscodeLengthHint(to: &query, decision: decision)
         return makeURL(endpoint: "stream", query: query)
     }
 
     // Download URL uses download quality, not streaming quality.
     func downloadURL(id: String) -> URL? {
+        downloadURL(id: id, decision: StreamingPreferences.downloadDecision(for: nil))
+    }
+
+    func downloadURL(for song: Song) -> URL? {
+        downloadURL(id: song.id, decision: StreamingPreferences.downloadDecision(for: song))
+    }
+
+    private func downloadURL(id: String, decision: StreamingTranscodeDecision) -> URL? {
         var query = [URLQueryItem(name: "id", value: id)]
-        let bitrate = StreamingPreferences.downloadBitrateKbps
-        if bitrate > 0 {
-            query.append(URLQueryItem(name: "maxBitRate", value: String(bitrate)))
+        if decision.wantsTranscode {
+            query.append(URLQueryItem(name: "maxBitRate", value: String(decision.bitrateKbps)))
         }
-        appendStreamFormat(to: &query, bitrate: bitrate)
+        appendStreamFormat(to: &query, decision: decision)
+        appendTranscodeLengthHint(to: &query, decision: decision)
         return makeURL(endpoint: "stream", query: query)
     }
 
@@ -254,12 +354,123 @@ struct SubsonicClient: Sendable {
     }
 
     // Explicit "raw" prevents server-default transcoding.
-    private func appendStreamFormat(to query: inout [URLQueryItem], bitrate: Int) {
-        if let format = StreamingPreferences.transcodingFormat {
-            query.append(URLQueryItem(name: "format", value: format))
-        } else if bitrate == 0 {
+    private func appendStreamFormat(to query: inout [URLQueryItem], decision: StreamingTranscodeDecision) {
+        if !decision.wantsTranscode {
             query.append(URLQueryItem(name: "format", value: "raw"))
+        } else if let format = decision.format {
+            query.append(URLQueryItem(name: "format", value: format))
         }
+    }
+
+    private func appendTranscodeLengthHint(to query: inout [URLQueryItem], decision: StreamingTranscodeDecision) {
+        guard decision.wantsTranscode else { return }
+        query.append(URLQueryItem(name: "estimateContentLength", value: "true"))
+    }
+
+    func streamMetadataReady(id: String) -> Bool {
+        streamMetadataReady(id: id, decision: StreamingPreferences.streamDecision(for: nil))
+    }
+
+    func streamMetadataReady(for song: Song) -> Bool {
+        streamMetadataReady(id: song.id, decision: StreamingPreferences.streamDecision(for: song))
+    }
+
+    private func streamMetadataReady(id: String, decision: StreamingTranscodeDecision) -> Bool {
+        guard let key = transcodeCacheKey(id: id, decision: decision) else { return true }
+        return transcodeCache.resolution(for: key) != nil
+    }
+
+    func prepareForPlayback(id: String) async {
+        await prepareForPlayback(id: id, decision: StreamingPreferences.streamDecision(for: nil))
+    }
+
+    func prepareForPlayback(song: Song) async {
+        await prepareForPlayback(id: song.id, decision: StreamingPreferences.streamDecision(for: song))
+    }
+
+    private func prepareForPlayback(id: String, decision: StreamingTranscodeDecision) async {
+        guard let key = transcodeCacheKey(id: id, decision: decision),
+              transcodeCache.resolution(for: key) == nil else { return }
+
+        do {
+            if let url = try await negotiatedTranscodeURL(id: id, bitrate: decision.bitrateKbps, format: key.format) {
+                // Navidrome's transcode token is intentionally opaque. Refresh it
+                // periodically instead of retaining it for the life of the client.
+                transcodeCache.store(.negotiated(url: url, expiresAt: Date(timeIntervalSinceNow: 600)), for: key)
+            } else {
+                transcodeCache.store(.legacy, for: key)
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            transcodeCache.store(.legacy, for: key)
+            AppLogger.shared.log(
+                "OpenSubsonic transcode negotiation unavailable; format=\(key.format); bitrateKbps=\(decision.bitrateKbps); using legacy stream",
+                category: .playback,
+                level: .warning
+            )
+        }
+    }
+
+    private func transcodeCacheKey(id: String, decision: StreamingTranscodeDecision) -> SubsonicTranscodeCacheKey? {
+        guard decision.wantsTranscode else { return nil }
+        let format = decision.format ?? StreamingPreferences.activeTranscodingFormat
+        // Navidrome currently excludes AAC from the negotiation extension, so
+        // AAC remains on the compatible legacy /stream endpoint (ADTS output).
+        guard format != "aac" else { return nil }
+        return SubsonicTranscodeCacheKey(id: id, bitrate: decision.bitrateKbps, format: format)
+    }
+
+    private func negotiatedTranscodeURL(id: String, bitrate: Int, format: String) async throws -> URL? {
+        guard let decisionURL = makeURL(endpoint: "getTranscodeDecision", query: [
+            URLQueryItem(name: "mediaId", value: id),
+            URLQueryItem(name: "mediaType", value: "song"),
+        ]) else { return nil }
+
+        let profile = OpenSubsonicTranscodeClientInfo.Profile(
+            container: format,
+            audioCodec: format,
+            protocol: "http",
+            maxAudioChannels: 2
+        )
+        let clientInfo = OpenSubsonicTranscodeClientInfo(
+            maxAudioBitrate: bitrate * 1_000,
+            maxTranscodingAudioBitrate: bitrate * 1_000,
+            transcodingProfiles: [profile]
+        )
+
+        var request = URLRequest(url: decisionURL)
+        request.httpMethod = "POST"
+        request.httpBody = try JSONEncoder().encode(clientInfo)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 8
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let envelope = try? JSONDecoder().decode(OpenSubsonicTranscodeEnvelope.self, from: data),
+              envelope.response.status.caseInsensitiveCompare("ok") == .orderedSame,
+              let decision = envelope.response.transcodeDecision,
+              decision.canTranscode,
+              let transcodeParams = decision.transcodeParams?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !transcodeParams.isEmpty else {
+            return nil
+        }
+
+        let details = decision.transcodeStream
+        let channelDescription = details?.audioChannels.map { String($0) } ?? "unknown"
+        AppLogger.shared.log(
+            "OpenSubsonic transcode negotiated; format=\(format); bitrateKbps=\(bitrate); container=\(details?.container ?? "unknown"); codec=\(details?.codec ?? "unknown"); channels=\(channelDescription)",
+            category: .playback
+        )
+
+        return makeURL(endpoint: "getTranscodeStream", query: [
+            URLQueryItem(name: "mediaId", value: id),
+            URLQueryItem(name: "mediaType", value: "song"),
+            URLQueryItem(name: "transcodeParams", value: transcodeParams),
+        ])
     }
 }
 

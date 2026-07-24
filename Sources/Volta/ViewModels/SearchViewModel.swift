@@ -86,6 +86,7 @@ final class SearchViewModel: ObservableObject {
         let id = client.config.baseURL.absoluteString
         guard browseGenreClientID != id else { return }
         browseGenreClientID = id
+        AppLogger.shared.log("Search client bound; backend=\(client.backendKind.displayName)", category: .library)
         reloadBrowseGenres()
     }
 
@@ -94,6 +95,7 @@ final class SearchViewModel: ObservableObject {
     func setOffline(_ offline: Bool) {
         guard isOffline != offline else { return }
         isOffline = offline
+        AppLogger.shared.log("Search offline mode \(offline ? "enabled" : "disabled")", category: .library)
         reloadBrowseGenres()
         scheduleSearch()
     }
@@ -224,6 +226,7 @@ final class SearchViewModel: ObservableObject {
         isSearching = true
         defer { isSearching = false }
         hasSearched = true
+        AppLogger.shared.log("Search started; backend=\(client.backendKind.displayName); queryChars=\(q.count)", category: .library)
 
         let normalized = q.normalizedForSearch()
         let useBoth = normalized != q.lowercased() && !normalized.isEmpty
@@ -254,6 +257,7 @@ final class SearchViewModel: ObservableObject {
         // unreachable even though we aren't flagged offline. Serve local matches
         // instead of an empty "no results" screen.
         if res1 == nil {
+            AppLogger.shared.log("Search server request failed; using offline fallback; queryChars=\(q.count)", category: .library, level: .warning)
             await applyOfflineResults(for: q)
             return
         }
@@ -296,6 +300,10 @@ final class SearchViewModel: ObservableObject {
         let visibleResolvedSongs = resolvedSongs.filter { !HiddenAlbumStore.shared.isSongHidden($0.value) }
         lyricSongsByID = visibleResolvedSongs
         lyricHits = hits.filter { visibleResolvedSongs[$0.id] != nil || resolvedSongs[$0.id] == nil }
+        AppLogger.shared.log(
+            "Search completed; artists=\(artists.count); albums=\(albums.count); songs=\(songs.count); genres=\(genres.count); lyricHits=\(lyricHits.count); queryChars=\(q.count)",
+            category: .library
+        )
     }
 
     // MARK: - Offline search (downloaded songs only)
@@ -304,6 +312,7 @@ final class SearchViewModel: ObservableObject {
         isSearching = true
         defer { isSearching = false }
         hasSearched = true
+        AppLogger.shared.log("Offline search started; queryChars=\(q.count)", category: .library)
         await applyOfflineResults(for: q)
     }
 
@@ -328,6 +337,10 @@ final class SearchViewModel: ObservableObject {
         // Keep hits we resolved to a downloaded song, plus any we couldn't map at
         // all (so they still appear) — drop only ones that map to a hidden song.
         lyricHits = hits.filter { resolved[$0.id] != nil || byID[$0.id] == nil }
+        AppLogger.shared.log(
+            "Offline search applied; artists=\(artists.count); albums=\(albums.count); songs=\(songs.count); genres=\(genres.count); lyricHits=\(lyricHits.count); queryChars=\(q.count)",
+            category: .library
+        )
     }
 
     private nonisolated static func offlineResults(
@@ -399,12 +412,15 @@ final class SearchViewModel: ObservableObject {
             if !all.isEmpty {
                 HiddenAlbumStore.shared.register(albums: all)
                 installedGenres = await Self.genreSummaries(albums: HiddenAlbumStore.shared.visibleAlbums(all))
+                AppLogger.shared.log("Browse genres loaded from server; genres=\(installedGenres.count); albums=\(all.count)", category: .library)
                 return
             }
+            AppLogger.shared.log("Browse genres server load returned empty; falling back to downloads", category: .library, level: .warning)
         }
 
         let songs = HiddenAlbumStore.shared.visibleSongs(DownloadService.shared.downloadedSongs())
         installedGenres = await Self.genreSummariesFromSongs(songs: songs)
+        AppLogger.shared.log("Browse genres loaded from downloads; genres=\(installedGenres.count); songs=\(songs.count)", category: .library)
     }
 
     private nonisolated static func fetchAllAlbums(client: any MusicService) async -> [Album] {

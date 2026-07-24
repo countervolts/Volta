@@ -19,6 +19,18 @@ struct LiveArtworkAsset {
 actor ArtworkLoader {
     static let shared = ArtworkLoader()
     private static let lockScreenVideoVersion = 3
+    private static let liveDecodePolicyVersion = 3
+    private static let oversizedAnimatedDataBytes = 48 * 1024 * 1024
+    private static let oversizedAnimatedPixelCount = 3_000_000
+    private static let oversizedAnimatedFrameCount = 360
+    private static let oversizedAnimatedPixelLimit = 192
+    private static let oversizedAnimatedDecodedBytes = 64 * 1024 * 1024
+    private static let extremeAnimatedDataBytes = 120 * 1024 * 1024
+    private static let extremeAnimatedPixelCount = 8_000_000
+    private static let extremeAnimatedFrameCount = 720
+    private static let extremeAnimatedPixelLimit = 160
+    private static let extremeAnimatedDecodedBytes = 48 * 1024 * 1024
+    private static let minimumAnimatedPixelLimit = 64
 
     private let memory = NSCache<NSString, UIImage>()
     // Optional decoded-frame cache; animated covers are large.
@@ -218,15 +230,15 @@ actor ArtworkLoader {
         if let existing = liveInFlight[requestKey] {
             AppLogger.shared.log(
                 "Live artwork joined in-flight request; key=\(String(requestKey.prefix(12))); video=\(includeVideo)",
-                category: .other
+                category: .artwork
             )
             return await existing.value
         }
 
         let started = ProcessInfo.processInfo.systemUptime
         AppLogger.shared.log(
-            "Live artwork load started; key=\(String(requestKey.prefix(12))); video=\(includeVideo); maxPixels=\(LiveArtworkSettings.maxPixelSize); maxFrames=\(LiveArtworkSettings.maxFrameCount)",
-            category: .other
+            "Live artwork load started; key=\(String(requestKey.prefix(12))); video=\(includeVideo); maxPixels=\(LiveArtworkSettings.maxPixelSize); frameQualityBudget=\(LiveArtworkSettings.maxFrameCount)",
+            category: .artwork
         )
         let task = Task<LiveArtworkAsset?, Never> { [weak self] in
             guard let self else { return nil }
@@ -241,7 +253,7 @@ actor ArtworkLoader {
         liveInFlight[requestKey] = nil
         AppLogger.shared.log(
             "Live artwork load finished; key=\(String(requestKey.prefix(12))); success=\(asset != nil); frames=\(asset?.animatedImage.images?.count ?? 0); videoReady=\(asset?.videoURL != nil); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
-            category: .other,
+            category: .artwork,
             level: asset == nil ? .warning : .info
         )
         return asset
@@ -258,7 +270,9 @@ actor ArtworkLoader {
         let maxPixelSize = LiveArtworkSettings.maxPixelSize
         let maxFrames = LiveArtworkSettings.maxFrameCount
         // Cache identity includes frame/resolution settings.
-        let variantKey = rawMode ? "\(key)-raw" : "\(key)-r\(maxPixelSize)-f\(maxFrames)"
+        let variantKey = rawMode
+            ? "\(key)-raw"
+            : "\(key)-v\(Self.liveDecodePolicyVersion)-r\(maxPixelSize)-f\(maxFrames)"
         let wantVideo = includeVideo && LiveArtworkSettings.prepareVideoAsset
         let keepInRAM = LiveArtworkSettings.keepDecodedFramesInRAM
 
@@ -272,7 +286,7 @@ actor ArtworkLoader {
         if keepInRAM, let box = liveMemory.object(forKey: variantKey as NSString) {
             AppLogger.shared.log(
                 "Live artwork decoded-memory cache hit; key=\(String(variantKey.prefix(12)))",
-                category: .other
+                category: .artwork
             )
             return await Self.makeAsset(from: box.sequence, variantKey: variantKey,
                                         wantVideo: wantVideo, videoAspect: videoAspect,
@@ -291,26 +305,28 @@ actor ArtworkLoader {
             let fileURL = directory.appendingPathComponent(key)
             let data: Data?
             if let d = try? Data(contentsOf: pinnedURL) {
-                AppLogger.shared.log("Live artwork bytes loaded from offline cache; bytes=\(d.count)", category: .other)
+                AppLogger.shared.log("Live artwork bytes loaded from offline cache; bytes=\(d.count)", category: .artwork)
                 data = d
             } else if let d = try? Data(contentsOf: identityURL) {
                 // Prefer the downloaded original so offline live artwork stays animated.
-                AppLogger.shared.log("Live artwork bytes loaded from offline identity cache; bytes=\(d.count)", category: .other)
+                AppLogger.shared.log("Live artwork bytes loaded from offline identity cache; bytes=\(d.count)", category: .artwork)
                 data = d
             } else if let d = try? Data(contentsOf: fileURL) {
-                AppLogger.shared.log("Live artwork bytes loaded from disk cache; bytes=\(d.count)", category: .other)
-                data = d
-            } else if let (d, response) = try? await session.data(from: url),
-                      Self.isImageResponse(response, data: d) {
-                try? d.write(to: fileURL, options: .atomic)
-                AppLogger.shared.log("Live artwork downloaded; bytes=\(d.count)", category: .other)
+                AppLogger.shared.log("Live artwork bytes loaded from disk cache; bytes=\(d.count)", category: .artwork)
                 data = d
             } else {
-                AppLogger.shared.log("Live artwork download failed", category: .other, level: .warning)
-                data = nil
+                data = await Self.downloadLiveArtworkBytes(from: url, using: session)
+            }
+            if data == nil {
+                AppLogger.shared.log("Live artwork download failed", category: .artwork, level: .warning)
             }
             guard let data else { return nil }
             sequence = await Self.decodeAnimation(from: data, maxPixelSize: maxPixelSize, maxFrames: maxFrames)
+            if sequence != nil {
+                try? data.write(to: fileURL, options: .atomic)
+            } else {
+                try? fileManager.removeItem(at: fileURL)
+            }
             if let sequence, !rawMode {
                 let dir = liveDir
                 DeveloperExperiments.launch(priority: .utility) {
@@ -326,6 +342,52 @@ actor ArtworkLoader {
         return await Self.makeAsset(from: sequence, variantKey: variantKey,
                                     wantVideo: wantVideo, videoAspect: videoAspect,
                                     videoDirectory: liveDir)
+    }
+
+    private nonisolated static func downloadLiveArtworkBytes(
+        from url: URL,
+        using session: URLSession
+    ) async -> Data? {
+        do {
+            let (data, response) = try await session.data(from: url)
+            let contentType = response.mimeType ?? "unknown"
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard isImageResponse(response, data: data) else {
+                AppLogger.shared.log(
+                    "Live artwork response rejected; status=\(status); contentType=\(contentType); bytes=\(data.count); url=\(redactedURLString(url))",
+                    category: .artwork,
+                    level: .warning
+                )
+                return nil
+            }
+            AppLogger.shared.log(
+                "Live artwork downloaded; status=\(status); contentType=\(contentType); bytes=\(data.count); url=\(redactedURLString(url))",
+                category: .artwork
+            )
+            return data
+        } catch {
+            AppLogger.shared.log(
+                "Live artwork download failed; error=\(error.localizedDescription); url=\(redactedURLString(url))",
+                category: .artwork,
+                level: .warning
+            )
+            return nil
+        }
+    }
+
+    private nonisolated static func redactedURLString(_ url: URL) -> String {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems else {
+            return url.absoluteString
+        }
+        components.queryItems = queryItems.map { item in
+            let lower = item.name.lowercased()
+            if lower.contains("token") || lower.contains("api_key") || lower.contains("password") || lower == "pw" {
+                return URLQueryItem(name: item.name, value: "<redacted>")
+            }
+            return item
+        }
+        return components.url?.absoluteString ?? url.absoluteString
     }
 
     private func applyMemoryPolicy(rawMode: Bool) {
@@ -356,6 +418,17 @@ actor ArtworkLoader {
         let frames: [UIImage]
         let delays: [TimeInterval]
         let image: UIImage
+    }
+
+    private struct AnimationDecodeBudget {
+        let maxPixelSize: Int
+        let sourceWidth: Int
+        let sourceHeight: Int
+        let reason: String?
+
+        var sourceSizeLabel: String {
+            sourceWidth > 0 && sourceHeight > 0 ? "\(sourceWidth)x\(sourceHeight)" : "unknown"
+        }
     }
 
     private final class LiveAssetBox {
@@ -410,10 +483,31 @@ actor ArtworkLoader {
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             return false
         }
-        if let mimeType = response.mimeType?.lowercased(), !mimeType.hasPrefix("image/") {
-            return false
+        if let mimeType = response.mimeType?.lowercased(), mimeType.hasPrefix("image/") {
+            return true
         }
-        return true
+        if isLikelyImageData(data) {
+            return true
+        }
+        return response.mimeType == nil
+    }
+
+    private nonisolated static func isLikelyImageData(_ data: Data) -> Bool {
+        startsWith(data, [0xFF, 0xD8, 0xFF])
+            || startsWith(data, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+            || startsWith(data, [0x47, 0x49, 0x46, 0x38])
+            || isLikelyWebPData(data)
+    }
+
+    private nonisolated static func startsWith(_ data: Data, _ bytes: [UInt8]) -> Bool {
+        data.count >= bytes.count && data.prefix(bytes.count).elementsEqual(bytes)
+    }
+
+    private nonisolated static func isLikelyWebPData(_ data: Data) -> Bool {
+        guard data.count >= 12 else { return false }
+        let header = [UInt8](data.prefix(12))
+        return header[0...3].elementsEqual([0x52, 0x49, 0x46, 0x46])
+            && header[8...11].elementsEqual([0x57, 0x45, 0x42, 0x50])
     }
 
     private nonisolated static func decodeImage(from data: Data, maxPixelSize: Int?, prepare: Bool) -> UIImage? {
@@ -444,21 +538,41 @@ actor ArtworkLoader {
     private nonisolated static func makeAnimation(from data: Data, maxPixelSize: Int, maxFrames: Int) -> AnimationSequence? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         let count = CGImageSourceGetCount(source)
-        guard count > 1 else { return nil }
+        guard count > 1 else {
+            let type = (CGImageSourceGetType(source) as String?) ?? "unknown"
+            AppLogger.shared.log(
+                "Live artwork: source is not animated; type=\(type); frames=\(count); bytes=\(data.count)",
+                category: .artwork,
+                level: .warning
+            )
+            return nil
+        }
 
-        // Drop frames evenly while preserving total loop timing.
-        let target = (maxFrames > 0 && count > maxFrames) ? maxFrames : count
+        let budget = animationDecodeBudget(
+            source: source,
+            frameCount: count,
+            dataBytes: data.count,
+            maxPixelSize: maxPixelSize,
+            maxFrames: maxFrames
+        )
+        if let reason = budget.reason {
+            let pixelLabel = budget.maxPixelSize > 0 ? "\(budget.maxPixelSize)" : "raw"
+            AppLogger.shared.log(
+                "Live artwork: oversized source downscaled; reason=\(reason); sourceFrames=\(count); sourcePixels=\(budget.sourceSizeLabel); bytes=\(data.count); framesPreserved=\(count); targetPixels=\(pixelLabel)",
+                category: .artwork
+            )
+        }
+
+        // Preserve every source frame and reduce pixel size for complex art.
         var frames: [UIImage] = []
+        frames.reserveCapacity(count)
         var delays: [TimeInterval] = []
+        delays.reserveCapacity(count)
         var total: TimeInterval = 0
         var carried: TimeInterval = 0
-        var lastBucket = -1
         for i in 0..<count {
             carried += max(0.02, frameDelay(source: source, index: i))
-            let bucket = i * target / count
-            guard bucket > lastBucket else { continue }
-            guard let cg = decodeFrame(source, index: i, maxPixelSize: maxPixelSize) else { continue }
-            lastBucket = bucket
+            guard let cg = decodeFrame(source, index: i, maxPixelSize: budget.maxPixelSize) else { continue }
             // Pre-decode frames so the first animation loop does not hitch.
             let frame = UIImage(cgImage: cg)
             frames.append(frame.preparingForDisplay() ?? frame)
@@ -476,9 +590,103 @@ actor ArtworkLoader {
             ?? UIImage.animatedImage(with: frames, duration: Double(frames.count) * 0.1)
         guard let image else { return nil }
         image.frameDelays = delays
-        let sizeLabel = maxPixelSize > 0 ? "≤\(maxPixelSize)px" : "raw size"
-        AppLogger.shared.log("Live artwork: decoded \(frames.count)/\(count) frames at \(sizeLabel)", category: .other)
+        let sizeLabel = budget.maxPixelSize > 0 ? "≤\(budget.maxPixelSize)px" : "raw size"
+        AppLogger.shared.log("Live artwork: decoded \(frames.count)/\(count) frames at \(sizeLabel)", category: .artwork)
         return AnimationSequence(frames: frames, delays: delays, image: image)
+    }
+
+    private nonisolated static func animationDecodeBudget(
+        source: CGImageSource,
+        frameCount: Int,
+        dataBytes: Int,
+        maxPixelSize: Int,
+        maxFrames: Int
+    ) -> AnimationDecodeBudget {
+        let sourceSize = animationSourcePixelSize(source)
+        let pixelCount = sourceSize.width > 0 && sourceSize.height > 0
+            ? sourceSize.width * sourceSize.height
+            : 0
+        var targetPixels = maxPixelSize
+
+        // Raw/developer mode intentionally disables the normal reduction policy.
+        guard maxFrames > 0 || maxPixelSize > 0 else {
+            return AnimationDecodeBudget(
+                maxPixelSize: targetPixels,
+                sourceWidth: sourceSize.width,
+                sourceHeight: sourceSize.height,
+                reason: nil
+            )
+        }
+
+        var reasons: [String] = []
+        if maxFrames > 0, frameCount > maxFrames {
+            reasons.append("frame-budget")
+        }
+        if frameCount > oversizedAnimatedFrameCount {
+            reasons.append("frames")
+        }
+        if dataBytes >= oversizedAnimatedDataBytes {
+            reasons.append("bytes")
+        }
+        if pixelCount >= oversizedAnimatedPixelCount {
+            reasons.append("pixels")
+        }
+
+        let extreme = frameCount > extremeAnimatedFrameCount
+            || dataBytes >= extremeAnimatedDataBytes
+            || pixelCount >= extremeAnimatedPixelCount
+
+        if !reasons.isEmpty, targetPixels > 0 {
+            let fixedLimit = extreme ? extremeAnimatedPixelLimit : oversizedAnimatedPixelLimit
+            let byteBudget = extreme ? extremeAnimatedDecodedBytes : oversizedAnimatedDecodedBytes
+            let dynamicLimit = pixelLimitForPreservingFrames(frameCount: frameCount, decodedByteBudget: byteBudget)
+            targetPixels = min(targetPixels, min(fixedLimit, dynamicLimit))
+        }
+
+        if extreme {
+            if !reasons.contains("extreme") {
+                reasons.append("extreme")
+            }
+        }
+
+        return AnimationDecodeBudget(
+            maxPixelSize: targetPixels,
+            sourceWidth: sourceSize.width,
+            sourceHeight: sourceSize.height,
+            reason: reasons.isEmpty ? nil : reasons.joined(separator: "+")
+        )
+    }
+
+    private nonisolated static func pixelLimitForPreservingFrames(
+        frameCount: Int,
+        decodedByteBudget: Int
+    ) -> Int {
+        guard frameCount > 0, decodedByteBudget > 0 else { return minimumAnimatedPixelLimit }
+        let bytesPerFramePixel = 4.0
+        let edge = (Double(decodedByteBudget) / (Double(frameCount) * bytesPerFramePixel)).squareRoot()
+        return max(minimumAnimatedPixelLimit, Int(edge.rounded(.down)))
+    }
+
+    private nonisolated static func animationSourcePixelSize(_ source: CGImageSource) -> (width: Int, height: Int) {
+        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
+            return (
+                intProperty(props[kCGImagePropertyPixelWidth]),
+                intProperty(props[kCGImagePropertyPixelHeight])
+            )
+        }
+        if let props = CGImageSourceCopyProperties(source, nil) as? [CFString: Any] {
+            return (
+                intProperty(props[kCGImagePropertyPixelWidth]),
+                intProperty(props[kCGImagePropertyPixelHeight])
+            )
+        }
+        return (0, 0)
+    }
+
+    private nonisolated static func intProperty(_ value: Any?) -> Int {
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber { return number.intValue }
+        return 0
     }
 
     // Downsample during decode; fall back if thumbnailing breaks animation.
@@ -521,7 +729,7 @@ actor ArtworkLoader {
         let total = max(manifest.delays.reduce(0, +), Double(frames.count) * 0.02)
         guard let image = UIImage.animatedImage(with: frames, duration: total) else { return nil }
         image.frameDelays = manifest.delays
-        AppLogger.shared.log("Live artwork: loaded \(frames.count) frames from optimized frame cache", category: .other)
+        AppLogger.shared.log("Live artwork: loaded \(frames.count) frames from optimized frame cache", category: .artwork)
         return AnimationSequence(frames: frames, delays: manifest.delays, image: image)
     }
 
@@ -695,7 +903,7 @@ actor ArtworkLoader {
         input.markAsFinished()
         await writer.finishWriting()
         guard writer.status == .completed else {
-            AppLogger.shared.log("Live artwork video: write FAILED status=\(writer.status.rawValue) err=\(String(describing: writer.error))", category: .other, level: .warning)
+            AppLogger.shared.log("Live artwork video: write FAILED status=\(writer.status.rawValue) err=\(String(describing: writer.error))", category: .artwork, level: .warning)
             return nil
         }
         // Lock-screen reads this from another process while locked.
@@ -723,7 +931,7 @@ actor ArtworkLoader {
             }
         }
         let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
-        AppLogger.shared.log("Live artwork video \(cached ? "cached" : "built"): \(Int(natural.width))x\(Int(natural.height)) \(String(format: "%.2f", dur))s \(String(format: "%.0f", fps))fps codec=\(codecs) playable=\(playable) vtracks=\(vtracks.count) bytes=\(bytes) (\(url.lastPathComponent))", category: .other)
+        AppLogger.shared.log("Live artwork video \(cached ? "cached" : "built"): \(Int(natural.width))x\(Int(natural.height)) \(String(format: "%.2f", dur))s \(String(format: "%.0f", fps))fps codec=\(codecs) playable=\(playable) vtracks=\(vtracks.count) bytes=\(bytes) (\(url.lastPathComponent))", category: .artwork)
     }
 
     private nonisolated static func fourCC(_ code: FourCharCode) -> String {

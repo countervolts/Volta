@@ -23,10 +23,15 @@ struct TrackRow<Trailing: View>: View {
     var leadingArtwork: Bool = false
     // custom swipe, since these rows are not List rows
     var onSwipePlayNext: (() -> Void)? = nil
+    @AppStorage("showExplicitBadge") private var showExplicitBadgeSetting = true
     @State private var dragX: CGFloat = 0
     @State private var swipeAxis: SwipeAxis?
     @State private var suppressTap = false
     @ViewBuilder var trailing: () -> Trailing
+
+    private var shouldShowExplicitBadge: Bool {
+        showExplicitBadgeSetting && (explicitOverride ?? song.isExplicit)
+    }
 
     private enum SwipeAxis {
         case horizontal
@@ -159,7 +164,7 @@ struct TrackRow<Trailing: View>: View {
     }
 
     private var hasExplicitBadge: Bool {
-        showsExplicitBadge && (explicitOverride ?? song.isExplicit)
+        shouldShowExplicitBadge
     }
 
     @ViewBuilder

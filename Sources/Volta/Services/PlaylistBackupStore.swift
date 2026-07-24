@@ -117,7 +117,7 @@ final class PlaylistBackupStore: ObservableObject {
         for playlist in playlists {
             await backup(playlistID: playlist.id, client: client)
         }
-        AppLogger.shared.log("Playlist backups refreshed (\(playlists.count) playlists)", category: .other)
+        AppLogger.shared.log("Playlist backups refreshed (\(playlists.count) playlists)", category: .library)
     }
 
     func markDeleted(_ playlist: Playlist, client: any MusicService) async {
@@ -149,14 +149,14 @@ final class PlaylistBackupStore: ObservableObject {
             serverURL: client.config.baseURL.absoluteString
         )
         upsert(restoredSnapshot)
-        AppLogger.shared.log("Restored playlist backup '\(snapshot.name)' as '\(name)'", category: .other)
+        AppLogger.shared.log("Restored playlist backup '\(snapshot.name)' as '\(name)'", category: .library)
         return restored
     }
 
     func delete(_ snapshot: PlaylistBackupSnapshot) {
         snapshots.removeAll { $0.id == snapshot.id }
         save()
-        AppLogger.shared.log("Deleted playlist backup '\(snapshot.name)'", category: .other)
+        AppLogger.shared.log("Deleted playlist backup '\(snapshot.name)'", category: .library)
     }
 
     func estimatedSizeBytes() -> Int {
@@ -220,7 +220,7 @@ enum PlaylistWriter {
             try await client.addToPlaylist(playlistID: playlist.id, songID: song.id)
         }
         await PlaylistBackupStore.shared.backup(playlistID: playlist.id, client: client)
-        AppLogger.shared.log("Saved mix '\(playlistTitle)' as playlist '\(name)' (\(mix.songs.count) songs)", category: .other)
+        AppLogger.shared.log("Saved mix '\(playlistTitle)' as playlist '\(name)' (\(mix.songs.count) songs)", category: .library)
         return name
     }
 

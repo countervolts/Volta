@@ -396,7 +396,7 @@ struct ServerInfoView: View {
             var totalTime: TimeInterval = 0
 
             for song in songs.prefix(4) {
-                guard let url = client.streamURL(id: song.id) else { continue }
+                guard let url = client.streamURL(for: song) else { continue }
                 var req = URLRequest(url: url)
                 req.timeoutInterval = 30
                 req.cachePolicy = .reloadIgnoringLocalCacheData

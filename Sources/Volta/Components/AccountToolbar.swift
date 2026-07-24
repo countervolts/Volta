@@ -9,6 +9,8 @@ enum SettingsRoute: Hashable {
     case category(SettingsCategory)
     case autoMix
     case autoMixPreview
+    case trackPairings
+    case transcoding
     case equalizer
     case language
     case hiddenAlbums
@@ -64,6 +66,10 @@ private struct SettingsDestinations: ViewModifier {
                 AutoMixSettingsView()
             case .autoMixPreview:
                 AutoMixPreviewView()
+            case .trackPairings:
+                TrackPairingSettingsView()
+            case .transcoding:
+                TranscodingSettingsView()
             case .equalizer:
                 EqualizerView()
             case .language:

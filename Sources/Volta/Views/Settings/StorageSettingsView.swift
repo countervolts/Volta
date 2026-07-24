@@ -15,12 +15,23 @@ extension SettingsView {
         return gb >= 1 ? String(format: "%g GB", gb) : "\(downloadCapMB) MB"
     }
 
+    var transcodeSummary: String {
+        guard transcodingEnabled else { return "Off" }
+        let scope = transcodingCellularOnly ? "Cellular Only · " : ""
+        if TranscodingSettingsMode(rawValue: transcodingMode) == .advanced {
+            let count = StreamingPreferences.decodeRuleTargets(transcodeFileTypeRules).count
+            return count > 0 ? "\(scope)Advanced · \(count) Rules" : "\(scope)Advanced"
+        }
+        let target = transcodingFormat == "raw" ? "Automatic" : transcodingFormat.uppercased()
+        return "\(scope)Simple · \(target)"
+    }
+
     // MARK: - Streaming
 
     @ViewBuilder
     var streamingSection: some View {
         let s = "Streaming & Downloads"
-        if sectionVisible(s, [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["download quality", "download", "bitrate"], ["transcoding format", "transcode", "format", "mp3", "aac", "opus"], ["download mode", "multithreaded", "threads", "single", "parallel"], ["download speed limit", "speed", "limit", "throttle"], ["storage cap", "cap", "max size", "storage"], ["auto-evict", "auto evict", "evict"]]) {
+        if sectionVisible(s, [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["download quality", "download", "bitrate"], ["transcode", "transcoding", "codec", "file type", "rules", "format", "mp3", "aac", "opus", "flac", "alac"], ["download mode", "multithreaded", "threads", "single", "parallel"], ["download speed limit", "speed", "limit", "throttle"], ["storage cap", "cap", "max size", "storage"], ["auto-evict", "auto evict", "evict"]]) {
             Section {
                 if rowVisible(s, ["wi-fi quality", "wifi", "streaming", "quality", "bitrate"]) {
                     Picker(selection: $streamingBitrate) {
@@ -61,16 +72,15 @@ extension SettingsView {
                     .tint(Theme.accent)
                 }
 
-                if rowVisible(s, ["transcoding format", "transcode", "format", "mp3", "aac", "opus"]) {
-                    Picker(selection: $transcodingFormat) {
-                        Text("MP3").tag("mp3")
-                        Text("AAC").tag("aac")
-                        Text("Opus").tag("opus")
-                        Text("Original").tag("raw")
-                    } label: {
-                        Label(L(.settings_transcoding_format), systemImage: "waveform.and.magnifyingglass")
+                if rowVisible(s, ["transcode", "transcoding", "codec", "file type", "rules", "format", "mp3", "aac", "opus", "flac", "alac"]) {
+                    NavigationLink(value: SettingsRoute.transcoding) {
+                        LabeledContent {
+                            Text(transcodeSummary).foregroundStyle(Theme.secondaryText)
+                        } label: {
+                            Label("Transcode", systemImage: "arrow.triangle.2.circlepath")
+                        }
                     }
-                    .tint(Theme.accent)
+                    .foregroundStyle(Theme.primaryText)
                 }
 
                 if rowVisible(s, ["download mode", "multithreaded", "threads", "single", "parallel"]) {
@@ -137,7 +147,7 @@ extension SettingsView {
             } header: {
                 Text(sectionTitle(s))
             } footer: {
-                Text("Cellular quality applies when not on Wi-Fi. Transcoding format requires server support. Multithreaded downloads fetch several chunks in parallel for faster saves.")
+                Text("Cellular quality applies when not on Wi-Fi. Transcode targets require server support. Multithreaded downloads fetch several chunks in parallel for faster saves.")
             }
             .listRowBackground(Theme.secondaryBackground)
         }
@@ -527,7 +537,7 @@ extension SettingsView {
             localArtworkLibraryDownloaded = artworkPrefetchProgress.completed > 0
             AppLogger.shared.log(
                 "Local artwork library downloaded: \(artworkPrefetchProgress.completed) items, \(artworkPrefetchProgress.failed) failed",
-                category: .other
+                category: .artwork
             )
         }
     }
@@ -636,7 +646,7 @@ extension SettingsView {
         Task {
             await ArtworkLoader.shared.clearCache()
             DiskCache.clear()
-            AppLogger.shared.log("Artwork & data cache cleared by user", category: .other)
+            AppLogger.shared.log("Artwork & data cache cleared by user", category: .artwork)
             VoltaNotificationCenter.shared.post(L(.notif_artwork_cache_cleared), tone: .success)
             refreshCacheSize()
         }
@@ -647,7 +657,7 @@ extension SettingsView {
             await ArtworkLoader.shared.clearPinnedArtwork()
             localArtworkLibraryDownloaded = false
             localArtworkBytes = 0
-            AppLogger.shared.log("Local artwork library cleared by user", category: .other)
+            AppLogger.shared.log("Local artwork library cleared by user", category: .artwork)
             VoltaNotificationCenter.shared.post(L(.notif_local_artwork_deleted), tone: .success)
             refreshCacheSize()
         }
@@ -656,7 +666,7 @@ extension SettingsView {
     func clearLocalLyrics() {
         Task {
             await LyricsService.shared.clearLocalLyrics()
-            AppLogger.shared.log("Local lyrics cleared by user", category: .other)
+            AppLogger.shared.log("Local lyrics cleared by user", category: .lyrics)
             VoltaNotificationCenter.shared.post(L(.notif_local_lyrics_cleared), tone: .success)
             refreshCacheSize()
         }
@@ -690,7 +700,7 @@ extension SettingsView {
         let dir  = docs.appendingPathComponent("volta-downloads")
         try? FileManager.default.removeItem(at: dir)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        AppLogger.shared.log("Downloads cleared by user", category: .other)
+        AppLogger.shared.log("Downloads cleared by user", category: .downloads)
         VoltaNotificationCenter.shared.post(L(.notif_downloads_cleared), tone: .success)
         refreshCacheSize()
     }

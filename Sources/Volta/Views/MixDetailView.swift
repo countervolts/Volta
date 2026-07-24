@@ -229,7 +229,7 @@ struct MixDetailView: View {
         explicitSongIDs.formUnion(resolved.compactMap { $0 })
         AppLogger.shared.log(
             "Mix explicit metadata resolved; mixID=\(mix.id); server=\(mix.songs.filter(\.isExplicit).count); embedded=\(resolved.compactMap { $0 }.count)",
-            category: .other
+            category: .library
         )
     }
 
@@ -254,7 +254,7 @@ struct MixDetailView: View {
                     showToast(L(.home_saved_to, name))
                 }
             } catch {
-                AppLogger.shared.log("Failed saving mix '\(mix.title)' as playlist: \(error.localizedDescription)", category: .other, level: .error)
+                AppLogger.shared.log("Failed saving mix '\(mix.title)' as playlist: \(error.localizedDescription)", category: .library, level: .error)
                 await MainActor.run {
                     isSavingMix = false
                     showToast(L(.home_save_mix_failed))

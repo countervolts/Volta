@@ -41,7 +41,7 @@ final class CarPlayController: NSObject {
         }
         reloadAll()
         startObservingPlayerState()
-        AppLogger.shared.log("CarPlay connected", category: .other)
+        AppLogger.shared.log("CarPlay connected", category: .ui)
     }
 
     func disconnect() {
@@ -57,7 +57,7 @@ final class CarPlayController: NSObject {
         playlistsTemplate = nil
         albumsTemplate = nil
         artistsTemplate = nil
-        AppLogger.shared.log("CarPlay disconnected", category: .other)
+        AppLogger.shared.log("CarPlay disconnected", category: .ui)
     }
 
     private func observeClientChanges() {

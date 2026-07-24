@@ -5,6 +5,7 @@ struct SearchView: View {
     @State private var isSearchActive = false
 
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismissSearch) private var dismissSearch
     @StateObject private var vm = SearchViewModel()
     @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
     @StateObject private var networkMonitor = NetworkMonitor.shared
@@ -79,9 +80,9 @@ struct SearchView: View {
         case .genre(let genreName):
             GenreHomeView(
                 genreName: genreName,
-                onAlbum: { path.append(SearchRoute.album($0)) },
-                onArtist: { path.append(SearchRoute.artist($0)) },
-                onMix: { path.append(SearchRoute.mix($0)) }
+                onAlbum: { open(.album($0)) },
+                onArtist: { open(.artist($0)) },
+                onMix: { open(.mix($0)) }
             )
         case .mix(let mix):
             MixDetailView(mix: mix)
@@ -102,7 +103,7 @@ struct SearchView: View {
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(vm.installedGenres) { genre in
                                 Button {
-                                    path.append(SearchRoute.genre(genre.name))
+                                    open(.genre(genre.name))
                                 } label: {
                                     genreBrowseCard(genre)
                                 }
@@ -258,12 +259,13 @@ struct SearchView: View {
                             ForEach(vm.albums) { album in
                                 Button {
                                     vm.saveSelectedAlbum(album, typedQuery: searchText)
-                                    path.append(SearchRoute.album(album))
+                                    open(.album(album))
                                 } label: {
                                     MediaCard(item: MediaItem(album: album))
                                         .heroSource(id: album.id)
                                 }
                                 .buttonStyle(.plain)
+                                .albumContextMenu(album)
                             }
                         }
                         .padding(.horizontal, 20)
@@ -307,7 +309,7 @@ struct SearchView: View {
                         .padding(.bottom, 12)
                         ForEach(vm.genres) { genre in
                             Button {
-                                path.append(SearchRoute.genre(genre.name))
+                                open(.genre(genre.name))
                             } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: Symbols.genres)
@@ -407,7 +409,7 @@ struct SearchView: View {
     private func artistCell(_ artist: Artist) -> some View {
         Button {
             vm.saveSelectedArtist(artist, typedQuery: searchText)
-            path.append(SearchRoute.artist(artist))
+            open(.artist(artist))
         } label: {
             VStack(spacing: 8) {
                 ArtworkView(coverArtID: artist.coverArt, size: 200, cornerRadius: 50)
@@ -493,7 +495,7 @@ struct SearchView: View {
                 await MainActor.run {
                     guard !hiddenAlbums.isHidden(album) else { return }
                     vm.saveSelectedAlbum(album, typedQuery: searchText)
-                    path.append(SearchRoute.album(album))
+                    open(.album(album))
                 }
             } else {
                 VoltaNotificationCenter.shared.post(L(.notif_couldnt_load_album), tone: .error)
@@ -510,7 +512,7 @@ struct SearchView: View {
                     hiddenAlbums.register(artists: [artist])
                     guard !hiddenAlbums.isArtistHidden(artist) else { return }
                     vm.saveSelectedArtist(artist, typedQuery: searchText)
-                    path.append(SearchRoute.artist(artist))
+                    open(.artist(artist))
                 }
             } else {
                 VoltaNotificationCenter.shared.post(L(.notif_couldnt_load_artist), tone: .error)
@@ -562,7 +564,7 @@ struct SearchView: View {
                 await MainActor.run {
                     hiddenAlbums.register(artists: [artist])
                     guard !hiddenAlbums.isArtistHidden(artist) else { return }
-                    path.append(SearchRoute.artist(artist))
+                    open(.artist(artist))
                 }
             } else {
                 await MainActor.run {
@@ -584,7 +586,7 @@ struct SearchView: View {
             if let album = try? await client.album(id: id) {
                 await MainActor.run {
                     guard !hiddenAlbums.isHidden(album) else { return }
-                    path.append(SearchRoute.album(album))
+                    open(.album(album))
                 }
             } else {
                 await MainActor.run {
@@ -599,6 +601,11 @@ struct SearchView: View {
         if let targetID = item.targetID { return targetID }
         guard item.id.hasPrefix(prefix) else { return nil }
         return String(item.id.dropFirst(prefix.count))
+    }
+
+    private func open(_ route: SearchRoute) {
+        dismissSearch()
+        path.append(route)
     }
 }
 
@@ -915,7 +922,7 @@ private struct GenreHomeView: View {
                     showToast(L(.home_saved_to, name))
                 }
             } catch {
-                AppLogger.shared.log("Failed saving search genre mix '\(mix.title)' as playlist: \(error.localizedDescription)", category: .other, level: .error)
+                AppLogger.shared.log("Failed saving search genre mix '\(mix.title)' as playlist: \(error.localizedDescription)", category: .library, level: .error)
                 await MainActor.run {
                     savingMixIDs.remove(mix.id)
                     showToast(L(.home_save_mix_failed))

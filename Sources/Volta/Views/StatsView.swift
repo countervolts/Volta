@@ -84,7 +84,7 @@ struct StatsView: View {
             VoltaNotificationCenter.shared.post(L(.notif_stats_exported), tone: .success)
             ShareSheet.present(urls)
         } catch {
-            AppLogger.shared.log("Stats export failed: \(error.localizedDescription)", category: .other, level: .error)
+            AppLogger.shared.log("Stats export failed: \(error.localizedDescription)", category: .library, level: .error)
             VoltaNotificationCenter.shared.post(L(.notif_stats_export_failed), tone: .error)
         }
     }

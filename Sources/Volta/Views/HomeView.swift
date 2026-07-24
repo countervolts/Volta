@@ -550,7 +550,7 @@ struct HomeView: View {
                     showToast(L(.home_saved_to, name))
                 }
             } catch {
-                AppLogger.shared.log("Failed saving mix '\(mix.title)' as playlist: \(error.localizedDescription)", category: .other, level: .error)
+                AppLogger.shared.log("Failed saving mix '\(mix.title)' as playlist: \(error.localizedDescription)", category: .library, level: .error)
                 await MainActor.run {
                     savingMixIDs.remove(mix.id)
                     showToast(L(.home_save_mix_failed))

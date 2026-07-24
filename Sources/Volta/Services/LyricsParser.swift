@@ -42,13 +42,41 @@ struct ParsedLyricsDocument: Sendable {
                 value: $0.text
             )
         }
+        let parsedCueLines: [StructuredLyricCueLine] = synced ? lines.compactMap { line in
+            guard let cues = line.cues, !cues.isEmpty else { return nil }
+            return StructuredLyricCueLine(
+                index: line.id,
+                agentId: line.vocalLane.rawValue,
+                start: Int((line.time * 1_000).rounded()),
+                end: nil,
+                value: line.text,
+                cue: cues.map {
+                    StructuredLyricCue(
+                        start: Int(($0.start * 1_000).rounded()),
+                        end: $0.end.map { Int(($0 * 1_000).rounded()) },
+                        value: $0.text,
+                        byteStart: $0.byteStart,
+                        byteEnd: $0.byteEnd
+                    )
+                }
+            )
+        } : []
+        let cueLines: [StructuredLyricCueLine]? = parsedCueLines.isEmpty ? nil : parsedCueLines
+        let agents: [StructuredLyricAgent]? = lines.contains(where: { $0.vocalLane == .other })
+            ? [
+                StructuredLyricAgent(id: LyricVocalLane.main.rawValue, role: LyricVocalLane.main.rawValue, name: nil),
+                StructuredLyricAgent(id: LyricVocalLane.other.rawValue, role: LyricVocalLane.other.rawValue, name: nil),
+            ]
+            : nil
         let structured = StructuredLyrics(
             displayArtist: nil,
             displayTitle: nil,
             lang: nil,
             offset: nil,
             synced: synced,
-            line: structuredLines
+            line: structuredLines,
+            cueLine: cueLines,
+            agents: agents
         )
         return LyricsList(structuredLyrics: [structured], rawPayload: raw)
     }
@@ -94,6 +122,10 @@ enum LyricsParser {
     static func canonicalPayload(for lines: [LyricLine]) -> RawLyricsPayload? {
         guard !lines.isEmpty else { return nil }
         let synced = lines.allSatisfy { $0.time >= 0 }
+        if synced, lines.contains(where: { $0.cues?.isEmpty == false }) {
+            let text = canonicalTTML(for: lines)
+            return RawLyricsPayload(data: Data(text.utf8), format: .ttml)
+        }
         if synced {
             let text = lines.map { line in
                 "[\(lrcTimestamp(line.time))]\(line.text)"
@@ -121,12 +153,116 @@ enum LyricsParser {
             ordered = parsed
         }
         return ordered.enumerated().map { index, line in
-            LyricLine(
+            let cues = fullySynced ? makeLyricCues(from: line.cues, in: line.text) : nil
+            return LyricLine(
                 id: index,
                 time: fullySynced ? Double(line.startMilliseconds ?? 0) / 1_000 : -1,
-                text: line.text
+                text: line.text,
+                cues: cues,
+                vocalLane: line.vocalLane
             )
         }
+    }
+
+    private static func makeLyricCues(
+        from parsedCues: [TTMLParsedCue],
+        in text: String
+    ) -> [LyricCue]? {
+        let cues = parsedCues.enumerated().compactMap { index, cue -> LyricCue? in
+            guard let range = stringRange(in: text, byteStart: cue.byteStart, byteEnd: cue.byteEnd) else {
+                return nil
+            }
+            let start = Double(cue.startMilliseconds) / 1_000
+            let end = cue.endMilliseconds.map { Double($0) / 1_000 }.flatMap { $0 > start ? $0 : nil }
+            return LyricCue(
+                id: index,
+                start: start,
+                end: end,
+                byteStart: cue.byteStart,
+                byteEnd: cue.byteEnd,
+                text: String(text[range])
+            )
+        }
+        return cues.isEmpty ? nil : cues
+    }
+
+    private static func stringRange(in text: String, byteStart: Int, byteEnd: Int) -> Range<String.Index>? {
+        guard byteStart >= 0, byteEnd >= byteStart, byteEnd < text.utf8.count else { return nil }
+        let lowerUTF8 = text.utf8.index(text.utf8.startIndex, offsetBy: byteStart)
+        let upperUTF8 = text.utf8.index(text.utf8.startIndex, offsetBy: byteEnd + 1)
+        guard let lower = String.Index(lowerUTF8, within: text),
+              let upper = String.Index(upperUTF8, within: text) else {
+            return nil
+        }
+        return lower..<upper
+    }
+
+    private static func canonicalTTML(for lines: [LyricLine]) -> String {
+        var result = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+          <body><div>
+        """
+        result.append("\n")
+
+        for line in lines {
+            result.append("    <p begin=\"\(ttmlTimestamp(line.time))\" ttm:agent=\"\(line.vocalLane.rawValue)\">")
+            appendTTMLContent(for: line, to: &result)
+            result.append("</p>\n")
+        }
+
+        result.append("  </div></body>\n</tt>\n")
+        return result
+    }
+
+    private static func appendTTMLContent(for line: LyricLine, to output: inout String) {
+        guard let cues = line.cues, !cues.isEmpty else {
+            output.append(xmlEscaped(line.text))
+            return
+        }
+
+        let sortedCues = cues
+            .compactMap { cue -> (cue: LyricCue, range: Range<String.Index>)? in
+                guard let range = stringRange(in: line.text, byteStart: cue.byteStart, byteEnd: cue.byteEnd) else {
+                    return nil
+                }
+                return (cue, range)
+            }
+            .sorted { $0.cue.byteStart < $1.cue.byteStart }
+
+        var cursor = line.text.startIndex
+        for entry in sortedCues where entry.range.lowerBound >= cursor {
+            if cursor < entry.range.lowerBound {
+                output.append(xmlEscaped(String(line.text[cursor..<entry.range.lowerBound])))
+            }
+
+            let begin = max(0, entry.cue.start - line.time)
+            output.append("<span begin=\"\(ttmlTimestamp(begin))\"")
+            if let end = entry.cue.end {
+                output.append(" dur=\"\(ttmlTimestamp(max(0, end - entry.cue.start)))\"")
+            }
+            output.append(">")
+            output.append(xmlEscaped(String(line.text[entry.range])))
+            output.append("</span>")
+            cursor = entry.range.upperBound
+        }
+
+        if cursor < line.text.endIndex {
+            output.append(xmlEscaped(String(line.text[cursor..<line.text.endIndex])))
+        }
+    }
+
+    private static func xmlEscaped(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
+    }
+
+    private static func ttmlTimestamp(_ time: TimeInterval) -> String {
+        String(format: "%.3fs", locale: Locale(identifier: "en_US_POSIX"), max(0, time))
     }
 
     private static func looksLikeLRC(_ text: String) -> Bool {
@@ -239,6 +375,20 @@ private struct TTMLParsedLine {
     let order: Int
     let startMilliseconds: Int?
     let text: String
+    let cues: [TTMLParsedCue]
+    let vocalLane: LyricVocalLane
+}
+
+private struct TTMLParsedCue {
+    let startMilliseconds: Int
+    let endMilliseconds: Int?
+    let byteStart: Int
+    let byteEnd: Int
+}
+
+private struct TTMLCueTiming: Equatable {
+    let startMilliseconds: Int
+    let endMilliseconds: Int?
 }
 
 private final class TTMLLyricsParser: NSObject, XMLParserDelegate {
@@ -257,11 +407,24 @@ private final class TTMLLyricsParser: NSObject, XMLParserDelegate {
         var hasEnd = false
         var invalid = false
         var preserveSpace = false
+        var cueTiming: TTMLCueTiming?
+        var vocalLane: LyricVocalLane = .main
     }
 
     private enum TextPiece {
-        case text(String, preserveSpace: Bool)
+        case text(String, preserveSpace: Bool, cueTiming: TTMLCueTiming?)
         case lineBreak
+    }
+
+    private struct FlattenedLine {
+        let text: String
+        let cues: [TTMLParsedCue]
+    }
+
+    private struct PendingCue {
+        var timing: TTMLCueTiming
+        var startByte: Int
+        var endExclusive: Int
     }
 
     private struct Paragraph {
@@ -324,7 +487,7 @@ private final class TTMLLyricsParser: NSObject, XMLParserDelegate {
         }
 
         let parent = contexts.last ?? TimingContext()
-        let context = childContext(attributes: attributeDict, parent: parent)
+        let context = childContext(elementName: name, attributes: attributeDict, parent: parent)
         contexts.append(context)
         elementNames.append(name)
 
@@ -352,14 +515,18 @@ private final class TTMLLyricsParser: NSObject, XMLParserDelegate {
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
         guard paragraph != nil else { return }
-        let preserve = contexts.last?.preserveSpace ?? false
-        paragraph?.pieces.append(.text(string, preserveSpace: preserve))
+        let context = contexts.last
+        let preserve = context?.preserveSpace ?? false
+        let cueTiming = context?.invalid == false ? context?.cueTiming : nil
+        paragraph?.pieces.append(.text(string, preserveSpace: preserve, cueTiming: cueTiming))
     }
 
     func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
         guard paragraph != nil, let text = LyricsParserTextDecoder.decode(CDATABlock) else { return }
-        let preserve = contexts.last?.preserveSpace ?? false
-        paragraph?.pieces.append(.text(text, preserveSpace: preserve))
+        let context = contexts.last
+        let preserve = context?.preserveSpace ?? false
+        let cueTiming = context?.invalid == false ? context?.cueTiming : nil
+        paragraph?.pieces.append(.text(text, preserveSpace: preserve, cueTiming: cueTiming))
     }
 
     func parser(
@@ -370,15 +537,17 @@ private final class TTMLLyricsParser: NSObject, XMLParserDelegate {
     ) {
         let name = elementName.lowercased()
         if name == "p", let paragraph {
-            let text = Self.flatten(paragraph.pieces)
-            if !text.isEmpty, !paragraph.context.invalid {
+            let flattened = Self.flatten(paragraph.pieces)
+            if !flattened.text.isEmpty, !paragraph.context.invalid {
                 let start = paragraph.context.hasBegin
                     ? paragraph.context.begin
                     : paragraph.earliestChildStart
                 parsedLines.append(TTMLParsedLine(
                     order: paragraph.order,
                     startMilliseconds: start,
-                    text: text
+                    text: flattened.text,
+                    cues: flattened.cues,
+                    vocalLane: paragraph.context.vocalLane
                 ))
             }
             self.paragraph = nil
@@ -393,12 +562,16 @@ private final class TTMLLyricsParser: NSObject, XMLParserDelegate {
     }
 
     private func childContext(
+        elementName: String,
         attributes: [String: String],
         parent: TimingContext
     ) -> TimingContext {
         var context = parent
         if let value = attribute("space", in: attributes)?.lowercased() {
             context.preserveSpace = value == "preserve"
+        }
+        if let value = attribute("agent", in: attributes)?.nonBlank {
+            context.vocalLane = LyricVocalLane(agentRole: value)
         }
 
         let beginExpression = attribute("begin", in: attributes)
@@ -444,6 +617,16 @@ private final class TTMLLyricsParser: NSObject, XMLParserDelegate {
         } else {
             context.end = 0
             context.hasEnd = false
+        }
+        let definesCue = elementName == "span"
+            && !context.invalid
+            && context.hasBegin
+            && (beginExpression != nil || endExpression != nil || durationExpression != nil)
+        if definesCue {
+            context.cueTiming = TTMLCueTiming(
+                startMilliseconds: context.begin,
+                endMilliseconds: context.hasEnd ? context.end : nil
+            )
         }
         return context
     }
@@ -572,7 +755,7 @@ private final class TTMLLyricsParser: NSObject, XMLParserDelegate {
         }
     }
 
-    private static func flatten(_ pieces: [TextPiece]) -> String {
+    private static func flatten(_ pieces: [TextPiece]) -> FlattenedLine {
         var logicalLines: [[TextPiece]] = [[]]
         for piece in pieces {
             if case .lineBreak = piece {
@@ -582,21 +765,93 @@ private final class TTMLLyricsParser: NSObject, XMLParserDelegate {
             }
         }
 
-        var lines = logicalLines.map { line -> String in
-            var result = ""
-            for case let .text(raw, preserve) in line {
-                let normalized = preserve ? normalizeLineEndings(raw) : collapseXMLWhitespace(raw)
-                if !preserve, result.last == " ", normalized.first == " " {
-                    result.append(contentsOf: normalized.dropFirst())
-                } else {
-                    result.append(normalized)
-                }
-            }
-            return result.trimmingCharacters(in: .whitespacesAndNewlines)
+        var lines = logicalLines.map(flattenLogicalLine)
+        while lines.first?.text.isEmpty == true { lines.removeFirst() }
+        while lines.last?.text.isEmpty == true { lines.removeLast() }
+
+        var text = ""
+        var cues: [TTMLParsedCue] = []
+        var isFirstLine = true
+        for line in lines {
+            if !isFirstLine { text.append("\n") }
+            isFirstLine = false
+
+            let lineBaseByte = text.utf8.count
+            text.append(line.text)
+            cues.append(contentsOf: line.cues.map {
+                TTMLParsedCue(
+                    startMilliseconds: $0.startMilliseconds,
+                    endMilliseconds: $0.endMilliseconds,
+                    byteStart: lineBaseByte + $0.byteStart,
+                    byteEnd: lineBaseByte + $0.byteEnd
+                )
+            })
         }
-        while lines.first?.isEmpty == true { lines.removeFirst() }
-        while lines.last?.isEmpty == true { lines.removeLast() }
-        return lines.joined(separator: "\n")
+
+        return FlattenedLine(text: text, cues: cues)
+    }
+
+    private static func flattenLogicalLine(_ pieces: [TextPiece]) -> FlattenedLine {
+        var text = ""
+        var pendingCues: [PendingCue] = []
+
+        for case let .text(raw, preserve, cueTiming) in pieces {
+            let normalized = preserve ? normalizeLineEndings(raw) : collapseXMLWhitespace(raw)
+            let rendered: String
+            if !preserve, text.last == " ", normalized.first == " " {
+                rendered = String(normalized.dropFirst())
+            } else {
+                rendered = normalized
+            }
+            guard !rendered.isEmpty else { continue }
+
+            let startByte = text.utf8.count
+            text.append(rendered)
+            guard let cueTiming else { continue }
+            append(
+                PendingCue(
+                    timing: cueTiming,
+                    startByte: startByte,
+                    endExclusive: text.utf8.count
+                ),
+                to: &pendingCues
+            )
+        }
+
+        guard let firstText = text.firstIndex(where: { !$0.isWhitespace }),
+              let lastText = text.lastIndex(where: { !$0.isWhitespace }) else {
+            return FlattenedLine(text: "", cues: [])
+        }
+
+        let endIndex = text.index(after: lastText)
+        let trimStartBytes = text[..<firstText].utf8.count
+        let trimEndExclusive = text[..<endIndex].utf8.count
+        let trimmed = String(text[firstText..<endIndex])
+
+        let cues = pendingCues.compactMap { cue -> TTMLParsedCue? in
+            let start = max(cue.startByte, trimStartBytes)
+            let endExclusive = min(cue.endExclusive, trimEndExclusive)
+            guard endExclusive > start else { return nil }
+            return TTMLParsedCue(
+                startMilliseconds: cue.timing.startMilliseconds,
+                endMilliseconds: cue.timing.endMilliseconds,
+                byteStart: start - trimStartBytes,
+                byteEnd: endExclusive - trimStartBytes - 1
+            )
+        }
+
+        return FlattenedLine(text: trimmed, cues: cues)
+    }
+
+    private static func append(_ cue: PendingCue, to cues: inout [PendingCue]) {
+        guard cue.endExclusive > cue.startByte else { return }
+        if let last = cues.last,
+           last.timing == cue.timing,
+           last.endExclusive == cue.startByte {
+            cues[cues.count - 1].endExclusive = cue.endExclusive
+            return
+        }
+        cues.append(cue)
     }
 
     private static func collapseXMLWhitespace(_ raw: String) -> String {

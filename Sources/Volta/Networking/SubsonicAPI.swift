@@ -273,8 +273,18 @@ extension SubsonicClient {
     }
 
     func lyricsBySongId(id: String) async throws -> LyricsList? {
-        let body = try await request("getLyricsBySongId", query: [URLQueryItem(name: "id", value: id)])
-        return body.lyricsList
+        do {
+            let body = try await request("getLyricsBySongId", query: [
+                URLQueryItem(name: "id", value: id),
+                URLQueryItem(name: "enhanced", value: "true"),
+            ])
+            return body.lyricsList
+        } catch {
+            let body = try await request("getLyricsBySongId", query: [
+                URLQueryItem(name: "id", value: id)
+            ])
+            return body.lyricsList
+        }
     }
 
     // Sharing is available when getShares succeeds.

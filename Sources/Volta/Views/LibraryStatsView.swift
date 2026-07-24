@@ -3,24 +3,90 @@ import Charts
 
 // MARK: - Library stats tab content
 
+private enum LibraryStatsScope: String, CaseIterable, Identifiable {
+    case personal = "Personal"
+    case global = "Global"
+
+    var id: String { rawValue }
+}
+
 struct LibraryStatsContentView: View {
     @ObservedObject var vm: LibraryStatsViewModel
     @EnvironmentObject private var appState: AppState
+    @State private var scope: LibraryStatsScope = .personal
 
     var body: some View {
-        Group {
-            if vm.phase == .failed, vm.stats == nil {
-                failedState
-            } else if let stats = vm.stats {
-                content(stats)
-            } else {
-                loadingState
+        VStack(alignment: .leading, spacing: 18) {
+            scopeSelector
+
+            Group {
+                switch scope {
+                case .personal:
+                    personalBody
+                case .global:
+                    globalBody
+                }
             }
         }
         .onAppear { vm.loadIfNeeded(appState: appState) }
+        .onChangeCompat(of: scope) { _, newScope in
+            if newScope == .global {
+                vm.loadGlobalIfAllowed(appState: appState)
+            }
+        }
     }
 
     // MARK: States
+
+    private var scopeSelector: some View {
+        HStack(spacing: 8) {
+            ForEach(LibraryStatsScope.allCases) { item in
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                        scope = item
+                    }
+                } label: {
+                    Text(item.rawValue)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(scope == item ? Theme.background : Theme.primaryText)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(scope == item ? Theme.accent : Color.clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(Theme.secondaryBackground, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.06), lineWidth: 0.5))
+        .padding(.horizontal, 20)
+    }
+
+    @ViewBuilder
+    private var personalBody: some View {
+        if vm.phase == .failed, vm.stats == nil {
+            failedState
+        } else if let stats = vm.stats {
+            content(stats)
+        } else {
+            loadingState
+        }
+    }
+
+    @ViewBuilder
+    private var globalBody: some View {
+        if !vm.isGlobalSharingEnabled {
+            globalOptInPrompt
+        } else if !vm.isSharingCurrentLibrary(appState: appState) {
+            globalDifferentLibraryPrompt
+        } else if vm.globalPhase == .failed, vm.globalStats == nil {
+            globalFailedState
+        } else if let stats = vm.globalStats {
+            globalContent(stats)
+        } else {
+            globalLoadingState
+        }
+    }
 
     private var loadingState: some View {
         VStack(spacing: 16) {
@@ -29,6 +95,18 @@ struct LibraryStatsContentView: View {
                 .tint(Theme.accent)
                 .frame(width: 180)
             Text(vm.progress > 0.01 ? "Scanning library… \(Int(vm.progress * 100))%" : "Reading your library…")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 80)
+    }
+
+    private var globalLoadingState: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .tint(Theme.accent)
+            Text(vm.stats == nil ? "Preparing anonymous library totals…" : "Loading global library stats…")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
         }
@@ -55,6 +133,147 @@ struct LibraryStatsContentView: View {
         .padding(.top, 70)
     }
 
+    private var globalFailedState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 34))
+                .foregroundStyle(Theme.secondaryText)
+            Text("Could not load global library stats")
+                .font(.headline).foregroundStyle(Theme.primaryText)
+            if let msg = vm.globalErrorMessage {
+                Text(msg).font(.caption).foregroundStyle(Theme.secondaryText)
+                    .multilineTextAlignment(.center).padding(.horizontal, 40)
+            }
+            Button("Try Again") { vm.refreshGlobal(appState: appState) }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 70)
+    }
+
+    private var globalOptInPrompt: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 44, height: 44)
+                    .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Share Anonymous Library Totals")
+                        .font(.headline)
+                        .foregroundStyle(Theme.primaryText)
+                    Text("Global stats are opt-in only.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                privacyRow(icon: "number", text: "Volta uploads only numbers: track count, album count, total playtime, total size, and app version.")
+                privacyRow(icon: "music.note.list", text: "No song titles, artist names, album names, server URLs, account details, or files are uploaded.")
+                privacyRow(icon: "link", text: "Sharing is linked to this library, so switching to another server will not upload another global entry.")
+                privacyRow(icon: "hand.raised.fill", text: "No library data leaves this device unless you opt in.")
+                privacyRow(icon: "dollarsign.slash", text: "This data is not collected for selling and is only used to show community totals.")
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    vm.enableGlobalSharing(appState: appState)
+                } label: {
+                    Text("Opt In")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+
+                Button {
+                    scope = .personal
+                } label: {
+                    Text("Not Now")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(Theme.secondaryText)
+            }
+        }
+        .padding(18)
+        .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.06), lineWidth: 0.5))
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
+    }
+
+    private var globalDifferentLibraryPrompt: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Image(systemName: "link.badge.plus")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 44, height: 44)
+                    .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Global Sharing Is Linked")
+                        .font(.headline)
+                        .foregroundStyle(Theme.primaryText)
+                    Text(vm.sharedLibraryName.map { "Currently sharing \($0)." } ?? "Currently sharing another library.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+
+            Text("Volta only allows one opted-in library per app install. This keeps someone from uploading separate Navidrome, Plex, Emby, or downloaded libraries as multiple global entries. No data from the current library will be uploaded.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if vm.globalPhase == .failed, let message = vm.globalErrorMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button(role: .destructive) {
+                vm.disableGlobalSharing()
+            } label: {
+                if vm.globalPhase == .loading {
+                    ProgressView()
+                        .tint(.red)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Text("Stop Sharing and Delete My Stats")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+            .disabled(vm.globalPhase == .loading)
+        }
+        .padding(18)
+        .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.06), lineWidth: 0.5))
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
+    }
+
+    private func privacyRow(icon: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 18, height: 18)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     // MARK: Content
 
     @ViewBuilder
@@ -66,6 +285,17 @@ struct LibraryStatsContentView: View {
             chartsSection(s)
             standoutsSection(s)
             bottomSection(s)
+            Color.clear.frame(height: 80)
+        }
+    }
+
+    @ViewBuilder
+    private func globalContent(_ s: GlobalLibraryStatsData) -> some View {
+        VStack(alignment: .leading, spacing: 26) {
+            globalSourceBanner(s)
+            globalOverviewSection(s)
+            globalRecordsSection(s)
+            globalPrivacyControls
             Color.clear.frame(height: 80)
         }
     }
@@ -99,6 +329,35 @@ struct LibraryStatsContentView: View {
         .padding(.horizontal, 20)
     }
 
+    private func globalSourceBanner(_ s: GlobalLibraryStatsData) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "globe.americas.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 42, height: 42)
+                .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Opted-in Volta Libraries").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.primaryText).lineLimit(1)
+                Text("\(s.totals.libraryCount.formatted()) libraries · updated \(s.generatedAt.formatted(date: .omitted, time: .shortened))")
+                    .font(.caption2).foregroundStyle(Theme.secondaryText).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Button { vm.refreshGlobal(appState: appState) } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.primaryText)
+                    .frame(width: 34, height: 34)
+                    .glassCircle()
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.globalPhase == .loading)
+        }
+        .padding(14)
+        .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.06), lineWidth: 0.5))
+        .padding(.horizontal, 20)
+    }
+
     // MARK: Overview
 
     private func overviewSection(_ s: LibraryStatsData) -> some View {
@@ -123,6 +382,88 @@ struct LibraryStatsContentView: View {
                 IconStatCard(icon: "dial.medium", label: "Common Profile", value: s.commonResolution, sub: "most frequent")
             }
         }
+    }
+
+    private func globalOverviewSection(_ s: GlobalLibraryStatsData) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LibSectionHeader(icon: "chart.bar.fill", title: "Global Overview")
+            statsGrid2 {
+                IconStatCard(icon: "music.note.house", label: "Libraries", value: s.totals.libraryCount.formatted(),
+                             sub: "anonymous opt-ins")
+                IconStatCard(icon: "music.note", label: "Tracks", value: s.totals.songCount.formatted(),
+                             sub: "\(roundedNumber(s.averages.songCount)) avg per library")
+                IconStatCard(icon: "square.stack", label: "Albums", value: s.totals.albumCount.formatted(),
+                             sub: "\(roundedNumber(s.averages.albumCount)) avg per library")
+                IconStatCard(icon: "clock", label: "Total Playtime", value: formatLibDuration(s.totals.durationSeconds),
+                             sub: "\(s.totals.durationSeconds / 3600) hours combined")
+                IconStatCard(icon: "internaldrive", label: "Combined Size", value: formatLibBytes(s.totals.librarySizeBytes),
+                             sub: "\(formatLibBytes(Int(s.averages.librarySizeBytes))) avg library")
+                IconStatCard(icon: "person.3.sequence", label: "Largest Song Count", value: s.records.highestSongCount.formatted(),
+                             sub: "single anonymous library")
+            }
+        }
+    }
+
+    private func globalRecordsSection(_ s: GlobalLibraryStatsData) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LibSectionHeader(icon: "trophy.fill", title: "Global Records")
+            statsGrid2 {
+                IconStatCard(icon: "clock.badge", label: "Highest Listening Time",
+                             value: formatLibDuration(s.records.highestListeningTimeSeconds),
+                             sub: "one anonymous library")
+                IconStatCard(icon: "internaldrive.fill", label: "Biggest Library Size",
+                             value: formatLibBytes(s.records.highestLibrarySizeBytes),
+                             sub: "one anonymous library")
+                IconStatCard(icon: "music.note.list", label: "Biggest Library Tracks",
+                             value: s.records.biggestLibrary.songCount.formatted(),
+                             sub: "\(s.records.biggestLibrary.albumCount.formatted()) albums")
+                IconStatCard(icon: "square.stack.3d.up", label: "Most Albums",
+                             value: s.records.highestAlbumCount.formatted(),
+                             sub: "one anonymous library")
+            }
+        }
+    }
+
+    private var globalPrivacyControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                Text("Only anonymous numeric totals are shared.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                Spacer(minLength: 8)
+            }
+
+            if vm.globalPhase == .failed, let message = vm.globalErrorMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button(role: .destructive) {
+                vm.disableGlobalSharing()
+            } label: {
+                if vm.globalPhase == .loading {
+                    ProgressView()
+                        .tint(.red)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Text("Stop Sharing and Delete My Stats")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+            .disabled(vm.globalPhase == .loading)
+        }
+        .padding(16)
+        .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.06), lineWidth: 0.5))
+        .padding(.horizontal, 20)
     }
 
     // MARK: Audio quality
@@ -412,33 +753,46 @@ struct LibRankCard: View {
 struct CoverageCard: View {
     let coverage: LibMetadataCoverage
     let total: Int
+    @State private var showMoreMetadata = false
 
-    private var items: [(String, Int)] {
-        [("Artwork", coverage.artwork), ("Release Year", coverage.releaseYear),
-         ("Genres", coverage.genres), ("BPM", coverage.bpm)]
-    }
+    private let visibleCount = 6
+
+    private var visibleItems: [LibCountMetric] { Array(coverage.items.prefix(visibleCount)) }
+    private var hiddenItems: [LibCountMetric] { Array(coverage.items.dropFirst(visibleCount)) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             LibSectionHeader(icon: "checklist", title: "Metadata Coverage")
             VStack(spacing: 14) {
-                ForEach(items, id: \.0) { item in
-                    let pct = total > 0 ? Double(item.1) / Double(total) : 0
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(item.0).font(.footnote.weight(.medium)).foregroundStyle(Theme.primaryText)
-                            Spacer()
-                            Text("\(Int((pct * 100).rounded()))%").font(.footnote.monospacedDigit())
-                                .foregroundStyle(Theme.secondaryText)
-                        }
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Theme.primaryText.opacity(0.08)).frame(height: 6)
-                                Capsule().fill(Theme.accent.gradient)
-                                    .frame(width: max(0, geo.size.width * pct), height: 6)
+                if coverage.items.isEmpty {
+                    Text("No metadata fields found.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(visibleItems) { item in
+                        metadataCoverageRow(item)
+                    }
+                    if !hiddenItems.isEmpty {
+                        DisclosureGroup(isExpanded: $showMoreMetadata) {
+                            VStack(spacing: 14) {
+                                ForEach(hiddenItems) { item in
+                                    metadataCoverageRow(item)
+                                }
+                            }
+                            .padding(.top, 12)
+                        } label: {
+                            HStack {
+                                Text(showMoreMetadata ? "Show less" : "Show more")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(Theme.accent)
+                                Spacer()
+                                Text("\(hiddenItems.count) more")
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(Theme.secondaryText)
                             }
                         }
-                        .frame(height: 6)
+                        .tint(Theme.accent)
                     }
                 }
             }
@@ -446,6 +800,29 @@ struct CoverageCard: View {
             .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.06), lineWidth: 0.5))
             .padding(.horizontal, 20)
+        }
+    }
+
+    private func metadataCoverageRow(_ item: LibCountMetric) -> some View {
+        let pct = max(0, min(1, item.percentage / 100))
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(item.label).font(.footnote.weight(.medium)).foregroundStyle(Theme.primaryText)
+                Spacer()
+                Text("\(Int(item.percentage.rounded()))%").font(.footnote.monospacedDigit())
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.primaryText.opacity(0.08)).frame(height: 6)
+                    Capsule().fill(Theme.accent.gradient)
+                        .frame(width: max(0, geo.size.width * pct), height: 6)
+                }
+            }
+            .frame(height: 6)
+            Text("\(item.count.formatted()) of \(total.formatted()) tracks")
+                .font(.caption2)
+                .foregroundStyle(Theme.secondaryText.opacity(0.8))
         }
     }
 }
@@ -465,4 +842,14 @@ func formatLibDuration(_ seconds: Int) -> String {
     if d > 0 { return "\(d)d \(h)h" }
     if h > 0 { return "\(h)h \(m)m" }
     return "\(m)m"
+}
+
+private func roundedNumber(_ value: Double) -> String {
+    if value >= 100 {
+        return Int(value.rounded()).formatted()
+    }
+    if value >= 10 {
+        return String(format: "%.1f", value)
+    }
+    return String(format: "%.2f", value)
 }

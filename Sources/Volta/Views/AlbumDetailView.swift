@@ -61,6 +61,8 @@ struct AlbumDetailView: View {
             }
         }
         .navigationBarHidden(true)
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         .preferredColorScheme(Theme.colorScheme)
         .background(SwipeBackEnabler())
         .navigationDestinationItemCompat(item: $drillArtist) { artist in
@@ -81,7 +83,7 @@ struct AlbumDetailView: View {
             let started = ProcessInfo.processInfo.systemUptime
             AppLogger.shared.log(
                 "Album detail load started; albumID=\(vm.album.id); initialSongs=\(vm.songs.count); fromArtist=\(fromArtist)",
-                category: .other
+                category: .artwork
             )
             if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
                 if let c = appState.client { await vm.load(client: c) }
@@ -97,7 +99,7 @@ struct AlbumDetailView: View {
             }
             AppLogger.shared.log(
                 "Album detail load finished; albumID=\(vm.album.id); songs=\(vm.songs.count); animatedCover=\(animatedCover != nil); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
-                category: .other
+                category: .artwork
             )
         }
     }
@@ -105,24 +107,28 @@ struct AlbumDetailView: View {
     // Album detail gets live artwork; grids stay static.
     private func loadAnimatedCover() async {
         guard LiveArtworkSettings.shouldShowAnimatedArtwork else {
-            AppLogger.shared.log("Album live artwork skipped: disabled; albumID=\(vm.album.id)", category: .other)
+            AppLogger.shared.log("Album live artwork skipped: disabled; albumID=\(vm.album.id)", category: .artwork)
             return
         }
         guard LiveArtworkSettings.animateAlbumHeaders else {
-            AppLogger.shared.log("Album live artwork skipped: device profile; albumID=\(vm.album.id)", category: .other)
+            AppLogger.shared.log("Album live artwork skipped: device profile; albumID=\(vm.album.id)", category: .artwork)
             return
         }
-        guard let client = appState.client,
-              let url = client.coverArtURL(id: vm.album.coverArt) else {
-            AppLogger.shared.log("Album live artwork skipped: no cover URL; albumID=\(vm.album.id)", category: .other, level: .warning)
+        guard let client = appState.client else {
+            AppLogger.shared.log("Album live artwork skipped: no cover URL; albumID=\(vm.album.id)", category: .artwork, level: .warning)
+            return
+        }
+        let urls = Self.liveArtworkURLs(for: vm.album, client: client)
+        guard !urls.isEmpty else {
+            AppLogger.shared.log("Album live artwork skipped: no cover URL; albumID=\(vm.album.id)", category: .artwork, level: .warning)
             return
         }
         let started = ProcessInfo.processInfo.systemUptime
-        AppLogger.shared.log("Album live artwork requested; albumID=\(vm.album.id)", category: .other)
-        guard let image = await ArtworkLoader.shared.animatedImage(for: url) else {
+        AppLogger.shared.log("Album live artwork requested; albumID=\(vm.album.id); candidates=\(urls.count)", category: .artwork)
+        guard let image = await Self.firstAnimatedImage(for: urls) else {
             AppLogger.shared.log(
                 "Album live artwork unavailable; albumID=\(vm.album.id); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
-                category: .other,
+                category: .artwork,
                 level: .warning
             )
             return
@@ -130,11 +136,32 @@ struct AlbumDetailView: View {
         animatedCover = image
         AppLogger.shared.log(
             "Album live artwork displayed; albumID=\(vm.album.id); frames=\(image.images?.count ?? 0); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
-            category: .other
+            category: .artwork
         )
         if let first = image.images?.first {
             vm.setDominantColor(ColorExtractor.dominantColor(from: first))
         }
+    }
+
+    private nonisolated static func liveArtworkURLs(for album: Album, client: any MusicService) -> [URL] {
+        // The resolved cover-art identity carries Emby's image tag and may
+        // point at an inherited image item, so prefer it over the raw album id.
+        var urls = client.liveArtworkURLs(id: album.coverArt)
+        if client.backendKind == .emby {
+            urls.append(contentsOf: client.liveArtworkURLs(id: album.id))
+        }
+        var seen = Set<String>()
+        return urls.filter { seen.insert($0.absoluteString).inserted }
+    }
+
+    private nonisolated static func firstAnimatedImage(for urls: [URL]) async -> UIImage? {
+        for url in urls {
+            guard !Task.isCancelled else { return nil }
+            if let image = await ArtworkLoader.shared.animatedImage(for: url) {
+                return image
+            }
+        }
+        return nil
     }
 
     private var phoneScrollView: some View {
@@ -492,6 +519,7 @@ struct AlbumDetailView: View {
                                     .frame(width: 130)
                             }
                             .buttonStyle(.plain)
+                            .albumContextMenu(album)
                         }
                     }
                     .padding(.horizontal, 20)
@@ -661,7 +689,7 @@ struct AddToPlaylistSheet: View {
                                 onAdded(pl.name)
                                 dismiss()
                             } catch {
-                                AppLogger.shared.log("Add to playlist failed: \(error.localizedDescription)", category: .other, level: .error)
+                                AppLogger.shared.log("Add to playlist failed: \(error.localizedDescription)", category: .library, level: .error)
                             }
                         }
                     }

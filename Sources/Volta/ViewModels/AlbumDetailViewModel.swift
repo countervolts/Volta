@@ -40,7 +40,7 @@ final class AlbumDetailViewModel: ObservableObject {
 
     func load(client: any MusicService) async {
         guard !isLoading else {
-            AppLogger.shared.log("Album metadata load coalesced; albumID=\(album.id)", category: .other)
+            AppLogger.shared.log("Album metadata load coalesced; albumID=\(album.id)", category: .library)
             return
         }
         isLoading = true
@@ -80,7 +80,7 @@ final class AlbumDetailViewModel: ObservableObject {
             songs = sortTracks(loaded.song ?? [])
             AppLogger.shared.log(
                 "Album metadata loaded from server; albumID=\(albumID); songs=\(songs.count); related=\(relatedAlbums.count); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
-                category: .other
+                category: .library
             )
         } else if songs.isEmpty {
             // Offline fallback: show this album's downloaded tracks.
@@ -89,13 +89,13 @@ final class AlbumDetailViewModel: ObservableObject {
                 songs = sortTracks(local)
                 AppLogger.shared.log(
                     "Album metadata used offline fallback; albumID=\(albumID); songs=\(songs.count)",
-                    category: .other,
+                    category: .library,
                     level: .warning
                 )
             } else {
                 AppLogger.shared.log(
                     "Album metadata unavailable; albumID=\(albumID); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
-                    category: .other,
+                    category: .library,
                     level: .warning
                 )
             }
@@ -123,7 +123,7 @@ final class AlbumDetailViewModel: ObservableObject {
         explicitSongIDs.formUnion(resolved.compactMap { $0 })
         AppLogger.shared.log(
             "Album explicit metadata resolved; albumID=\(album.id); server=\(songs.filter(\.isExplicit).count); embedded=\(resolved.compactMap { $0 }.count)",
-            category: .other
+            category: .library
         )
     }
 

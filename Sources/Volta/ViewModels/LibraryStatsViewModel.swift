@@ -42,10 +42,7 @@ struct LibArtistRank: Identifiable, Hashable {
 }
 
 struct LibMetadataCoverage: Hashable {
-    var artwork = 0
-    var releaseYear = 0
-    var genres = 0
-    var bpm = 0
+    var items: [LibCountMetric] = []
 }
 
 // The full snapshot rendered by the Library tab.
@@ -101,12 +98,20 @@ struct LibraryStatsData: Hashable {
 @MainActor
 final class LibraryStatsViewModel: ObservableObject {
     enum Phase: Equatable { case idle, loading, ready, failed }
+    enum GlobalPhase: Equatable { case idle, loading, ready, failed }
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var progress: Double = 0       // 0...1 while scanning
     @Published private(set) var stats: LibraryStatsData?
     @Published private(set) var errorMessage: String?
     @Published private(set) var isOfflineData = false
+    @Published private(set) var globalPhase: GlobalPhase = .idle
+    @Published private(set) var globalStats: GlobalLibraryStatsData?
+    @Published private(set) var globalErrorMessage: String?
+    @Published private(set) var isGlobalSharingEnabled = GlobalLibraryStatsService.isOptedIn
+
+    private static let sharedLibraryKey = "globalLibraryStatsSharedLibraryKey"
+    private static let sharedLibraryNameKey = "globalLibraryStatsSharedLibraryName"
 
     // Computed snapshots are expensive (a full library walk), so keep the last
     // result per server alive across tab switches.
@@ -114,9 +119,30 @@ final class LibraryStatsViewModel: ObservableObject {
     private static var cacheOffline: [String: Bool] = [:]
 
     private var currentTask: Task<Void, Never>?
+    private var globalTask: Task<Void, Never>?
 
     private func cacheKey(_ appState: AppState) -> String {
         appState.currentServer?.id ?? "downloads"
+    }
+
+    private func sharingName(_ appState: AppState) -> String {
+        appState.currentServer?.displayName ?? "Downloaded Music"
+    }
+
+    var sharedLibraryName: String? {
+        UserDefaults.standard.string(forKey: Self.sharedLibraryNameKey)
+    }
+
+    func isSharingCurrentLibrary(appState: AppState) -> Bool {
+        guard isGlobalSharingEnabled,
+              let sharedKey = UserDefaults.standard.string(forKey: Self.sharedLibraryKey) else {
+            return false
+        }
+        return sharedKey == cacheKey(appState)
+    }
+
+    private func shouldShareLibrary(key: String) -> Bool {
+        isGlobalSharingEnabled && UserDefaults.standard.string(forKey: Self.sharedLibraryKey) == key
     }
 
     // Load from cache if we have a snapshot, otherwise scan once.
@@ -152,12 +178,109 @@ final class LibraryStatsViewModel: ObservableObject {
                 self.stats = result.data
                 self.isOfflineData = result.offline
                 self.phase = .ready
+                if self.shouldShareLibrary(key: key) {
+                    self.syncGlobalStats(uploading: result.data)
+                }
             } catch is CancellationError {
                 // superseded by a newer scan; leave state untouched
             } catch {
                 if Task.isCancelled { return }
                 self.errorMessage = error.localizedDescription
                 self.phase = .failed
+            }
+        }
+    }
+
+    func loadGlobalIfAllowed(appState: AppState) {
+        guard isGlobalSharingEnabled else { return }
+        guard isSharingCurrentLibrary(appState: appState) else {
+            globalPhase = .idle
+            globalErrorMessage = nil
+            return
+        }
+        if globalStats != nil, globalPhase == .ready { return }
+        if let stats {
+            syncGlobalStats(uploading: stats)
+        } else {
+            globalPhase = .loading
+            globalErrorMessage = nil
+            loadIfNeeded(appState: appState)
+        }
+    }
+
+    func refreshGlobal(appState: AppState) {
+        guard isGlobalSharingEnabled else { return }
+        guard isSharingCurrentLibrary(appState: appState) else {
+            globalPhase = .idle
+            globalErrorMessage = nil
+            return
+        }
+        if let stats {
+            syncGlobalStats(uploading: stats)
+        } else {
+            globalPhase = .loading
+            globalErrorMessage = nil
+            refresh(appState: appState)
+        }
+    }
+
+    func enableGlobalSharing(appState: AppState) {
+        guard !isGlobalSharingEnabled else {
+            loadGlobalIfAllowed(appState: appState)
+            return
+        }
+
+        UserDefaults.standard.set(cacheKey(appState), forKey: Self.sharedLibraryKey)
+        UserDefaults.standard.set(sharingName(appState), forKey: Self.sharedLibraryNameKey)
+        isGlobalSharingEnabled = true
+        GlobalLibraryStatsService.setOptedIn(true)
+        refreshGlobal(appState: appState)
+    }
+
+    func disableGlobalSharing() {
+        guard isGlobalSharingEnabled else { return }
+
+        globalPhase = .loading
+        globalErrorMessage = nil
+        globalTask?.cancel()
+
+        globalTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await GlobalLibraryStatsService.deleteSharedStats()
+                if Task.isCancelled { return }
+                self.isGlobalSharingEnabled = false
+                GlobalLibraryStatsService.setOptedIn(false)
+                UserDefaults.standard.removeObject(forKey: Self.sharedLibraryKey)
+                UserDefaults.standard.removeObject(forKey: Self.sharedLibraryNameKey)
+                self.globalStats = nil
+                self.globalPhase = .idle
+            } catch {
+                if Task.isCancelled { return }
+                self.globalErrorMessage = "Could not delete shared stats: \(error.localizedDescription)"
+                self.globalPhase = .failed
+            }
+        }
+    }
+
+    private func syncGlobalStats(uploading stats: LibraryStatsData) {
+        guard isGlobalSharingEnabled else { return }
+
+        globalTask?.cancel()
+        globalPhase = .loading
+        globalErrorMessage = nil
+
+        globalTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let global = try await GlobalLibraryStatsService.submit(stats: stats)
+                if Task.isCancelled { return }
+                self.globalStats = global
+                self.globalPhase = .ready
+            } catch {
+                if Task.isCancelled { return }
+                self.globalErrorMessage = error.localizedDescription
+                self.globalPhase = .failed
             }
         }
     }
@@ -249,7 +372,12 @@ final class LibraryStatsViewModel: ObservableObject {
         var durationBucketCounts: [Int: Int] = [:]   // bucket index -> count
         var genreCounts: [String: Int] = [:]
 
-        var coverage = LibMetadataCoverage()
+        var metadataTagCounts: [String: Int] = [:]
+
+        func countMetadataTag(_ label: String, present: Bool) {
+            guard present else { return }
+            metadataTagCounts[label, default: 0] += 1
+        }
 
         // Per-album rollups.
         struct AlbumAgg { var name = ""; var artist = ""; var cover: String?; var tracks = 0; var duration = 0; var size = 0 }
@@ -270,11 +398,31 @@ final class LibraryStatsViewModel: ObservableObject {
             if song.isLossless { lossless += 1 }
             if song.isHiResLossless { hiRes += 1 }
 
-            // metadata coverage
-            if song.coverArt != nil { coverage.artwork += 1 }
-            if let y = song.year, y > 0 { coverage.releaseYear += 1 }
-            if song.genre?.nonBlank != nil { coverage.genres += 1 }
-            if let b = song.bpm, b > 0 { coverage.bpm += 1 }
+            countMetadataTag("Album", present: song.album?.nonBlank != nil)
+            countMetadataTag("Artist", present: song.artist?.nonBlank != nil)
+            countMetadataTag("Album Artist", present: song.albumArtist?.nonBlank != nil)
+            countMetadataTag("Artwork", present: song.coverArt?.nonBlank != nil)
+            countMetadataTag("Duration", present: (song.duration ?? 0) > 0)
+            countMetadataTag("Track #", present: (song.track ?? 0) > 0)
+            countMetadataTag("Disc #", present: (song.discNumber ?? 0) > 0)
+            countMetadataTag("Release Year", present: (song.year ?? 0) > 0)
+            countMetadataTag("Genre", present: song.genre?.nonBlank != nil)
+            countMetadataTag("File Size", present: (song.size ?? 0) > 0)
+            countMetadataTag("Format", present: song.suffix?.nonBlank != nil || song.contentType?.nonBlank != nil)
+            countMetadataTag("Codec", present: song.codec?.nonBlank != nil)
+            countMetadataTag("Bitrate", present: (song.bitRate ?? 0) > 0)
+            countMetadataTag("Path", present: song.path?.nonBlank != nil)
+            countMetadataTag("Play Count", present: song.playCount != nil)
+            countMetadataTag("Explicit Status", present: song.hasKnownExplicitStatus)
+            countMetadataTag("Starred", present: song.starred?.nonBlank != nil)
+            countMetadataTag("ReplayGain", present: song.replayGain != nil)
+            countMetadataTag("BPM", present: (song.bpm ?? 0) > 0)
+            countMetadataTag("Sample Rate", present: (song.samplingRate ?? 0) > 0)
+            countMetadataTag("Bit Depth", present: (song.bitDepth ?? 0) > 0)
+            countMetadataTag("Channels", present: (song.channelCount ?? 0) > 0)
+            countMetadataTag("Composer", present: song.displayComposer?.nonBlank != nil)
+            countMetadataTag("Credits", present: !(song.contributors ?? []).isEmpty)
+            countMetadataTag("Features", present: song.contributes?.nonBlank != nil)
 
             // release year / decade
             if let y = song.year, y > 0 {
@@ -333,10 +481,21 @@ final class LibraryStatsViewModel: ObservableObject {
         data.hiResTracks = hiRes
         data.firstReleaseYear = minYear == Int.max ? nil : minYear
         data.lastReleaseYear = maxYear == Int.min ? nil : maxYear
-        data.metadataCoverage = coverage
 
         let n = Double(songs.count)
         func pct(_ c: Int) -> Double { (Double(c) / n * 1000).rounded() / 10 }
+
+        data.metadataCoverage.items = Self.metadataTagLabels
+            .map { label in
+                let count = metadataTagCounts[label] ?? 0
+                return LibCountMetric(id: label, label: label, count: count, percentage: pct(count))
+            }
+            .sorted { lhs, rhs in
+                if lhs.count != rhs.count { return lhs.count > rhs.count }
+                let leftRank = Self.metadataTagSortRank(lhs.label)
+                let rightRank = Self.metadataTagSortRank(rhs.label)
+                return leftRank == rightRank ? lhs.label < rhs.label : leftRank < rightRank
+            }
 
         data.fileFormats = formatCounts.sorted { $0.value > $1.value }.prefix(8).map {
             LibCountMetric(id: $0.key, label: $0.key.uppercased(), count: $0.value, percentage: pct($0.value))
@@ -411,5 +570,19 @@ final class LibraryStatsViewModel: ObservableObject {
         case 8: return "7.1"
         default: return "\(count) ch"
         }
+    }
+
+    nonisolated private static func metadataTagSortRank(_ label: String) -> Int {
+        metadataTagLabels.firstIndex(of: label) ?? Int.max
+    }
+
+    nonisolated private static var metadataTagLabels: [String] {
+        [
+            "Album", "Artist", "Album Artist", "Artwork", "Duration",
+            "Track #", "Disc #", "Release Year", "Genre", "File Size",
+            "Format", "Codec", "Bitrate", "Path", "Play Count",
+            "Explicit Status", "Starred", "ReplayGain", "BPM", "Sample Rate",
+            "Bit Depth", "Channels", "Composer", "Credits", "Features",
+        ]
     }
 }

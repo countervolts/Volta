@@ -163,7 +163,7 @@ final class PlaybackCacheService {
 
     func cachedURL(for song: Song, client: any MusicService) -> URL? {
         guard PlaybackCacheSettings.isEnabled,
-              let streamURL = client.streamURL(id: song.id) else { return nil }
+              let streamURL = client.streamURL(for: song) else { return nil }
         let key = cacheKey(for: streamURL)
         guard var record = manifest[key] else {
             misses += 1
@@ -217,7 +217,7 @@ final class PlaybackCacheService {
     func cancelPrefetch(for song: Song, client: any MusicService) {
         preparingSongIDs.remove(song.id)
         prepareTokens.removeValue(forKey: song.id)
-        guard let streamURL = client.streamURL(id: song.id) else { return }
+        guard let streamURL = client.streamURL(for: song) else { return }
         let key = cacheKey(for: streamURL)
         activeTasks[key]?.cancel()
         activeTasks.removeValue(forKey: key)
@@ -231,7 +231,7 @@ final class PlaybackCacheService {
         try? FileManager.default.removeItem(at: directory)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         recordEvent("Playback cache cleared")
-        AppLogger.shared.log("Playback cache cleared by user", category: .other)
+        AppLogger.shared.log("Playback cache cleared by user", category: .playback)
     }
 
     func totalBytes() -> Int {
@@ -297,7 +297,7 @@ final class PlaybackCacheService {
     }
 
     func isCached(_ song: Song, client: any MusicService) -> Bool {
-        guard let streamURL = client.streamURL(id: song.id) else { return false }
+        guard let streamURL = client.streamURL(for: song) else { return false }
         let key = cacheKey(for: streamURL)
         guard let record = manifest[key] else { return false }
         return FileManager.default.fileExists(atPath: record.path)
@@ -324,8 +324,8 @@ final class PlaybackCacheService {
                     self.preparingSongIDs.remove(song.id)
                 }
             }
-            if !client.streamMetadataReady(id: song.id) {
-                await client.prepareForPlayback(id: song.id)
+            if !client.streamMetadataReady(for: song) {
+                await client.prepareForPlayback(song: song)
             }
             guard !Task.isCancelled,
                   generationToken == self.generation,
@@ -333,7 +333,7 @@ final class PlaybackCacheService {
                   PlaybackCacheSettings.isEnabled,
                   DownloadService.shared.localURL(for: song) == nil,
                   case .notDownloaded = DownloadService.shared.state(for: song),
-                  let streamURL = client.streamURL(id: song.id) else { return }
+                  let streamURL = client.streamURL(for: song) else { return }
 
             let key = self.cacheKey(for: streamURL)
             guard self.cachedFileExists(forKey: key) == false,

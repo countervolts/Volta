@@ -159,6 +159,43 @@ extension Song {
         }
         return bitDepth >= 24 && samplingRate > 48_000 && samplingRate <= 192_000
     }
+
+    var isDolbyAtmos: Bool {
+        let hints = [codec, contentType, suffix, path]
+            .compactMap(Self.normalizedAudioHint)
+
+        if hints.contains(where: Self.isDolbyAtmosHint) {
+            return true
+        }
+
+        let hasM4AContainer = hints.contains { hint in
+            hint == "m4a" || hint == "mp4" || hint.contains("audio/mp4") || hint.contains("audio/x-m4a")
+        }
+        return !isLossless && hasM4AContainer && (channelCount ?? 0) >= 6
+    }
+
+    private static func normalizedAudioHint(_ value: String?) -> String? {
+        value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .nonBlank
+    }
+
+    private static func isDolbyAtmosHint(_ hint: String) -> Bool {
+        hint.contains("dolby atmos")
+            || hint.contains("atmos")
+            || hint.contains("eac3_joc")
+            || hint.contains("eac-3_joc")
+            || hint.contains("ec-3+joc")
+            || hint.contains("e-ac-3+joc")
+            || hint.contains("joc")
+            || hint == "eac3"
+            || hint == "e-ac-3"
+            || hint == "ec-3"
+            || hint.contains("audio/eac3")
+            || hint.contains("audio/e-ac-3")
+            || hint.contains("audio/ec-3")
+    }
 }
 
 // OpenSubsonic ReplayGain values.
@@ -216,13 +253,61 @@ struct StructuredLyricLine: Decodable, Sendable {
     let value: String
 }
 
+struct StructuredLyricCue: Decodable, Sendable {
+    let start: Int?
+    let end: Int?
+    let value: String?
+    let byteStart: Int?
+    let byteEnd: Int?
+}
+
+struct StructuredLyricCueLine: Decodable, Sendable {
+    let index: Int?
+    let agentId: String?
+    let start: Int?
+    let end: Int?
+    let value: String?
+    let cue: [StructuredLyricCue]?
+}
+
+struct StructuredLyricAgent: Decodable, Sendable {
+    let id: String?
+    let role: String?
+    let name: String?
+}
+
 struct StructuredLyrics: Decodable, Sendable {
     let displayArtist: String?
     let displayTitle: String?
     let lang: String?
     let offset: Int?
     let synced: Bool?
+    let kind: String?
     let line: [StructuredLyricLine]?
+    let cueLine: [StructuredLyricCueLine]?
+    let agents: [StructuredLyricAgent]?
+
+    init(
+        displayArtist: String?,
+        displayTitle: String?,
+        lang: String?,
+        offset: Int?,
+        synced: Bool?,
+        kind: String? = nil,
+        line: [StructuredLyricLine]?,
+        cueLine: [StructuredLyricCueLine]? = nil,
+        agents: [StructuredLyricAgent]? = nil
+    ) {
+        self.displayArtist = displayArtist
+        self.displayTitle = displayTitle
+        self.lang = lang
+        self.offset = offset
+        self.synced = synced
+        self.kind = kind
+        self.line = line
+        self.cueLine = cueLine
+        self.agents = agents
+    }
 }
 
 struct LyricsList: Decodable, Sendable {
@@ -247,10 +332,70 @@ struct LyricsList: Decodable, Sendable {
     }
 }
 
+enum LyricVocalLane: String, Codable, Sendable, Hashable {
+    case main
+    case other
+
+    init(agentRole: String?) {
+        let normalized = agentRole?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "main", "lead", "primary", "v1":
+            self = .main
+        case "background", "backing", "choir", "duet", "other", "secondary", "supporting":
+            self = .other
+        default:
+            if let normalized,
+               normalized.range(of: #"^v(?:[2-9]\d*|[a-z])$"#, options: .regularExpression) != nil {
+                self = .other
+            } else {
+                self = .main
+            }
+        }
+    }
+}
+
 // Parsed lyric line for display.
 struct LyricLine: Identifiable, Hashable, Codable, Sendable {
     let id: Int
     let time: TimeInterval   // seconds; < 0 means unsynced
+    let text: String
+    let cues: [LyricCue]?
+    let vocalLane: LyricVocalLane
+
+    private enum CodingKeys: String, CodingKey {
+        case id, time, text, cues, vocalLane
+    }
+
+    init(
+        id: Int,
+        time: TimeInterval,
+        text: String,
+        cues: [LyricCue]? = nil,
+        vocalLane: LyricVocalLane = .main
+    ) {
+        self.id = id
+        self.time = time
+        self.text = text
+        self.cues = cues
+        self.vocalLane = vocalLane
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        time = try container.decode(TimeInterval.self, forKey: .time)
+        text = try container.decode(String.self, forKey: .text)
+        cues = try container.decodeIfPresent([LyricCue].self, forKey: .cues)
+        vocalLane = try container.decodeIfPresent(LyricVocalLane.self, forKey: .vocalLane) ?? .main
+    }
+}
+
+struct LyricCue: Identifiable, Hashable, Codable, Sendable {
+    let id: Int
+    let start: TimeInterval
+    let end: TimeInterval?
+    let byteStart: Int
+    let byteEnd: Int
     let text: String
 }
 

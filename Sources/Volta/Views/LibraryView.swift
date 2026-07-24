@@ -24,15 +24,20 @@ struct LibraryView: View {
             ZStack {
                 Theme.background.ignoresSafeArea()
                 GeometryReader { geo in
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            sourcePicker
-                            filterPicker
-                            Divider().background(Theme.secondaryText.opacity(0.15))
-                            content
+                    ScrollViewReader { scrollProxy in
+                        ZStack(alignment: .trailing) {
+                            ScrollView {
+                                LazyVStack(spacing: 0) {
+                                    sourcePicker
+                                    filterPicker
+                                    Divider().background(Theme.secondaryText.opacity(0.15))
+                                    content
+                                }
+                                .frame(minHeight: geo.size.height + 160, alignment: .top)
+                                .padding(.bottom, 80)
+                            }
+                            alphabetJumpOverlay(scrollProxy: scrollProxy)
                         }
-                        .frame(minHeight: geo.size.height + 160, alignment: .top)
-                        .padding(.bottom, 80)
                     }
                 }
             }
@@ -201,6 +206,11 @@ struct LibraryView: View {
         } else if vm.isLoading && !vm.hasLoaded {
             ProgressView().controlSize(.large).tint(Theme.accent)
                 .frame(maxWidth: .infinity, minHeight: 360)
+        } else if vm.source == .server,
+                  let failure = vm.loadFailure(for: vm.filter),
+                  vm.currentFilterIsEmpty,
+                  vm.searchText.isEmpty {
+            serverLoadErrorState(failure)
         } else if vm.source == .downloaded && vm.filteredSongs.isEmpty && vm.searchText.isEmpty {
             downloadedEmptyState
         } else {
@@ -286,25 +296,68 @@ struct LibraryView: View {
         .frame(maxWidth: .infinity, minHeight: 360)
     }
 
+    private func serverLoadErrorState(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(Theme.secondaryText)
+            Text("\(vm.filter.rawValue) could not be loaded")
+                .font(.headline)
+                .foregroundStyle(Theme.primaryText)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+                .multilineTextAlignment(.center)
+                .lineLimit(4)
+        }
+        .padding(.horizontal, 40)
+        .frame(maxWidth: .infinity, minHeight: 360)
+    }
+
+    @ViewBuilder
     private var albumsGrid: some View {
         let columns = [GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
                        GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
                        GridItem(.flexible(), spacing: Theme.Layout.gridSpacing)]
-        return LazyVGrid(columns: columns, spacing: Theme.Layout.gridSpacing) {
-            ForEach(vm.filteredAlbums) { album in
-                NavigationLink(value: LibraryRoute.album(album)) {
-                    MediaCard(item: MediaItem(album: album))
+        let trailingPadding = alphabetContentTrailingPadding
+        if usesAlbumAlphabetSections {
+            LazyVStack(spacing: Theme.Layout.gridSpacing) {
+                ForEach(albumAlphabetSections) { section in
+                    VStack(spacing: 0) {
+                        LazyVGrid(columns: columns, spacing: Theme.Layout.gridSpacing) {
+                            ForEach(section.items) { album in
+                                albumGridItem(album)
+                            }
+                        }
+                    }
+                    .id(section.targetID)
                 }
-                .buttonStyle(.plain)
-                .albumContextMenu(album)
             }
+            .padding(.leading, Theme.Layout.screenPadding)
+            .padding(.trailing, trailingPadding)
+            .padding(.vertical, 12)
+        } else {
+            LazyVGrid(columns: columns, spacing: Theme.Layout.gridSpacing) {
+                ForEach(vm.filteredAlbums) { album in
+                    albumGridItem(album)
+                }
+            }
+            .padding(.horizontal, Theme.Layout.screenPadding)
+            .padding(.vertical, 12)
         }
-        .padding(.horizontal, Theme.Layout.screenPadding)
-        .padding(.vertical, 12)
+    }
+
+    private func albumGridItem(_ album: Album) -> some View {
+        NavigationLink(value: LibraryRoute.album(album)) {
+            MediaCard(item: MediaItem(album: album))
+        }
+        .buttonStyle(.plain)
+        .albumContextMenu(album)
     }
 
     private var artistsList: some View {
-        LazyVStack(spacing: 0) {
+        let trailingPadding = alphabetContentTrailingPadding
+        return LazyVStack(spacing: 0) {
             ForEach(vm.filteredArtists) { artist in
                 NavigationLink(value: LibraryRoute.artist(artist)) {
                     HStack(spacing: 14) {
@@ -321,27 +374,40 @@ struct LibraryView: View {
                         Spacer()
                         Image(systemName: Symbols.chevron).font(.caption).foregroundStyle(Theme.secondaryText)
                     }
-                    .padding(.horizontal, Theme.Layout.screenPadding)
+                    .padding(.leading, Theme.Layout.screenPadding)
+                    .padding(.trailing, trailingPadding)
                     .padding(.vertical, 10)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .id(alphabetAnchorID(kind: "artist", rawID: artist.id))
                 Divider().background(Theme.secondaryText.opacity(0.12)).padding(.leading, 70)
             }
         }
     }
 
     private var songsList: some View {
-        LazyVStack(spacing: 0) {
+        let sections = usesSongAlphabetSections ? songAlphabetSections : []
+        let entries = sections.isEmpty ? songListEntries : songListEntries(from: sections)
+        let trailingPadding = showsAlphabetJumpBar(jumpItems(from: sections)) ? 48 : Theme.Layout.screenPadding
+        return LazyVStack(spacing: 0) {
             if !vm.filteredSongs.isEmpty {
                 librarySongsActions
             }
-            ForEach(Array(vm.filteredSongs.enumerated()), id: \.element.id) { index, song in
-                songRow(song, visibleIndex: index)
-                Divider().background(Theme.secondaryText.opacity(0.12))
-                    .padding(.leading, selectionMode ? 96 : 68)
+            ForEach(entries) { entry in
+                songListEntry(entry, trailingPadding: trailingPadding)
             }
         }
+    }
+
+    @ViewBuilder
+    private func songListEntry(_ entry: SongListEntry, trailingPadding: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            songRow(entry.song, visibleIndex: entry.visibleIndex, trailingPadding: trailingPadding)
+            Divider().background(Theme.secondaryText.opacity(0.12))
+                .padding(.leading, selectionMode ? 96 : 68)
+        }
+        .id(entry.id)
     }
 
     private var librarySongsActions: some View {
@@ -375,7 +441,8 @@ struct LibraryView: View {
     }
 
     @ViewBuilder
-    private func songRow(_ song: Song, visibleIndex: Int) -> some View {
+    private func songRow(_ song: Song, visibleIndex: Int, trailingPadding: CGFloat? = nil) -> some View {
+        let resolvedTrailingPadding = trailingPadding ?? alphabetContentTrailingPadding
         let selected = selectedSongIDs.contains(song.id)
         if selectionMode {
             HStack(spacing: 12) {
@@ -391,7 +458,8 @@ struct LibraryView: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal, Theme.Layout.screenPadding)
+            .padding(.leading, Theme.Layout.screenPadding)
+            .padding(.trailing, resolvedTrailingPadding)
             .padding(.vertical, 8)
             .contentShape(Rectangle())
             .onTapGesture { toggleSelection(song) }
@@ -421,7 +489,8 @@ struct LibraryView: View {
                     deleteLabel: L(.action_remove_download)
                 )
             }
-            .padding(.horizontal, Theme.Layout.screenPadding)
+            .padding(.leading, Theme.Layout.screenPadding)
+            .padding(.trailing, resolvedTrailingPadding)
             .onLongPressGesture(minimumDuration: 0.4) { enterSelection(with: song) }
         }
     }
@@ -604,8 +673,240 @@ struct LibraryView: View {
         }
     }
 
+    @ViewBuilder
+    private func alphabetJumpOverlay(scrollProxy: ScrollViewProxy) -> some View {
+        let items = alphabetJumpItems
+        if showsAlphabetJumpBar(items) {
+            AlphabetJumpBar(items: items) { item in
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.easeOut(duration: 0.18)) {
+                    scrollProxy.scrollTo(item.targetID, anchor: .top)
+                }
+            }
+            .padding(.trailing, 4)
+            .transition(.opacity)
+        }
+    }
+
+    private var alphabetContentTrailingPadding: CGFloat {
+        showsAlphabetJumpBar(alphabetJumpItems) ? 48 : Theme.Layout.screenPadding
+    }
+
+    private var alphabetJumpItems: [AlphabetJumpItem] {
+        switch vm.filter {
+        case .artists:
+            return alphabetJumpItems(
+                vm.filteredArtists.map { ($0.name, alphabetAnchorID(kind: "artist", rawID: $0.id)) }
+            )
+        case .albums:
+            guard usesAlbumAlphabetSections else { return [] }
+            return albumAlphabetSections.map { AlphabetJumpItem(label: $0.label, targetID: $0.targetID) }
+        case .songs:
+            guard usesSongAlphabetSections else { return [] }
+            return songAlphabetSections.map { AlphabetJumpItem(label: $0.label, targetID: $0.targetID) }
+        case .genres, .folders:
+            return []
+        }
+    }
+
+    private var usesAlbumAlphabetSections: Bool {
+        vm.sortOrder == .name || vm.sortOrder == .album
+    }
+
+    private var usesSongAlphabetSections: Bool {
+        vm.sortOrder == .name
+    }
+
+    private var albumAlphabetSections: [AlphabetSection<Album>] {
+        alphabetSections(
+            kind: "album",
+            items: vm.filteredAlbums,
+            title: { $0.name }
+        )
+    }
+
+    private var songListEntries: [SongListEntry] {
+        vm.filteredSongs.enumerated().map { SongListEntry(visibleIndex: $0.offset, song: $0.element) }
+    }
+
+    private var songAlphabetSections: [AlphabetSection<SongListEntry>] {
+        alphabetSections(
+            kind: "song",
+            items: songListEntries,
+            title: { $0.song.title }
+        )
+    }
+
+    private func songListEntries(from sections: [AlphabetSection<SongListEntry>]) -> [SongListEntry] {
+        sections.flatMap { section in
+            section.items.enumerated().map { offset, entry in
+                SongListEntry(
+                    visibleIndex: entry.visibleIndex,
+                    song: entry.song,
+                    anchorID: offset == 0 ? section.targetID : nil
+                )
+            }
+        }
+    }
+
+    private func showsAlphabetJumpBar(_ items: [AlphabetJumpItem]) -> Bool {
+        !selectionMode && items.count >= 3
+    }
+
+    private func jumpItems<Item>(from sections: [AlphabetSection<Item>]) -> [AlphabetJumpItem] {
+        sections.map { AlphabetJumpItem(label: $0.label, targetID: $0.targetID) }
+    }
+
+    private func alphabetSections<Item>(
+        kind: String,
+        items: [Item],
+        title: (Item) -> String
+    ) -> [AlphabetSection<Item>] {
+        var sections: [AlphabetSection<Item>] = []
+
+        for item in items {
+            let key = alphabetSectionKey(for: title(item))
+            if sections.last?.label == key {
+                sections[sections.count - 1].items.append(item)
+            } else {
+                sections.append(
+                    AlphabetSection(
+                        label: key,
+                        targetID: alphabetAnchorID(kind: kind, rawID: "section-\(key)"),
+                        items: [item]
+                    )
+                )
+            }
+        }
+
+        return sections
+    }
+
+    private func alphabetJumpItems(_ namesAndIDs: [(String, String)]) -> [AlphabetJumpItem] {
+        var seen: Set<String> = []
+        var items: [AlphabetJumpItem] = []
+
+        for entry in namesAndIDs {
+            let key = alphabetSectionKey(for: entry.0)
+            guard seen.insert(key).inserted else { continue }
+            items.append(AlphabetJumpItem(label: key, targetID: entry.1))
+        }
+
+        return items.sorted { alphabetSortRank($0.label) < alphabetSortRank($1.label) }
+    }
+
+    private func alphabetAnchorID(kind: String, rawID: String) -> String {
+        "library-\(kind)-\(rawID)"
+    }
+
+    private func alphabetSectionKey(for text: String) -> String {
+        let normalized = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        guard let first = normalized.first else { return "#" }
+        let uppercased = String(first).uppercased()
+        return ("A"..."Z").contains(uppercased) ? uppercased : "#"
+    }
+
+    private func alphabetSortRank(_ key: String) -> Int {
+        guard key != "#", let scalar = key.unicodeScalars.first else { return 26 }
+        return Int(scalar.value - UnicodeScalar("A").value)
+    }
+
     private func formatDuration(_ s: Int) -> String {
         String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+private struct AlphabetJumpItem: Identifiable {
+    let label: String
+    let targetID: String
+
+    var id: String { label }
+}
+
+private struct AlphabetSection<Item>: Identifiable {
+    let label: String
+    let targetID: String
+    var items: [Item]
+
+    var id: String { targetID }
+}
+
+private struct SongListEntry: Identifiable {
+    let visibleIndex: Int
+    let song: Song
+    var anchorID: String? = nil
+
+    var id: String { anchorID ?? song.id }
+}
+
+private struct AlphabetJumpBar: View {
+    let items: [AlphabetJumpItem]
+    var onSelect: (AlphabetJumpItem) -> Void
+
+    @State private var activeID: String?
+
+    private let rowHeight: CGFloat = 13
+    private let verticalPadding: CGFloat = 8
+
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                ForEach(items) { item in
+                    Text(item.label)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(activeID == item.id ? Theme.background : Theme.accent)
+                        .frame(width: 22, height: rowHeight)
+                        .background(activeID == item.id ? Theme.accent : Color.clear, in: Circle())
+                        .contentShape(Rectangle())
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityLabel("Jump to \(item.label)")
+                        .accessibilityAction {
+                            select(item)
+                            clearActive(afterSelecting: item.id)
+                        }
+                }
+            }
+            .padding(.vertical, verticalPadding)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule().stroke(Theme.secondaryText.opacity(0.12), lineWidth: 0.5)
+            )
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        selectItem(at: value.location.y, height: geometry.size.height)
+                    }
+                    .onEnded { _ in
+                        activeID = nil
+                    }
+            )
+        }
+        .frame(width: 30, height: CGFloat(items.count) * rowHeight + verticalPadding * 2)
+    }
+
+    private func select(_ item: AlphabetJumpItem) {
+        activeID = item.id
+        onSelect(item)
+    }
+
+    private func clearActive(afterSelecting id: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            if activeID == id {
+                activeID = nil
+            }
+        }
+    }
+
+    private func selectItem(at y: CGFloat, height: CGFloat) {
+        let contentTop = verticalPadding
+        let contentHeight = max(rowHeight, height - verticalPadding * 2)
+        let clampedY = min(max(y - contentTop, 0), contentHeight - 0.1)
+        let index = Int(clampedY / rowHeight)
+        guard items.indices.contains(index) else { return }
+
+        let item = items[index]
+        guard activeID != item.id else { return }
+        select(item)
     }
 }
 

@@ -6,6 +6,7 @@ struct AlbumContextMenu: ViewModifier {
     var onAddToPlaylist: ((Song) -> Void)? = nil
 
     @EnvironmentObject private var appState: AppState
+    @State private var showInformation = false
     @State private var showStats = false
     private var audio: AudioPlayer { appState.audioPlayer }
 
@@ -24,6 +25,7 @@ struct AlbumContextMenu: ViewModifier {
             Section {
                 Button { download() } label: { Label(L(.action_download), systemImage: Symbols.download) }
                 Button { favorite() } label: { Label(L(.action_favorite), systemImage: Symbols.starEmpty) }
+                Button { showInformation = true } label: { Label(L(.action_info), systemImage: Symbols.info) }
                 Button { showStats = true } label: { Label(L(.action_view_stats), systemImage: Symbols.stats) }
             }
             Section {
@@ -46,6 +48,9 @@ struct AlbumContextMenu: ViewModifier {
         }
         .sheet(isPresented: $showStats) {
             AlbumStatsSheet(album: album)
+        }
+        .sheet(isPresented: $showInformation) {
+            AlbumInformationSheet(album: album)
         }
     }
 

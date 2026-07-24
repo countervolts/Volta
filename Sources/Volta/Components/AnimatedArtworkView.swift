@@ -33,11 +33,11 @@ struct AnimatedImageView: UIViewRepresentable {
         context.coordinator.configuredImage = image
         if let frames = image.images, frames.count > 1 {
             v.setAnimation(frames: frames, delays: image.frameDelays, duration: image.duration)
-            AppLogger.shared.log("Live artwork: presenting \(frames.count) frames via compositor keyframe animation", category: .other)
+            AppLogger.shared.log("Live artwork: presenting \(frames.count) frames via compositor keyframe animation", category: .artwork)
         } else {
             v.setAnimation(frames: [], delays: nil, duration: 0)
             v.image = image
-            AppLogger.shared.log("Live artwork: animated image arrived with NO frames array (images=\(image.images?.count ?? -1)) — rendering still", category: .other, level: .warning)
+            AppLogger.shared.log("Live artwork: animated image arrived with NO frames array (images=\(image.images?.count ?? -1)) — rendering still", category: .artwork, level: .warning)
         }
     }
 }
@@ -100,7 +100,7 @@ final class CompositorAnimatedImageView: UIImageView {
         layer.add(anim, forKey: Self.animationKey)
         if !loggedStart {
             loggedStart = true
-            AppLogger.shared.log("Live artwork: compositor animation installed (\(frameContents.count) frames over \(String(format: "%.1f", duration))s at native rate)", category: .other)
+            AppLogger.shared.log("Live artwork: compositor animation installed (\(frameContents.count) frames over \(String(format: "%.1f", duration))s at native rate)", category: .artwork)
         }
     }
 

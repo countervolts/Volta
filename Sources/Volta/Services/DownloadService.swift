@@ -100,7 +100,7 @@ private actor DownloadProgressThrottler {
             entries[id] = Entry(lastPublishedAt: .distantPast)
         }
         activeIDs.insert(id)
-        AppLogger.shared.log("Download active count: \(activeIDs.count)", category: .other)
+        AppLogger.shared.log("Download active count: \(activeIDs.count)", category: .downloads)
     }
 
     func record(_ id: String, progress rawProgress: Double, force: Bool = false) -> DownloadProgressPublish? {
@@ -121,7 +121,7 @@ private actor DownloadProgressThrottler {
         if entry.rawCallbacks % 500 == 0 {
             AppLogger.shared.log(
                 "Download progress callbacks: id=\(id), raw=\(entry.rawCallbacks), ui=\(entry.uiPublishes), active=\(activeIDs.count)",
-                category: .other
+                category: .downloads
             )
         }
 
@@ -152,7 +152,7 @@ private actor DownloadProgressThrottler {
         closedIDs.insert(id)
         AppLogger.shared.log(
             "Download progress finished: id=\(id), raw=\(entry.rawCallbacks), ui=\(entry.uiPublishes), active=\(activeIDs.count)",
-            category: .other
+            category: .downloads
         )
     }
 }
@@ -279,7 +279,7 @@ final class DownloadService: ObservableObject {
             return
         }
         guard case .notDownloaded = state(for: song) else { return }
-        guard let client, let streamURL = client.downloadURL(id: song.id) else { return }
+        guard let client, let streamURL = client.downloadURL(for: song) else { return }
         // Demo servers are stream-only; never save their content to the device.
         if DemoServers.isDemo(client.config.baseURL) {
             VoltaNotificationCenter.shared.post(L(.notif_demo_no_downloads), tone: .info)
@@ -304,7 +304,7 @@ final class DownloadService: ObservableObject {
         prefetchArtwork(for: song)
 
         let title    = song.title
-        let progressiveDownload = client.downloadIsProgressive(id: songID)
+        let progressiveDownload = client.downloadIsProgressive(for: song)
         let suffix   = Self.downloadFileSuffix(for: song, client: client)
         let total    = progressiveDownload ? 0 : (song.size ?? 0)
         let destURL  = directory.appendingPathComponent(Self.safeFileName(id: songID, suffix: suffix))
@@ -319,7 +319,7 @@ final class DownloadService: ObservableObject {
 
         if useSegmentedTransfer {
             let segments = max(2, min(DeveloperExperiments.constrainedConcurrency(default: 6), total / (512 * 1024)))
-            AppLogger.shared.log("Download starting: \(title) (\(segments) segments, \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))\(speedLimit > 0 ? ", limited" : ""))", category: .other)
+            AppLogger.shared.log("Download starting: \(title) (\(segments) segments, \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))\(speedLimit > 0 ? ", limited" : ""))", category: .downloads)
             let task = Task { [self] in
                 do {
                     try await DownloadService.downloadSegmented(url: streamURL, title: title, total: total, dest: destURL, speedLimit: speedLimit) { progress in
@@ -332,24 +332,24 @@ final class DownloadService: ObservableObject {
                     complete(songID, song: song, path: destURL.path, manifestURL: manifestURL, method: "multithreaded", token: token)
                 } catch is CancellationError {
                     guard isCurrentDownload(songID, token: token) else { return }
-                    AppLogger.shared.log("Download cancelled: \(title)", category: .other)
+                    AppLogger.shared.log("Download cancelled: \(title)", category: .downloads)
                     fail(songID, removing: destURL, token: token)
                 } catch {
                     guard isCurrentDownload(songID, token: token) else { return }
                     if DownloadService.isTransientNetworkError(error) {
                         pauseForResume(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, method: "single thread", resumeData: nil, token: token)
                     } else {
-                        AppLogger.shared.log("Segmented download failed: \(title) (\(error.localizedDescription)); falling back to single", category: .other, level: .warning)
+                        AppLogger.shared.log("Segmented download failed: \(title) (\(error.localizedDescription)); falling back to single", category: .downloads, level: .warning)
                         startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, token: token)
                     }
                 }
             }
             segmentTasks[songID] = task
         } else if progressiveDownload {
-            AppLogger.shared.log("Download starting: \(title) (\(Self.progressiveDownloadMethod), \(suffix))", category: .other)
+            AppLogger.shared.log("Download starting: \(title) (\(Self.progressiveDownloadMethod), \(suffix))", category: .downloads)
             startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, method: Self.progressiveDownloadMethod, token: token)
         } else {
-            AppLogger.shared.log("Download starting: \(title) (single thread\(total > 0 ? ", \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))" : ""))", category: .other)
+            AppLogger.shared.log("Download starting: \(title) (single thread\(total > 0 ? ", \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))" : ""))", category: .downloads)
             startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, token: token)
         }
     }
@@ -359,7 +359,7 @@ final class DownloadService: ObservableObject {
     }
 
     private func cancelDownload(for song: Song, notify: Bool, updateBulk: Bool) {
-        AppLogger.shared.log("Download cancelled: \(song.title)", category: .other)
+        AppLogger.shared.log("Download cancelled: \(song.title)", category: .downloads)
         if notify, case .downloading = state(for: song) {
             VoltaNotificationCenter.shared.post(L(.notif_download_cancelled), tone: .warning)
         }
@@ -380,7 +380,7 @@ final class DownloadService: ObservableObject {
     }
 
     func removeDownload(for song: Song) {
-        AppLogger.shared.log("Download removed: \(song.title)", category: .other)
+        AppLogger.shared.log("Download removed: \(song.title)", category: .downloads)
         VoltaNotificationCenter.shared.post(L(.notif_download_removed), tone: .info)
         cancelDownload(for: song)
         if let rec = manifest[song.id] {
@@ -420,8 +420,16 @@ final class DownloadService: ObservableObject {
 
     private nonisolated static func downloadFileSuffix(for song: Song, client: any MusicService) -> String {
         // Progressive downloads use the transcode container extension.
-        if client.downloadIsProgressive(id: song.id) {
-            return StreamingPreferences.plexUniversalTranscodeExtension
+        if client.downloadIsProgressive(for: song) {
+            let decision = StreamingPreferences.downloadDecision(for: song)
+            switch client.backendKind {
+            case .plex:
+                return StreamingPreferences.plexUniversalTranscodeExtension(for: decision.format)
+            case .jellyfin, .emby:
+                return decision.format == "aac" || decision.format == nil ? "m4a" : (decision.format ?? "m4a")
+            case .subsonic:
+                return decision.format ?? "mp3"
+            }
         }
         return song.suffix ?? "mp3"
     }
@@ -462,7 +470,7 @@ final class DownloadService: ObservableObject {
                     try? FileManager.default.removeItem(at: tempURL)
                     Task { @MainActor in
                         guard self.isCurrentDownload(songID, token: token) else { return }
-                        AppLogger.shared.log("Download rejected: \(title): \(failure)", category: .other, level: .error)
+                        AppLogger.shared.log("Download rejected: \(title): \(failure)", category: .downloads, level: .error)
                         self.fail(songID, removing: dest, token: token)
                     }
                     return
@@ -475,7 +483,7 @@ final class DownloadService: ObservableObject {
                     if moved {
                         self.complete(songID, song: song, path: dest.path, manifestURL: manifestURL, method: method, token: token)
                     } else {
-                        AppLogger.shared.log("Download failed to save file: \(title)", category: .other, level: .error)
+                        AppLogger.shared.log("Download failed to save file: \(title)", category: .downloads, level: .error)
                         self.fail(songID, removing: dest, token: token)
                     }
                 }
@@ -487,7 +495,7 @@ final class DownloadService: ObservableObject {
                     if resumeData != nil || DownloadService.isTransientNetworkError(error) {
                         self.pauseForResume(song: song, url: url, dest: dest, manifestURL: manifestURL, method: method, resumeData: resumeData, token: token)
                     } else {
-                        AppLogger.shared.log("Download failed: \(title): \(msg)", category: .other, level: .error)
+                        AppLogger.shared.log("Download failed: \(title): \(msg)", category: .downloads, level: .error)
                         self.fail(songID, removing: dest, token: token)
                     }
                 }
@@ -580,7 +588,7 @@ final class DownloadService: ObservableObject {
             progress = 0
         }
         setState(.downloading(progress: progress), forID: songID)
-        AppLogger.shared.log("Download paused: \(song.title); connection lost, will resume when network returns", category: .other, level: .warning)
+        AppLogger.shared.log("Download paused: \(song.title); connection lost, will resume when network returns", category: .downloads, level: .warning)
         if NetworkMonitor.shared.connection != .none {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -600,7 +608,7 @@ final class DownloadService: ObservableObject {
               segmentTasks[id] == nil,
               let pending = pendingResumes.removeValue(forKey: id) else { return }
         if startTimes[id] == nil { startTimes[id] = Date() }
-        AppLogger.shared.log("Download resuming: \(pending.song.title)", category: .other)
+        AppLogger.shared.log("Download resuming: \(pending.song.title)", category: .downloads)
         startSingle(
             song: pending.song,
             url: pending.url,
@@ -646,7 +654,7 @@ final class DownloadService: ObservableObject {
             try data.write(to: parts[i], options: .atomic)
             let p = await counter.add(data.count)
             await progress(p)
-            AppLogger.shared.log("Download segment complete: \(title); segment=\(i + 1)/\(segments); bytes=\(data.count)", category: .other)
+            AppLogger.shared.log("Download segment complete: \(title); segment=\(i + 1)/\(segments); bytes=\(data.count)", category: .downloads)
             return data.count
         }
 
@@ -671,7 +679,7 @@ final class DownloadService: ObservableObject {
                 }
             }
 
-            AppLogger.shared.log("Download stitching segments: \(title); segments=\(segments)", category: .other)
+            AppLogger.shared.log("Download stitching segments: \(title); segments=\(segments)", category: .downloads)
             try? FileManager.default.removeItem(at: dest)
             FileManager.default.createFile(atPath: dest.path, contents: nil)
             let handle = try FileHandle(forWritingTo: dest)
@@ -700,13 +708,13 @@ final class DownloadService: ObservableObject {
         if elapsed > 0.02 {
             AppLogger.shared.log(
                 "Slow download progress publish: id=\(songID), \(String(format: "%.3f", elapsed))s, raw=\(publish.rawCallbacks), ui=\(publish.uiPublishes)",
-                category: .other,
+                category: .downloads,
                 level: .warning
             )
         } else if publish.uiPublishes % 25 == 0 {
             AppLogger.shared.log(
                 "Download progress publishes: id=\(songID), raw=\(publish.rawCallbacks), ui=\(publish.uiPublishes), active=\(publish.activeDownloads)",
-                category: .other
+                category: .downloads
             )
         }
     }
@@ -729,9 +737,9 @@ final class DownloadService: ObservableObject {
         let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
         if elapsed > 0.05, bytes > 0 {
             let speedStr = ByteCountFormatter.string(fromByteCount: Int64(Double(bytes) / elapsed), countStyle: .file)
-            AppLogger.shared.log("Download complete: \(song.title) (\(method), \(sizeStr) in \(String(format: "%.1f", elapsed))s, average \(speedStr)/s)", category: .other)
+            AppLogger.shared.log("Download complete: \(song.title) (\(method), \(sizeStr) in \(String(format: "%.1f", elapsed))s, average \(speedStr)/s)", category: .downloads)
         } else {
-            AppLogger.shared.log("Download complete: \(song.title) (\(method), \(sizeStr))", category: .other)
+            AppLogger.shared.log("Download complete: \(song.title) (\(method), \(sizeStr))", category: .downloads)
         }
         let muted = mutedCompletionNotifications.remove(songID) != nil
         downloadedRevision += 1
@@ -797,7 +805,7 @@ final class DownloadService: ObservableObject {
         let pending = songs.filter { song in
             guard seen.insert(song.id).inserted else { return false }
             guard case .notDownloaded = state(for: song) else { return false }
-            return client.downloadURL(id: song.id) != nil
+            return client.downloadURL(for: song) != nil
         }
         guard !pending.isEmpty else { return }
 
@@ -822,7 +830,7 @@ final class DownloadService: ObservableObject {
 
         AppLogger.shared.log(
             "Bulk missing-song download queued: total=\(bulkTotalCount), bytes=\(bulkBytesTotal), concurrency=\(bulkConcurrencyLimit)",
-            category: .other
+            category: .downloads
         )
         VoltaNotificationCenter.shared.post(L(.notif_downloading_n, pending.count), tone: .success)
         pumpBulkDownloads()
@@ -832,13 +840,13 @@ final class DownloadService: ObservableObject {
         guard bulkProgress.phase == .running else { return }
         bulkProgress.phase = .paused
         refreshBulkProgress(force: true)
-        AppLogger.shared.log("Bulk missing-song download paused: completed=\(bulkCompletedCount)/\(bulkTotalCount), active=\(bulkActiveIDs.count)", category: .other)
+        AppLogger.shared.log("Bulk missing-song download paused: completed=\(bulkCompletedCount)/\(bulkTotalCount), active=\(bulkActiveIDs.count)", category: .downloads)
     }
 
     func resumeBulkDownloads() {
         guard bulkProgress.phase == .paused else { return }
         bulkProgress.phase = .running
-        AppLogger.shared.log("Bulk missing-song download resumed", category: .other)
+        AppLogger.shared.log("Bulk missing-song download resumed", category: .downloads)
         pumpBulkDownloads()
     }
 
@@ -875,7 +883,7 @@ final class DownloadService: ObservableObject {
         while bulkActiveIDs.count < bulkConcurrencyLimit, !bulkQueue.isEmpty {
             let song = bulkQueue.removeFirst()
             guard case .notDownloaded = state(for: song),
-                  let streamURL = client.downloadURL(id: song.id) else {
+                  let streamURL = client.downloadURL(for: song) else {
                 bulkSkippedCount += 1
                 bulkBytesFinished += song.size ?? 0
                 continue
@@ -949,7 +957,7 @@ final class DownloadService: ObservableObject {
         bulkProgress = finalProgress
         AppLogger.shared.log(
             "Bulk missing-song download \(cancelled ? "cancelled" : "finished"): completed=\(bulkCompletedCount), failed=\(bulkFailedCount), skipped=\(bulkSkippedCount), total=\(bulkTotalCount)",
-            category: .other,
+            category: .downloads,
             level: bulkFailedCount > 0 ? .warning : .info
         )
 
@@ -1026,7 +1034,7 @@ final class DownloadService: ObservableObject {
             setState(.notDownloaded, forID: id)
             downloadedRevision += 1
             total -= size
-            AppLogger.shared.log("Download evicted: '\(rec.song?.title ?? id)' to stay under \(capMB)MB cap", category: .other)
+            AppLogger.shared.log("Download evicted: '\(rec.song?.title ?? id)' to stay under \(capMB)MB cap", category: .downloads)
             VoltaNotificationCenter.shared.post(L(.notif_evicted_old_download), tone: .info)
         }
         saveManifest(to: manifestURL)
@@ -1085,7 +1093,7 @@ final class DownloadService: ObservableObject {
                 try? FileManager.default.moveItem(at: manifestURL, to: backup)
                 AppLogger.shared.log(
                     "Download manifest unreadable; backed up to \(backup.lastPathComponent) and rebuilding from disk",
-                    category: .other, level: .error
+                    category: .downloads, level: .error
                 )
             }
         }
@@ -1097,7 +1105,7 @@ final class DownloadService: ObservableObject {
             if Self.isObviouslyInvalidAudioDownload(url) {
                 try? FileManager.default.removeItem(at: url)
                 invalidIDs.append(id)
-                AppLogger.shared.log("Removed invalid tiny download '\(rec.song?.title ?? id)'", category: .other, level: .warning)
+                AppLogger.shared.log("Removed invalid tiny download '\(rec.song?.title ?? id)'", category: .downloads, level: .warning)
             } else if FileManager.default.fileExists(atPath: rec.path) {
                 setState(.downloaded, forID: id)
             } else {
@@ -1145,7 +1153,7 @@ final class DownloadService: ObservableObject {
             added = true
         }
         if added {
-            AppLogger.shared.log("Recovered orphaned downloads from disk; metadata will backfill when online", category: .other)
+            AppLogger.shared.log("Recovered orphaned downloads from disk; metadata will backfill when online", category: .downloads)
         }
         return added
     }
@@ -1176,7 +1184,7 @@ final class DownloadService: ObservableObject {
             if filled > 0 {
                 downloadedRevision += 1
                 saveManifest(to: manifestURL)
-                AppLogger.shared.log("Backfilled metadata for \(filled) recovered download(s)", category: .other)
+                AppLogger.shared.log("Backfilled metadata for \(filled) recovered download(s)", category: .downloads)
             }
         }
     }

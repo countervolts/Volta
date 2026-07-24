@@ -582,6 +582,6 @@ final class AutoMixPreviewEngine: ObservableObject {
 
     private func playbackURL(for song: Song) -> URL? {
         if let local = DownloadService.shared.localURL(for: song) { return local }
-        return appState?.client?.streamURL(id: song.id)
+        return appState?.client?.streamURL(for: song)
     }
 }
