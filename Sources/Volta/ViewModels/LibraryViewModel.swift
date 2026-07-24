@@ -60,6 +60,7 @@ final class LibraryViewModel: ObservableObject {
     @Published private(set) var musicFolders: [MusicFolder] = []
     @Published private(set) var isLoading = false
     @Published private(set) var hasLoaded = false
+    @Published private(set) var loadFailures: [LibraryFilter: String] = [:]
 
     @Published var searchText: String = ""
 
@@ -96,14 +97,24 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func setSort(_ o: LibrarySortOrder) {
+        guard sortOrder != o else { return }
         sortOrder = o
         if let value = Self.settingValue(for: o) {
             UserDefaults.standard.set(value, forKey: "albumSortOrder")
         }
+        AppLogger.shared.log("Library sort changed: \(o.rawValue)", category: .library)
     }
 
-    func setGenreFilter(_ g: String?) { genreFilter = g }
-    func clearFilters() { sortOrder = .name; genreFilter = nil; neverPlayedOnly = false }
+    func setGenreFilter(_ g: String?) {
+        genreFilter = g
+        AppLogger.shared.log("Library genre filter \(g == nil ? "cleared" : "set")", category: .library)
+    }
+    func clearFilters() {
+        sortOrder = .name
+        genreFilter = nil
+        neverPlayedOnly = false
+        AppLogger.shared.log("Library filters cleared", category: .library)
+    }
 
     var availableGenres: [String] { sourceGenres }
 
@@ -210,8 +221,32 @@ final class LibraryViewModel: ObservableObject {
         searchText.isEmpty ? sourceGenres : sourceGenres.filter { $0.localizedCaseInsensitiveContains(searchText) }
     }
 
-    func setFilter(_ f: LibraryFilter) { filter = f; searchText = "" }
-    func setSource(_ s: LibrarySource) { source = s; searchText = "" }
+    var currentFilterIsEmpty: Bool {
+        switch filter {
+        case .artists: return filteredArtists.isEmpty
+        case .albums: return filteredAlbums.isEmpty
+        case .songs: return filteredSongs.isEmpty
+        case .genres: return filteredGenres.isEmpty
+        case .folders: return false
+        }
+    }
+
+    func loadFailure(for filter: LibraryFilter) -> String? {
+        loadFailures[filter]
+    }
+
+    func setFilter(_ f: LibraryFilter) {
+        guard filter != f || !searchText.isEmpty else { return }
+        filter = f
+        searchText = ""
+        AppLogger.shared.log("Library filter changed: \(f.rawValue)", category: .library)
+    }
+    func setSource(_ s: LibrarySource) {
+        guard source != s || !searchText.isEmpty else { return }
+        source = s
+        searchText = ""
+        AppLogger.shared.log("Library source changed: \(s.rawValue)", category: .library)
+    }
 
     // MARK: - Synthesizing offline album/artist objects from song metadata
 
@@ -244,9 +279,14 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func load(client: any MusicService) async {
-        guard !isLoading else { return }
+        guard !isLoading else {
+            AppLogger.shared.log("Library load skipped: already loading", category: .library)
+            return
+        }
         isLoading = true
         defer { isLoading = false }
+        let started = ProcessInfo.processInfo.systemUptime
+        AppLogger.shared.log("Library load started; backend=\(client.backendKind.displayName)", category: .library)
 
         let a: [Artist]
         let al: [Album]
@@ -276,6 +316,10 @@ final class LibraryViewModel: ObservableObject {
         if musicFolders.isEmpty {
             musicFolders = (try? await client.musicFolders()) ?? []
         }
+        AppLogger.shared.log(
+            "Library load completed; artists=\(artists.count); albums=\(albums.count); songs=\(songs.count); genres=\(genres.count); folders=\(musicFolders.count); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+            category: .library
+        )
 
         // Optional artist-photo warmup.
         if UserDefaults.standard.bool(forKey: "prefetchArtistImages"), !PerformanceMode.disablePrefetch {
@@ -292,11 +336,31 @@ final class LibraryViewModel: ObservableObject {
     }
 
     private func loadArtists(client: any MusicService) async -> [Artist] {
-        (try? await client.artists()) ?? []
+        do {
+            let artists = try await client.artists()
+            clearFailure(.artists)
+            return artists
+        } catch is CancellationError {
+            AppLogger.shared.log("Library artists load cancelled", category: .library)
+            return artists
+        } catch {
+            recordFailure(.artists, error: error)
+            return []
+        }
     }
 
     private func loadSongs(client: any MusicService) async -> [Song] {
-        (try? await client.randomSongs(size: 500)) ?? []
+        do {
+            let songs = try await client.randomSongs(size: 500)
+            clearFailure(.songs)
+            return songs
+        } catch is CancellationError {
+            AppLogger.shared.log("Library songs load cancelled", category: .library)
+            return songs
+        } catch {
+            recordFailure(.songs, error: error)
+            return []
+        }
     }
 
     private func loadAlbums(client: any MusicService) async -> [Album] {
@@ -304,13 +368,42 @@ final class LibraryViewModel: ObservableObject {
         var offset = 0
         let size = 500
         while true {
-            let batch = (try? await client.allAlbums(size: size, offset: offset)) ?? []
+            let batch: [Album]
+            do {
+                batch = try await client.allAlbums(size: size, offset: offset)
+                clearFailure(.albums)
+                clearFailure(.genres)
+            } catch is CancellationError {
+                AppLogger.shared.log("Library albums load cancelled; loaded=\(all.count)", category: .library)
+                return all.isEmpty ? albums : all
+            } catch {
+                recordFailure(.albums, error: error)
+                recordFailure(.genres, error: error)
+                return all
+            }
             all.append(contentsOf: batch)
             if batch.count < size { break }
             offset += size
             if offset > 10000 { break } // safety cap
         }
+        if offset > 10000 {
+            AppLogger.shared.log("Library album load stopped at safety cap; loaded=\(all.count)", category: .library, level: .warning)
+        }
         return all
+    }
+
+    private func recordFailure(_ filter: LibraryFilter, error: Error) {
+        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        loadFailures[filter] = message
+        AppLogger.shared.log(
+            "Library \(filter.rawValue.lowercased()) load failed: \(message)",
+            category: .library,
+            level: .error
+        )
+    }
+
+    private func clearFailure(_ filter: LibraryFilter) {
+        loadFailures.removeValue(forKey: filter)
     }
 
     func albumsForGenre(_ genre: String) -> [Album] {

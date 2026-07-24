@@ -1,15 +1,30 @@
+# misc
+xtool/
+.devcontainer/
+.vscode/
+discordbot/
+
+# api (for global stats) tmp ignored
+stats-api/
+stats-api/node_modules/
+stats-api/.wrangler/
+stats-api/.dev.vars*
+stats-api/.env*
+stats-api/worker-startup.cpuprofile
+
+# full res sources
+img/*.png
+
+# xcode files
+xcuserdata/
+*.xcuserstate
 .build/
 build/
 .sim*/
 .derivedData/
 .swiftpm/
-xtool/
-.devcontainer/
-.vscode/
-discordbot/
+
+# other files
 fixme.md
-# full res sources
-img/*.png
-# xcode files
-xcuserdata/
-*.xcuserstate
+ignoreme.md
+todo.md

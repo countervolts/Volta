@@ -67,10 +67,12 @@ actor LyricsService {
             if forceSave, !hasLocalLyrics(for: song.id) {
                 _ = saveLocalLyrics(cached, for: song, source: "Cached", raw: nil)
             }
+            AppLogger.shared.log("Lyrics loaded from memory cache; song='\(song.title)'; lines=\(cached.count)", category: .lyrics)
             return cached
         }
         if downloadSource == nil, let local = loadLocalLyrics(for: song) {
             cache[song.id] = local
+            AppLogger.shared.log("Lyrics loaded from local storage; song='\(song.title)'; lines=\(local.count)", category: .lyrics)
             return local
         }
 
@@ -91,6 +93,10 @@ actor LyricsService {
                         raw: list.rawPayload
                     )
                 }
+                AppLogger.shared.log(
+                    "Lyrics loaded from structured server response; song='\(song.title)'; backend=\(client.backendKind.displayName); lines=\(result.count); documents=\(list.structuredLyrics?.count ?? 0)",
+                    category: .lyrics
+                )
                 return result
             }
 
@@ -110,6 +116,10 @@ actor LyricsService {
                         raw: parsed.raw
                     )
                 }
+                AppLogger.shared.log(
+                    "Lyrics loaded from legacy server response; song='\(song.title)'; backend=\(client.backendKind.displayName); lines=\(parsed.lines.count); format=\(parsed.raw.format.rawValue)",
+                    category: .lyrics
+                )
                 return parsed.lines
             }
         }
@@ -124,9 +134,11 @@ actor LyricsService {
                     raw: parsed.raw
                 )
             }
+            AppLogger.shared.log("Lyrics loaded from LRCLIB; song='\(song.title)'; lines=\(parsed.lines.count); format=\(parsed.raw.format.rawValue)", category: .lyrics)
             return parsed.lines
         }
 
+        AppLogger.shared.log("Lyrics not found; song='\(song.title)'; requestedSource=\(downloadSource?.displayName ?? "automatic")", category: .lyrics, level: .warning)
         return []
     }
 
@@ -212,49 +224,216 @@ actor LyricsService {
             }
         }
 
-        return hits.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        let sorted = hits.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        AppLogger.shared.log("Local lyrics search completed; queryChars=\(query.count); hits=\(sorted.count)", category: .lyrics)
+        return sorted
     }
 
     func clearLocalLyrics() {
         cache.removeAll()
         try? FileManager.default.removeItem(at: directory)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        AppLogger.shared.log("Local lyrics storage cleared", category: .lyrics, level: .warning)
     }
 
     // MARK: - Structured server responses
 
-    private static func displayLines(from list: LyricsList) -> [LyricLine]? {
+    static func displayLines(from list: LyricsList) -> [LyricLine]? {
         let documents = list.structuredLyrics ?? []
-        let candidates = documents.compactMap { document -> (lines: [LyricLine], synced: Bool)? in
+        let candidates = documents.enumerated().compactMap { documentIndex, document -> (lines: [LyricLine], synced: Bool, rank: Int, order: Int)? in
             guard let sourceLines = document.line, !sourceLines.isEmpty else { return nil }
             let fullyTimed = sourceLines.allSatisfy { $0.start != nil }
             let synced = fullyTimed && (document.synced != false)
+            let offset = document.offset ?? 0
+            let cueLinesByIndex = vocalCueLinesByIndex(for: document)
+            let rank = lyricDocumentRank(document)
 
             if synced {
-                let offset = document.offset ?? 0
                 let ordered = sourceLines.enumerated().sorted {
                     let lhs = ($0.element.start ?? 0) + offset
                     let rhs = ($1.element.start ?? 0) + offset
                     return lhs == rhs ? $0.offset < $1.offset : lhs < rhs
+                }.flatMap { entry -> [StructuredDisplayLine] in
+                    let lineMilliseconds = max(0, (entry.element.start ?? 0) + offset)
+                    let vocalCueLines = cueLinesByIndex[entry.offset] ?? []
+                    guard !vocalCueLines.isEmpty else {
+                        return [
+                            StructuredDisplayLine(
+                                sourceIndex: entry.offset,
+                                cueOrder: 0,
+                                timeMilliseconds: lineMilliseconds,
+                                text: entry.element.value,
+                                cues: nil,
+                                vocalLane: .main
+                            )
+                        ]
+                    }
+
+                    return vocalCueLines.map { vocalCueLine in
+                        let lineText = vocalCueLine.cueLine.value?.nonBlank ?? entry.element.value
+                        let milliseconds = max(0, (vocalCueLine.cueLine.start ?? entry.element.start ?? 0) + offset)
+                        let cues = lyricCues(
+                            from: vocalCueLine.cueLine,
+                            lineText: lineText,
+                            offsetMilliseconds: offset
+                        )
+                        return StructuredDisplayLine(
+                            sourceIndex: entry.offset,
+                            cueOrder: vocalCueLine.order,
+                            timeMilliseconds: milliseconds,
+                            text: lineText,
+                            cues: cues,
+                            vocalLane: vocalCueLine.vocalLane
+                        )
+                    }
                 }
-                let lines = ordered.enumerated().map { index, entry in
-                    let milliseconds = max(0, (entry.element.start ?? 0) + offset)
-                    return LyricLine(
-                        id: index,
-                        time: Double(milliseconds) / 1_000,
-                        text: entry.element.value
-                    )
+                let lines = ordered
+                    .sorted(by: structuredDisplayLineSort)
+                    .enumerated()
+                    .map { index, row in
+                        LyricLine(
+                            id: index,
+                            time: Double(row.timeMilliseconds) / 1_000,
+                            text: row.text,
+                            cues: row.cues,
+                            vocalLane: row.vocalLane
+                        )
+                    }
+                if !lines.isEmpty {
+                    return (lines, true, rank, documentIndex)
                 }
-                return (lines, true)
+                return nil
             }
 
             let lines = sourceLines.enumerated().map {
                 LyricLine(id: $0.offset, time: -1, text: $0.element.value)
             }
-            return (lines, false)
+            return (lines, false, rank, documentIndex)
         }
 
-        return candidates.first(where: { $0.synced })?.lines ?? candidates.first?.lines
+        let sortedSynced = candidates
+            .filter { $0.synced }
+            .sorted(by: lyricCandidateSort)
+        if let lines = sortedSynced.first?.lines {
+            return lines
+        }
+
+        return candidates.sorted(by: lyricCandidateSort).first?.lines
+    }
+
+    private static func lyricCandidateSort(
+        _ lhs: (lines: [LyricLine], synced: Bool, rank: Int, order: Int),
+        _ rhs: (lines: [LyricLine], synced: Bool, rank: Int, order: Int)
+    ) -> Bool {
+        if lhs.rank != rhs.rank {
+            return lhs.rank < rhs.rank
+        }
+        return lhs.order < rhs.order
+    }
+
+    private static func lyricDocumentRank(_ document: StructuredLyrics) -> Int {
+        let kind = document.kind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().nonBlank
+        if kind == nil || kind == "main" { return 0 }
+        if kind == "translation" { return 1 }
+        if kind == "pronunciation" { return 2 }
+        return 3
+    }
+
+    private struct VocalCueLine {
+        let cueLine: StructuredLyricCueLine
+        let vocalLane: LyricVocalLane
+        let order: Int
+    }
+
+    private struct StructuredDisplayLine {
+        let sourceIndex: Int
+        let cueOrder: Int
+        let timeMilliseconds: Int
+        let text: String
+        let cues: [LyricCue]?
+        let vocalLane: LyricVocalLane
+    }
+
+    private static func vocalCueLinesByIndex(for document: StructuredLyrics) -> [Int: [VocalCueLine]] {
+        var agentRoles: [String: String] = [:]
+        for agent in document.agents ?? [] {
+            guard let id = agent.id?.nonBlank else { continue }
+            if let role = agent.role?.nonBlank?.lowercased() {
+                agentRoles[id] = role
+            }
+        }
+        var result: [Int: [VocalCueLine]] = [:]
+        for (order, cueLine) in (document.cueLine ?? []).enumerated() {
+            guard let index = cueLine.index else { continue }
+            let role = cueLine.agentId.flatMap { agentRoles[$0] ?? $0 }
+            result[index, default: []].append(VocalCueLine(
+                cueLine: cueLine,
+                vocalLane: LyricVocalLane(agentRole: role),
+                order: order
+            ))
+        }
+        return result.mapValues {
+            $0.sorted {
+                if $0.vocalLane != $1.vocalLane {
+                    return vocalLaneRank($0.vocalLane) < vocalLaneRank($1.vocalLane)
+                }
+                return $0.order < $1.order
+            }
+        }
+    }
+
+    private static func structuredDisplayLineSort(_ lhs: StructuredDisplayLine, _ rhs: StructuredDisplayLine) -> Bool {
+        if lhs.timeMilliseconds != rhs.timeMilliseconds {
+            return lhs.timeMilliseconds < rhs.timeMilliseconds
+        }
+        if lhs.sourceIndex != rhs.sourceIndex {
+            return lhs.sourceIndex < rhs.sourceIndex
+        }
+        if lhs.vocalLane != rhs.vocalLane {
+            return vocalLaneRank(lhs.vocalLane) < vocalLaneRank(rhs.vocalLane)
+        }
+        return lhs.cueOrder < rhs.cueOrder
+    }
+
+    private static func vocalLaneRank(_ lane: LyricVocalLane) -> Int {
+        lane == .main ? 0 : 1
+    }
+
+    private static func lyricCues(
+        from cueLine: StructuredLyricCueLine?,
+        lineText: String,
+        offsetMilliseconds: Int
+    ) -> [LyricCue]? {
+        guard let cueLine,
+              cueLine.value == lineText,
+              let sourceCues = cueLine.cue,
+              !sourceCues.isEmpty else {
+            return nil
+        }
+
+        let textByteCount = lineText.utf8.count
+        let cues = sourceCues.enumerated().compactMap { index, cue -> LyricCue? in
+            guard let start = cue.start,
+                  let value = cue.value,
+                  let byteStart = cue.byteStart,
+                  let byteEnd = cue.byteEnd,
+                  byteStart >= 0,
+                  byteEnd >= byteStart,
+                  byteEnd < textByteCount else {
+                return nil
+            }
+            let adjustedStart = max(0, start + offsetMilliseconds)
+            let adjustedEnd = cue.end.map { max(0, $0 + offsetMilliseconds) }
+            return LyricCue(
+                id: index,
+                start: Double(adjustedStart) / 1_000,
+                end: adjustedEnd.map { Double($0) / 1_000 },
+                byteStart: byteStart,
+                byteEnd: byteEnd,
+                text: value
+            )
+        }
+        return cues.isEmpty ? nil : cues
     }
 
     // MARK: - Local raw storage
@@ -324,6 +503,7 @@ actor LyricsService {
             try payload.data.write(to: rawFileURL, options: .atomic)
             try metadataData.write(to: metadataURL(forKey: key), options: .atomic)
         } catch {
+            AppLogger.shared.log("Lyrics save failed; song='\(song.title)'; source=\(source); error=\(error.localizedDescription)", category: .lyrics, level: .warning)
             return false
         }
 
@@ -414,7 +594,10 @@ actor LyricsService {
               let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
+        else {
+            AppLogger.shared.log("LRCLIB request failed or returned invalid response; song='\(song.title)'", category: .lyrics, level: .warning)
+            return nil
+        }
 
         // LRCLIB exposes syncedLyrics as LRC text and plainLyrics as text. Save
         // those exact strings locally instead of a parsed-lines JSON rendering.

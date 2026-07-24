@@ -72,9 +72,11 @@ final class LoginViewModel: ObservableObject {
         serverError = nil
         credentialsError = nil
         pendingPlexHostedToken = nil
+        AppLogger.shared.log("Login backend selected: \(backend.displayName)", category: .ui)
     }
 
     func deselect() {
+        AppLogger.shared.log("Login backend deselected: \(selectedBackend?.displayName ?? "none")", category: .ui)
         selectedBackend = nil
         serverError = nil
         credentialsError = nil
@@ -94,6 +96,7 @@ final class LoginViewModel: ObservableObject {
         serverError = nil
         credentialsError = nil
         reachability = .reachable(insecure: false)
+        AppLogger.shared.log("Demo server filled for \(kind.displayName)", category: .ui)
         return true
     }
 
@@ -120,16 +123,25 @@ final class LoginViewModel: ObservableObject {
     private func runReachabilityCheck(candidates: [URL], address: String) async {
         guard address == serverAddress else { return }
         reachability = .checking
+        AppLogger.shared.log(
+            "Reachability check started; backend=\(selectedBackend?.displayName ?? "unknown"); candidates=\(candidates.count)",
+            category: .networking
+        )
         for url in candidates {
             if Task.isCancelled { return }
             if await Self.hostResponds(url) {
                 guard address == serverAddress else { return }
                 reachability = .reachable(insecure: url.scheme?.lowercased() == "http")
+                AppLogger.shared.log(
+                    "Reachability check succeeded; endpoint=\(Self.endpointLabel(url)); insecure=\(url.scheme?.lowercased() == "http")",
+                    category: .networking
+                )
                 return
             }
         }
         guard address == serverAddress else { return }
         reachability = .unreachable
+        AppLogger.shared.log("Reachability check failed; candidates=\(candidates.count)", category: .networking, level: .warning)
     }
 
     // Any HTTP response means the host is reachable.
@@ -155,20 +167,27 @@ final class LoginViewModel: ObservableObject {
         let address = serverAddress
         let candidates = SubsonicConfig.candidateURLs(from: serverAddress, kind: kind)
         guard !candidates.isEmpty else {
+            AppLogger.shared.log("Login failed before probe: no server URL candidates", category: .networking, level: .warning)
             failServer()
             return .completed
         }
         guard !needsImmediateInsecureHTTPConfirmation(candidates: candidates, allowInsecureHTTP: allowInsecureHTTP) else {
+            AppLogger.shared.log("Login needs insecure HTTP confirmation; backend=\(kind.displayName)", category: .networking, level: .warning)
             return .needsInsecureHTTPConfirmation
         }
         let credentialCandidates = candidatesForCredentialProbe(candidates, allowInsecureHTTP: allowInsecureHTTP)
         guard !credentialCandidates.isEmpty else {
+            AppLogger.shared.log("Login failed before probe: no credential-safe URL candidates", category: .networking, level: .warning)
             failServer()
             return .completed
         }
 
         isConnecting = true
         defer { isConnecting = false }
+        AppLogger.shared.log(
+            "Login probe started; backend=\(kind.displayName); candidates=\(credentialCandidates.count); allowInsecureHTTP=\(allowInsecureHTTP)",
+            category: .networking
+        )
 
         do {
             let config = try await probe(candidates: credentialCandidates, kind: kind) {
@@ -177,17 +196,22 @@ final class LoginViewModel: ObservableObject {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             appState.completeLogin(config: config, kind: kind)
             didCompleteLogin = true
+            AppLogger.shared.log("Login completed; backend=\(kind.displayName); endpoint=\(Self.endpointLabel(config.baseURL))", category: .networking)
             return .completed
         } catch ProbeFailure.authFailure {
+            AppLogger.shared.log("Login probe failed: invalid credentials; backend=\(kind.displayName)", category: .networking, level: .warning)
             failCredentials()
             return .completed
         } catch ProbeFailure.unreachable(let error) {
             if await shouldOfferInsecureHTTPFallback(candidates: candidates, address: address, allowInsecureHTTP: allowInsecureHTTP) {
+                AppLogger.shared.log("Login probe failed over HTTPS; insecure HTTP fallback available", category: .networking, level: .warning)
                 return .needsInsecureHTTPConfirmation
             }
+            AppLogger.shared.log("Login probe failed: \(error?.errorDescription ?? "unreachable")", category: .networking, level: .error)
             failServer(message: error?.errorDescription)
             return .completed
         } catch {
+            AppLogger.shared.log("Login probe failed: \(error.localizedDescription)", category: .networking, level: .error)
             failServer()
             return .completed
         }
@@ -226,12 +250,19 @@ final class LoginViewModel: ObservableObject {
         for url in candidates {
             let config = makeConfig(url)
             do {
-                return try await AuthService.validate(config: config, kind: kind, session: Self.probeSession)
+                let validated = try await AuthService.validate(config: config, kind: kind, session: Self.probeSession)
+                AppLogger.shared.log("Login candidate accepted; backend=\(kind.displayName); endpoint=\(Self.endpointLabel(url))", category: .networking)
+                return validated
             } catch let error as SubsonicError {
-                if error.isAuthFailure { throw ProbeFailure.authFailure }
+                if error.isAuthFailure {
+                    AppLogger.shared.log("Login candidate rejected by auth; backend=\(kind.displayName); endpoint=\(Self.endpointLabel(url))", category: .networking, level: .warning)
+                    throw ProbeFailure.authFailure
+                }
                 lastError = error
+                AppLogger.shared.log("Login candidate unreachable; backend=\(kind.displayName); endpoint=\(Self.endpointLabel(url)); error=\(error.errorDescription ?? "unknown")", category: .networking, level: .warning)
             } catch {
                 lastError = nil
+                AppLogger.shared.log("Login candidate failed; backend=\(kind.displayName); endpoint=\(Self.endpointLabel(url)); error=\(error.localizedDescription)", category: .networking, level: .warning)
             }
         }
         throw ProbeFailure.unreachable(lastError)
@@ -528,5 +559,13 @@ final class LoginViewModel: ObservableObject {
         credentialsShake += 1
         UINotificationFeedbackGenerator().notificationOccurred(.error)
         VoltaNotificationCenter.shared.post(text, tone: .error)
+    }
+
+    private static func endpointLabel(_ url: URL) -> String {
+        var label = "\(url.scheme ?? "unknown")://\(url.host ?? "unknown")"
+        if let port = url.port { label += ":\(port)" }
+        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if !path.isEmpty { label += "/\(path)" }
+        return label
     }
 }

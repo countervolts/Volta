@@ -120,6 +120,7 @@ final class VoltaNotificationCenter: ObservableObject {
 
     func postTestNotifications() {
         sequenceTask?.cancel()
+        AppLogger.shared.logAlways("Developer notification preview sequence started", category: .ui)
         sequenceTask = Task { @MainActor in
             for tone in VoltaNotificationTone.allCases {
                 post(tone.testMessage, tone: tone, duration: 1.5, force: true)

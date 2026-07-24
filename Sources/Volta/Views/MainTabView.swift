@@ -275,6 +275,7 @@ struct MainTabView: View {
 
         playerPresentationTask?.cancel()
         let snapshot = PlayerTransitionSnapshot(
+            songID: song.id,
             artwork: audio.currentLiveArtwork?.previewImage ?? audio.currentArtwork,
             nativeMiniPlayer: captureNativeMiniPlayer(in: miniPlayerFrame),
             targetArtworkScale: transitionArtworkScale(usesFullBleedArtwork: usesFullBleedArtwork),
@@ -345,9 +346,12 @@ struct MainTabView: View {
         }
 
         if audio.currentSong != nil {
+            let currentSongID = audio.currentSong?.id
+            let canReuseNativeMiniPlayer = playerSnapshot?.songID == currentSongID
             let refreshedSnapshot = PlayerTransitionSnapshot(
+                songID: currentSongID,
                 artwork: audio.currentLiveArtwork?.previewImage ?? audio.currentArtwork,
-                nativeMiniPlayer: playerSnapshot?.nativeMiniPlayer,
+                nativeMiniPlayer: canReuseNativeMiniPlayer ? playerSnapshot?.nativeMiniPlayer : nil,
                 targetArtworkScale: transitionArtworkScale(
                     usesFullBleedArtwork: usesFullBleedArtwork
                 ),
@@ -496,6 +500,7 @@ struct MainTabView: View {
 }
 
 private struct PlayerTransitionSnapshot {
+    let songID: String?
     let artwork: UIImage?
     let nativeMiniPlayer: UIImage?
     let targetArtworkScale: CGFloat

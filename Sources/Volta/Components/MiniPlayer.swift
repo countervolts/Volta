@@ -16,6 +16,7 @@ struct MiniPlayerAccessory: View {
             Button(action: onExpand) {
                 HStack(spacing: 10) {
                     artwork
+                        .id(song.id)
 
                     VStack(alignment: .leading, spacing: 1) {
                         OverflowSlidingText(

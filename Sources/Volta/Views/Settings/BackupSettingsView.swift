@@ -174,7 +174,7 @@ extension SettingsView {
                 ShareSheet.present([url])
             } catch {
                 settingsBackupStatus = "Backup failed: \(error.localizedDescription)"
-                AppLogger.shared.log("Settings backup failed: \(error.localizedDescription)", category: .other, level: .error)
+                AppLogger.shared.log("Settings backup failed: \(error.localizedDescription)", category: .settings, level: .error)
             }
         }
     }
@@ -195,7 +195,7 @@ extension SettingsView {
         } catch {
             settingsBackupStatus = "Restore failed: \(error.localizedDescription)"
             VoltaNotificationCenter.shared.post(L(.notif_settings_restore_failed), tone: .error)
-            AppLogger.shared.log("Settings restore failed: \(error.localizedDescription)", category: .other, level: .error)
+            AppLogger.shared.log("Settings restore failed: \(error.localizedDescription)", category: .settings, level: .error)
         }
     }
 
@@ -277,7 +277,7 @@ extension SettingsView {
             } catch {
                 playlistBackupStatus = "Restore failed: \(error.localizedDescription)"
                 VoltaNotificationCenter.shared.post(L(.notif_playlist_restore_failed), tone: .error)
-                AppLogger.shared.log("Playlist restore failed: \(error.localizedDescription)", category: .other, level: .error)
+                AppLogger.shared.log("Playlist restore failed: \(error.localizedDescription)", category: .settings, level: .error)
             }
             restoringPlaylistBackupID = nil
         }

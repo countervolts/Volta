@@ -50,7 +50,7 @@ final class AppState: ObservableObject {
     func restoreSession() {
         guard !didStartRestore else { return }
         didStartRestore = true
-        AppLogger.shared.logAlways("Session restore started", category: .other)
+        AppLogger.shared.logAlways("Session restore started", category: .settings)
         // Wi-Fi/cellular can change the effective server URL.
         NetworkMonitor.shared.onConnectionChange { [weak self] conn in
             self?.handleNetworkChange(cellular: conn == .cellular)
@@ -68,7 +68,7 @@ final class AppState: ObservableObject {
             activate(config: config, record: store.currentServer() ?? record, allowFallback: true)
             phase = .authenticated
         } else {
-            AppLogger.shared.log("No stored session; showing login", category: .other)
+            AppLogger.shared.log("No stored session; showing login", category: .ui)
             phase = .login
         }
     }
@@ -124,7 +124,7 @@ final class AppState: ObservableObject {
     }
 
     func logout() {
-        AppLogger.shared.logAlways("Logout started; server=\(currentServer?.displayName ?? "none")", category: .other)
+        AppLogger.shared.logAlways("Logout started; server=\(currentServer?.displayName ?? "none")", category: .settings)
         audioPlayer.stopAndClear()
         store.clearCurrent()
         client = nil
@@ -231,6 +231,7 @@ final class AppState: ObservableObject {
             currentServer = activeRecord
         }
         client = service
+        TrackPairingStore.shared.selectServer(activeRecord.id)
         audioPlayer.updateClient(service, serverID: activeRecord.id)
         IntentBridge.shared.setup(client: service, audioPlayer: audioPlayer)
         AppLogger.shared.log(

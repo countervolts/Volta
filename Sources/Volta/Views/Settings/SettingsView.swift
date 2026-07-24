@@ -21,7 +21,7 @@ struct ArtworkPrefetchProgress: Equatable {
 }
 
 // Accent icons, neutral row text.
-private struct AccentIconLabelStyle: LabelStyle {
+struct AccentIconLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         Label {
             configuration.title
@@ -32,6 +32,24 @@ private struct AccentIconLabelStyle: LabelStyle {
                 .layoutPriority(1)
         } icon: {
             configuration.icon.foregroundStyle(Theme.accent)
+        }
+    }
+}
+
+private struct SettingsMiniPlayerBottomInset: ViewModifier {
+    let height: CGFloat
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if height > 0 {
+            content.safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear
+                    .frame(height: height)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        } else {
+            content
         }
     }
 }
@@ -100,7 +118,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
 
     var summary: String {
         switch self {
-        case .playback: return "Autoplay, transitions, shuffle"
+        case .playback: return "Autoplay, transitions, pairings"
         case .scrobbling: return "Last.fm and ListenBrainz"
         case .audio: return "Equalizer, normalization, spatial"
         case .streaming: return "Quality, downloads, limits"
@@ -109,21 +127,21 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .storage: return "Caches, lyrics, local files"
         case .backups: return "Settings and playlists"
         case .performance: return "Speed, battery, image loading"
-        case .developer: return "Tools, logs, experiments"
-        case .about: return "Version and changelog"
+        case .developer: return "Tools and experiments"
+        case .about: return "Support, version, changelog"
         }
     }
 
     var searchRows: [[String]] {
         switch self {
         case .playback:
-            return [["autoplay", "play"], ["autoplay", "infinite play", "infinite", "autoplay style", "fill", "similar", "random", "genre"], ["crossfade", "fade", "automix", "transition", "duration", "style", "blend", "silence", "bpm", "tempo"], ["gapless playback"], ["enhanced caching", "playback cache", "prefetch", "seamless", "buffer"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"], ["resume playback after interruption", "resume", "interruption", "interrupt", "phone call", "siri", "other app", "force stop"]]
+            return [["autoplay", "play"], ["autoplay", "infinite play", "infinite", "autoplay style", "fill", "similar", "random", "genre"], ["crossfade", "fade", "automix", "transition", "duration", "style", "blend", "silence", "bpm", "tempo"], ["track pairings", "linked tracks", "linked songs", "song pair", "play after", "bleed together"], ["gapless playback"], ["enhanced caching", "playback cache", "prefetch", "seamless", "buffer"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"], ["resume playback after interruption", "resume", "interruption", "interrupt", "phone call", "siri", "other app", "force stop"]]
         case .scrobbling:
             return [["last.fm", "listenbrainz", "scrobbling", "now playing"]]
         case .audio:
             return [["volume normalization", "replaygain", "replay gain", "normalize", "loudness"], ["equalizer", "eq", "bands", "graphic"], ["mono audio", "mono", "accessibility", "downmix"], ["spatial widener", "spatial", "3d", "stereo", "widener", "spatialize"]]
         case .streaming:
-            return [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["download quality", "download", "bitrate"], ["transcoding format", "transcode", "format", "mp3", "aac", "opus"], ["download mode", "multithreaded", "threads", "single", "parallel"], ["download speed limit", "speed", "limit", "throttle"], ["storage cap", "cap", "max size", "storage"], ["auto-evict", "auto evict", "evict"]]
+            return [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["download quality", "download", "bitrate"], ["transcode", "transcoding", "codec", "file type", "rules", "format", "mp3", "aac", "opus", "flac", "alac"], ["download mode", "multithreaded", "threads", "single", "parallel"], ["download speed limit", "speed", "limit", "throttle"], ["storage cap", "cap", "max size", "storage"], ["auto-evict", "auto evict", "evict"]]
         case .appearance:
             return [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]
         case .server:
@@ -137,7 +155,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .developer:
             return [["developer tools", "developer", "tools", "diagnostics"], ["experiments", "flags"], ["playback cache diagnostics", "cache diagnostics"], ["performance overlay", "overlay", "fps"], ["notifications", "toast"], ["dump app files", "export", "logs"], ["logging", "logs"]]
         case .about:
-            return [["version", "build", "about", "app"], ["changelog", "release notes"]]
+            return [["version", "build", "about", "app"], ["support", "donate", "tip", "buy me a coffee", "coffee"], ["changelog", "release notes"], ["logs", "diagnostics"]]
         }
     }
 }
@@ -170,6 +188,10 @@ struct SettingsView: View {
     @AppStorage("streamingBitrateCell")var streamingBitrateCell = 0
     @AppStorage("downloadBitrate")     var downloadBitrate     = 0
     @AppStorage("transcodingFormat")   var transcodingFormat   = "raw"
+    @AppStorage(StreamingPreferences.transcodingEnabledKey) var transcodingEnabled = true
+    @AppStorage(StreamingPreferences.transcodingModeKey) var transcodingMode = TranscodingSettingsMode.simple.rawValue
+    @AppStorage(StreamingPreferences.transcodingCellularOnlyKey) var transcodingCellularOnly = false
+    @AppStorage(StreamingPreferences.transcodeFileTypeRulesKey) var transcodeFileTypeRules = ""
     @AppStorage("downloadThreadingMode") var downloadThreadingMode = "multi"
     @AppStorage("downloadSpeedLimitKBps") var downloadSpeedLimitKBps = 0
     @AppStorage("downloadCapMB")       var downloadCapMB       = 0
@@ -259,12 +281,20 @@ struct SettingsView: View {
     @State var restoringPlaylistBackupID: String?
 
     init(focusedCategory: SettingsCategory? = nil) {
+        StreamingPreferences.migrateTranscodingSettingsIfNeeded()
         self.focusedCategory = focusedCategory
     }
 
     var audio: AudioPlayer { appState.audioPlayer }
     var hasLocalArtworkLibrary: Bool { localArtworkLibraryDownloaded || localArtworkBytes > 0 }
     var viewMode: SettingsViewMode { SettingsViewMode(rawValue: settingsViewMode) ?? .list }
+    var miniPlayerBottomInset: CGFloat {
+        guard audio.hasActivePlaybackSession, audio.currentSong != nil else { return 0 }
+        if #available(iOS 26.0, *) {
+            return 96
+        }
+        return 0
+    }
 
     // MARK: - Search filtering
 
@@ -429,6 +459,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .modifier(SettingsMiniPlayerBottomInset(height: miniPlayerBottomInset))
             .labelStyle(AccentIconLabelStyle())
             .searchable(text: $settingsSearch, placement: .navigationBarDrawer(displayMode: .automatic), prompt: L(.settings_search))
             .scrollContentBackground(.hidden)

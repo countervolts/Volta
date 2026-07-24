@@ -5,39 +5,71 @@ import UIKit
 struct SwipeBackEnabler: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> _VC { _VC() }
     func updateUIViewController(_ v: _VC, context: Context) {
-        v.scheduleApplyGesture()
+        v.scheduleApplyGestureIfNeeded()
     }
 
     final class _VC: UIViewController {
         private let popDelegate = PopGestureDelegate()
+        private var didApplyForCurrentLayoutCycle = false
+        private var pendingImmediateApply = false
+        private var pendingDelayedApply = false
 
         override func viewWillAppear(_ animated: Bool) {
             super.viewWillAppear(animated)
-            scheduleApplyGesture()
+            didApplyForCurrentLayoutCycle = false
+            scheduleApplyGesture(force: true)
+            scheduleDelayedApply()
         }
 
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
-            scheduleApplyGesture()
+            scheduleApplyGesture(force: true)
         }
 
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
-            scheduleApplyGesture()
+            guard !didApplyForCurrentLayoutCycle else { return }
+            didApplyForCurrentLayoutCycle = true
+            scheduleApplyGesture(force: true)
         }
 
-        func scheduleApplyGesture() {
+        func scheduleApplyGestureIfNeeded() {
+            scheduleApplyGesture(force: false)
+        }
+
+        private func scheduleApplyGesture(force: Bool) {
+            guard force || !isGestureApplied else { return }
+            guard !pendingImmediateApply else { return }
+            pendingImmediateApply = true
             DispatchQueue.main.async { [weak self] in
-                self?.applyGesture()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                self?.applyGesture()
+                guard let self else { return }
+                self.pendingImmediateApply = false
+                self.applyGesture(force: force)
             }
         }
 
-        private func applyGesture() {
+        private func scheduleDelayedApply() {
+            guard !pendingDelayedApply else { return }
+            pendingDelayedApply = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                guard let self else { return }
+                self.pendingDelayedApply = false
+                self.applyGesture(force: true)
+            }
+        }
+
+        private var isGestureApplied: Bool {
+            guard let navigationController = resolvedNavigationController(),
+                  let gesture = navigationController.interactivePopGestureRecognizer else { return false }
+            return gesture.isEnabled
+                && gesture.delegate === popDelegate
+                && popDelegate.navigationController === navigationController
+        }
+
+        private func applyGesture(force: Bool) {
             guard let navigationController = resolvedNavigationController(),
                   let gesture = navigationController.interactivePopGestureRecognizer else { return }
+            guard force || !isGestureApplied else { return }
             popDelegate.navigationController = navigationController
             gesture.isEnabled = true
             gesture.delegate = popDelegate

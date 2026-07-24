@@ -14,8 +14,13 @@ struct MediaCardGrid: View {
     var body: some View {
         LazyVGrid(columns: threeColumns, spacing: Theme.Layout.gridSpacing) {
             ForEach(items) { item in
-                MediaCard(item: item)
+                let card = MediaCard(item: item)
                     .onTapGesture { onSelect(item) }
+                if let album = item.albumRef {
+                    card.albumContextMenu(album)
+                } else {
+                    card
+                }
             }
         }
     }
@@ -31,6 +36,7 @@ struct PicksGrid: View {
             ForEach(albums) { album in
                 PickCard(album: album)
                     .onTapGesture { onSelect(album) }
+                    .albumContextMenu(album)
             }
         }
     }

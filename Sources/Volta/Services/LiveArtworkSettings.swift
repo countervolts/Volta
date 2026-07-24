@@ -51,7 +51,8 @@ enum LiveArtworkSettings {
         }
     }
 
-    // Keep enough frames for native-rate playback; maxPixelSize keeps the RAM cost in check.
+    // Frame-count budget for quality scaling. The decoder preserves source
+    // frames and lowers pixel size when an animation exceeds this budget.
     static var maxFrameCount: Int {
         guard supportsAnimatedArtwork else { return 0 }
         guard !rawAnimatedArtworkEnabled,

@@ -143,7 +143,7 @@ struct NowPlayingScreen: View {
             }
         }
         .sheet(isPresented: $showAudioSignalPath) {
-            AudioSignalPathSheet(song: audio.currentSong)
+            AudioSignalPathSheet(song: audio.currentSong, isTranscoding: audio.currentPlaybackUsesTranscode)
         }
         .fullScreenCover(isPresented: $showVisualizer) {
             AudioVisualizerScreen(audio: audio)
@@ -1922,7 +1922,10 @@ struct NowPlayingScreen: View {
     // Text has .contentTransition(.identity) + .transaction { animation = nil } so the
     // animation-schedule doesn't wobble it. Driven by the shared snapshot above.
     private func timeLabels(elapsed t: TimeInterval, total: TimeInterval) -> some View {
-        let losslessStatus = LosslessBadgeResolver.status(for: audio.currentSong)
+        let losslessStatus = LosslessBadgeResolver.status(
+            for: audio.currentSong,
+            isTranscoding: audio.currentPlaybackUsesTranscode
+        )
         return HStack {
             timeText(formatTime(t))
             Spacer()
@@ -1937,7 +1940,10 @@ struct NowPlayingScreen: View {
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showLosslessInfo) {
-                    LosslessInfoPopover(song: audio.currentSong) {
+                    LosslessInfoPopover(
+                        song: audio.currentSong,
+                        isTranscoding: audio.currentPlaybackUsesTranscode
+                    ) {
                         showLosslessInfo = false
                         Task { @MainActor in
                             try? await Task.sleep(nanoseconds: 180_000_000)
@@ -2985,7 +2991,7 @@ private struct LiveArtworkVideoView: UIViewRepresentable {
             guard let player else { return }
             let item = player.currentItem
             let error = item?.error?.localizedDescription ?? co?.looper?.error?.localizedDescription ?? "none"
-            AppLogger.shared.log("Live artwork: video layer after 1.5s — itemStatus=\(item?.status.rawValue ?? -1) rate=\(player.rate) error=\(error)", category: .other)
+            AppLogger.shared.log("Live artwork: video layer after 1.5s — itemStatus=\(item?.status.rawValue ?? -1) rate=\(player.rate) error=\(error)", category: .artwork)
         }
 
         // AVPlayer pauses video when the app backgrounds and won't resume itself
@@ -3076,8 +3082,9 @@ struct SongInfoSheet: View {
 
 private struct LosslessInfoPopover: View {
     let song: Song?
+    let isTranscoding: Bool
     var onOpenSignalPath: () -> Void
-    private var status: LosslessBadgeStatus? { LosslessBadgeResolver.status(for: song) }
+    private var status: LosslessBadgeStatus? { LosslessBadgeResolver.status(for: song, isTranscoding: isTranscoding) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -3132,13 +3139,14 @@ private struct LosslessInfoPopover: View {
 
 private struct AudioSignalPathSheet: View {
     let song: Song?
+    let isTranscoding: Bool
     @Environment(\.dismiss) private var dismiss
     @AppStorage("streamingBitrate") private var streamingBitrate = 0
     @AppStorage("streamingBitrateCell") private var streamingBitrateCell = 0
     @AppStorage("transcodingFormat") private var transcodingFormat = "raw"
     @AppStorage("replayGainMode") private var replayGainMode = "off"
 
-    private var status: LosslessBadgeStatus? { LosslessBadgeResolver.status(for: song) }
+    private var status: LosslessBadgeStatus? { LosslessBadgeResolver.status(for: song, isTranscoding: isTranscoding) }
     private var session: AVAudioSession { AVAudioSession.sharedInstance() }
 
     var body: some View {
@@ -3154,7 +3162,7 @@ private struct AudioSignalPathSheet: View {
                 }
 
                 Section(L(.signal_server_stream)) {
-                    row(L(.signal_transcoding), transcodingFormat == "raw" ? L(.signal_original) : transcodingFormat.uppercased())
+                    row(L(.signal_transcoding), activeTranscodingLabel)
                     row(L(.signal_wifi_quality), bitrateLabel(streamingBitrate))
                     row(L(.signal_cellular_quality), streamingBitrateCell == 0 ? L(.signal_same_as_wifi) : bitrateLabel(streamingBitrateCell))
                 }
@@ -3189,6 +3197,17 @@ private struct AudioSignalPathSheet: View {
 
     private var fileFormat: String? {
         song?.suffix?.uppercased() ?? song?.contentType
+    }
+
+    private var activeTranscodingLabel: String {
+        guard isTranscoding else { return L(.signal_original) }
+        let decision = StreamingPreferences.streamDecision(for: song)
+        let target = decision.format ?? (transcodingFormat == "raw" ? nil : transcodingFormat)
+        let label = target?.uppercased() ?? "Automatic"
+        guard decision.usesRuleOverride, let source = decision.sourceKind else {
+            return label
+        }
+        return "\(source.title) -> \(label)"
     }
 
     @MainActor

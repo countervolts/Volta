@@ -21,6 +21,12 @@ struct ArtistDetailView: View {
         Color(ColorExtractor.backgroundVariant(of: vm.dominantColor))
     }
 
+    private var showsYonkagorFish: Bool {
+        vm.displayArtist.name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveCompare("Yonkagor") == .orderedSame
+    }
+
     private static let headerHeight: CGFloat = 380
     private static let legacyScrollSpace = "artist-scroll-space"
 
@@ -48,6 +54,13 @@ struct ArtistDetailView: View {
 
                 artistScroll(width: width, headerHeight: headerHeight)
 
+                if showsYonkagorFish {
+                    YonkagorFishOverlay()
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+
                 if vm.isLoading && vm.albums.isEmpty {
                     ProgressView()
                         .controlSize(.large)
@@ -67,6 +80,7 @@ struct ArtistDetailView: View {
         }
         .ignoresSafeArea(edges: .top)
         .navigationBarHidden(true)
+        .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .preferredColorScheme(Theme.colorScheme)
         .background(SwipeBackEnabler())
@@ -389,6 +403,7 @@ struct ArtistDetailView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .albumContextMenu(album)
                         }
                     }
                     .padding(.horizontal, 20)
@@ -428,6 +443,7 @@ struct ArtistDetailView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .albumContextMenu(album)
                         }
                     }
                     .padding(.horizontal, 20)
@@ -469,6 +485,7 @@ struct ArtistDetailView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .albumContextMenu(album)
                         }
                     }
                     .padding(.horizontal, 20)
@@ -797,6 +814,165 @@ private struct ArtistScrollOffsetPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+private struct YonkagorFishOverlay: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var fish: [Fish]
+
+    init() {
+        _fish = State(initialValue: Self.randomFish())
+    }
+
+    private var pauseAnimation: Bool {
+        reduceMotion || PerformanceMode.reduceAnimations
+    }
+
+    var body: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: FrameRateGovernor.minimumInterval,
+                paused: pauseAnimation
+            )
+        ) { timeline in
+            Canvas { context, size in
+                drawFish(context: context, size: size, date: timeline.date)
+            }
+        }
+        .opacity(0.88)
+        .transaction { $0.animation = nil }
+    }
+
+    private func drawFish(context: GraphicsContext, size: CGSize, date: Date) {
+        let elapsed = pauseAnimation ? 0 : date.timeIntervalSinceReferenceDate
+
+        for swimmer in fish {
+            let progress = (elapsed / swimmer.duration + swimmer.phase)
+                .truncatingRemainder(dividingBy: 1)
+            let travelWidth = size.width + swimmer.size * 3.2
+            let x = swimmer.swimsRight
+                ? -swimmer.size * 1.6 + CGFloat(progress) * travelWidth
+                : size.width + swimmer.size * 1.6 - CGFloat(progress) * travelWidth
+            let wave = sin(elapsed * swimmer.waveSpeed + swimmer.phase * Double.pi * 2)
+            let y = min(
+                max(size.height * swimmer.yPosition + CGFloat(wave) * swimmer.waveHeight, swimmer.size),
+                max(swimmer.size, size.height - swimmer.size)
+            )
+
+            var fishContext = context
+            fishContext.opacity = swimmer.opacity
+            fishContext.translateBy(x: x, y: y)
+            if !swimmer.swimsRight {
+                fishContext.scaleBy(x: -1, y: 1)
+            }
+            let scale = swimmer.size / 44
+            fishContext.scaleBy(x: scale, y: scale)
+            Self.drawFishBody(
+                context: &fishContext,
+                bodyColor: swimmer.bodyColor,
+                accentColor: swimmer.accentColor,
+                tailPhase: elapsed * swimmer.tailSpeed + swimmer.phase * Double.pi * 2
+            )
+        }
+    }
+
+    private static func drawFishBody(
+        context: inout GraphicsContext,
+        bodyColor: Color,
+        accentColor: Color,
+        tailPhase: TimeInterval
+    ) {
+        let tailOffset = CGFloat(sin(tailPhase)) * 3.2
+
+        var tail = Path()
+        tail.move(to: CGPoint(x: -16, y: 0))
+        tail.addLine(to: CGPoint(x: -32, y: -10 + tailOffset))
+        tail.addQuadCurve(to: CGPoint(x: -25, y: 0), control: CGPoint(x: -29, y: -3))
+        tail.addQuadCurve(to: CGPoint(x: -32, y: 10 + tailOffset), control: CGPoint(x: -29, y: 3))
+        tail.closeSubpath()
+        context.fill(tail, with: .color(accentColor.opacity(0.95)))
+
+        let body = Path(ellipseIn: CGRect(x: -20, y: -10, width: 40, height: 20))
+        context.fill(
+            body,
+            with: .linearGradient(
+                Gradient(colors: [bodyColor, accentColor.opacity(0.82)]),
+                startPoint: CGPoint(x: -18, y: -10),
+                endPoint: CGPoint(x: 18, y: 10)
+            )
+        )
+
+        var topFin = Path()
+        topFin.move(to: CGPoint(x: -6, y: -8))
+        topFin.addQuadCurve(to: CGPoint(x: 7, y: -8), control: CGPoint(x: -1, y: -17))
+        topFin.addQuadCurve(to: CGPoint(x: -6, y: -8), control: CGPoint(x: 0, y: -11))
+        context.fill(topFin, with: .color(accentColor.opacity(0.65)))
+
+        var lowerFin = Path()
+        lowerFin.move(to: CGPoint(x: -2, y: 5))
+        lowerFin.addLine(to: CGPoint(x: 8, y: 13))
+        lowerFin.addLine(to: CGPoint(x: 11, y: 4))
+        lowerFin.closeSubpath()
+        context.fill(lowerFin, with: .color(.white.opacity(0.22)))
+
+        var gill = Path()
+        gill.move(to: CGPoint(x: 4, y: -6))
+        gill.addQuadCurve(to: CGPoint(x: 4, y: 6), control: CGPoint(x: 9, y: 0))
+        context.stroke(gill, with: .color(.white.opacity(0.24)), lineWidth: 1.1)
+
+        context.fill(
+            Path(ellipseIn: CGRect(x: 10, y: -4.5, width: 3.8, height: 3.8)),
+            with: .color(.black.opacity(0.65))
+        )
+        context.fill(
+            Path(ellipseIn: CGRect(x: 11, y: -3.7, width: 1.2, height: 1.2)),
+            with: .color(.white.opacity(0.85))
+        )
+    }
+
+    private struct Fish {
+        let yPosition: CGFloat
+        let phase: Double
+        let duration: TimeInterval
+        let size: CGFloat
+        let waveHeight: CGFloat
+        let waveSpeed: Double
+        let tailSpeed: Double
+        let swimsRight: Bool
+        let opacity: Double
+        let bodyColor: Color
+        let accentColor: Color
+    }
+
+    private static func randomFish(count: Int = Int.random(in: 6...9)) -> [Fish] {
+        (0..<count).map { index in
+            let hue = Double.random(in: 0...1)
+            let accentHue = (hue + Double.random(in: 0.18...0.5))
+                .truncatingRemainder(dividingBy: 1)
+
+            return Fish(
+                yPosition: CGFloat.random(in: 0.14...0.82),
+                phase: (Double(index) / Double(count)) + Double.random(in: -0.04...0.04),
+                duration: TimeInterval.random(in: 11...20),
+                size: CGFloat.random(in: 28...52),
+                waveHeight: CGFloat.random(in: 8...24),
+                waveSpeed: Double.random(in: 1.1...2.4),
+                tailSpeed: Double.random(in: 8.5...12.5),
+                swimsRight: Bool.random(),
+                opacity: Double.random(in: 0.52...0.82),
+                bodyColor: Color(
+                    hue: hue,
+                    saturation: Double.random(in: 0.62...0.94),
+                    brightness: Double.random(in: 0.78...1.0)
+                ),
+                accentColor: Color(
+                    hue: accentHue,
+                    saturation: Double.random(in: 0.58...0.9),
+                    brightness: Double.random(in: 0.84...1.0)
+                )
+            )
+        }
     }
 }
 

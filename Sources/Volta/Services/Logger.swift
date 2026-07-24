@@ -3,6 +3,12 @@ import Foundation
 enum LogCategory: String, CaseIterable, Sendable {
     case networking = "Networking"
     case playback   = "Playback"
+    case library    = "Library"
+    case lyrics     = "Lyrics"
+    case downloads  = "Downloads"
+    case artwork    = "Artwork"
+    case ui         = "UI"
+    case settings   = "Settings"
     case other      = "Other"
 }
 
@@ -13,16 +19,17 @@ struct LogEntry: Identifiable, Sendable {
     let level: Level
     let message: String
 
-    enum Level: String, Sendable { case info, warning, error }
+    enum Level: String, CaseIterable, Sendable { case info, warning, error }
 
     var formatted: String {
         let t = timestamp.formatted(date: .omitted, time: .standard)
-        return "[\(t)] [\(level.rawValue.uppercased())] \(message)"
+        return "[\(t)] [\(category.rawValue)] [\(level.rawValue.uppercased())] \(message)"
     }
 }
 
 extension Notification.Name {
     static let logEntryAdded = Notification.Name("LogEntryAdded")
+    static let logEntriesChanged = Notification.Name("LogEntriesChanged")
 }
 
 final class AppLogger: @unchecked Sendable {
@@ -64,6 +71,22 @@ final class AppLogger: @unchecked Sendable {
         lock.withLock { entries }
     }
 
+    func countsByCategory() -> [LogCategory: Int] {
+        lock.withLock {
+            entries.reduce(into: [:]) { counts, entry in
+                counts[entry.category, default: 0] += 1
+            }
+        }
+    }
+
+    func countsByLevel() -> [LogEntry.Level: Int] {
+        lock.withLock {
+            entries.reduce(into: [:]) { counts, entry in
+                counts[entry.level, default: 0] += 1
+            }
+        }
+    }
+
     func estimatedSizeBytes() -> Int {
         lock.withLock {
             entries.map(\.formatted).joined(separator: "\n").lengthOfBytes(using: .utf8)
@@ -72,13 +95,25 @@ final class AppLogger: @unchecked Sendable {
 
     func clear(category: LogCategory) {
         lock.withLock { entries.removeAll { $0.category == category } }
+        notifyEntriesChanged()
     }
 
     func clearAll() {
         lock.withLock { entries.removeAll() }
+        notifyEntriesChanged()
     }
 
     func allFormatted(category: LogCategory) -> String {
         entries(for: category).map(\.formatted).joined(separator: "\n")
+    }
+
+    func allFormatted() -> String {
+        allEntries().map(\.formatted).joined(separator: "\n")
+    }
+
+    private func notifyEntriesChanged() {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .logEntriesChanged, object: nil)
+        }
     }
 }

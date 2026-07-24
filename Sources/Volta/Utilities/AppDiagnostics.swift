@@ -4,11 +4,11 @@ import UIKit
 
 enum AppDiagnostics {
     static func logLaunch(context: String = "launch") {
-        AppLogger.shared.logAlways(diagnosticsLine(context: context), category: .other)
+        AppLogger.shared.logAlways(diagnosticsLine(context: context), category: .settings)
     }
 
     static func logMainTabDecision() {
-        AppLogger.shared.logAlways(tabDecisionLine(), category: .other)
+        AppLogger.shared.logAlways(tabDecisionLine(), category: .settings)
     }
 
     private static func diagnosticsLine(context: String) -> String {

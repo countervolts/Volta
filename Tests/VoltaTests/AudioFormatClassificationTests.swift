@@ -27,6 +27,30 @@ final class AudioFormatClassificationTests: XCTestCase {
 
         XCTAssertFalse(song.isLossless)
         XCTAssertFalse(song.isHiResLossless)
+        XCTAssertFalse(song.isDolbyAtmos)
+    }
+
+    func testDolbyAtmosEAC3IsRecognizedEvenThoughLossy() throws {
+        let song = try decodeSong(
+            suffix: "m4a",
+            codec: "eac3",
+            contentType: "audio/mp4",
+            channelCount: 6
+        )
+
+        XCTAssertFalse(song.isLossless)
+        XCTAssertTrue(song.isDolbyAtmos)
+    }
+
+    func testDolbyAtmosFallbackUsesMultichannelM4A() throws {
+        let song = try decodeSong(
+            suffix: "m4a",
+            contentType: "audio/mp4",
+            channelCount: 6
+        )
+
+        XCTAssertFalse(song.isLossless)
+        XCTAssertTrue(song.isDolbyAtmos)
     }
 
     func testALACContentTypeHandlesBackendWithoutCodecField() throws {
@@ -67,7 +91,8 @@ final class AudioFormatClassificationTests: XCTestCase {
         codec: String? = nil,
         contentType: String? = nil,
         bitDepth: Int? = nil,
-        samplingRate: Int? = nil
+        samplingRate: Int? = nil,
+        channelCount: Int? = nil
     ) throws -> Song {
         var payload: [String: Any] = [
             "id": "song-1",
@@ -78,6 +103,7 @@ final class AudioFormatClassificationTests: XCTestCase {
         payload["contentType"] = contentType
         payload["bitDepth"] = bitDepth
         payload["samplingRate"] = samplingRate
+        payload["channelCount"] = channelCount
         let data = try JSONSerialization.data(withJSONObject: payload)
         return try JSONDecoder().decode(Song.self, from: data)
     }

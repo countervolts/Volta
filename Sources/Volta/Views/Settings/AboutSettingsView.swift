@@ -7,7 +7,7 @@ extension SettingsView {
     @ViewBuilder
     var aboutSection: some View {
         let s = "About"
-        if sectionVisible(s, [["app", "version", "build", "volta", "developer", "ayo", "countervolts", "source code", "github", "repository"], ["changelog", "changes", "commits", "history", "release notes", "git"]]) {
+        if sectionVisible(s, [["app", "version", "build", "volta", "developer", "ayo", "countervolts", "source code", "github", "repository"], ["support", "donate", "tip", "buy me a coffee", "coffee"], ["changelog", "changes", "commits", "history", "release notes", "git"], ["logs", "diagnostics"]]) {
             Section(sectionTitle(s)) {
                 LabeledContent("App", value: "Volta")
                     .foregroundStyle(Theme.primaryText)
@@ -38,8 +38,26 @@ extension SettingsView {
                 }
                 .foregroundStyle(Theme.primaryText)
 
+                Button {
+                    openURL(AboutSettingsData.supportURL)
+                } label: {
+                    HStack {
+                        Label("Support Volta", systemImage: "heart.fill")
+                        Spacer()
+                        Text("Buy Me a Coffee")
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                .foregroundStyle(Theme.primaryText)
+
                 NavigationLink(value: SettingsRoute.changelog) {
                     Label("Changelog", systemImage: "clock.arrow.circlepath")
+                }
+                .foregroundStyle(Theme.primaryText)
+
+                NavigationLink(value: SettingsRoute.logs) {
+                    Label("Logs", systemImage: Symbols.logs)
                 }
                 .foregroundStyle(Theme.primaryText)
             }
@@ -58,6 +76,7 @@ private struct ChangelogEntry: Identifiable {
 
 private enum AboutSettingsData {
     static let sourceCodeURL = URL(string: "https://github.com/countervolts/Volta")!
+    static let supportURL = URL(string: "https://buymeacoffee.com/countervolts")!
     static let commitsAPIURL = URL(string: "https://api.github.com/repos/countervolts/Volta/commits")!
 }
 

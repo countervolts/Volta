@@ -10,8 +10,8 @@ struct LosslessBadgeStatus: Equatable {
 }
 
 enum LosslessBadgeResolver {
-    static func status(for song: Song?) -> LosslessBadgeStatus? {
-        guard let song, song.isLossless else { return nil }
+    static func status(for song: Song?, isTranscoding: Bool = false) -> LosslessBadgeStatus? {
+        guard let song else { return nil }
 
         let session = AVAudioSession.sharedInstance()
         let outputs = session.currentRoute.outputs
@@ -25,6 +25,32 @@ enum LosslessBadgeResolver {
         let sampleRateMatches = song.samplingRate.map { abs($0 - outputRate) <= 1 } ?? false
         let hasFileDepth = song.bitDepth != nil
         let isHiRes = song.isHiResLossless
+
+        // Runtime stream state wins over source-format badges. A Dolby Atmos
+        // source that is being transcoded should show Transcoding, not Atmos.
+        if isTranscoding {
+            return transcodingStatus(for: song, output: output)
+        }
+
+        if song.isDolbyAtmos {
+            return LosslessBadgeStatus(
+                title: "Dolby Atmos",
+                systemImage: "airpodspro",
+                status: "Dolby Atmos",
+                output: output,
+                reason: "Source metadata indicates a Dolby Atmos-compatible stream."
+            )
+        }
+
+        guard song.isLossless else {
+            return LosslessBadgeStatus(
+                title: "Lossy",
+                systemImage: "music.note",
+                status: "Lossy File",
+                output: output,
+                reason: lossyReason(song: song)
+            )
+        }
 
         let isTrue = routeCanBeBitPerfect && !hasBlockedRoute && sampleRateMatches && hasFileDepth
         if isTrue {
@@ -101,6 +127,31 @@ enum LosslessBadgeResolver {
             return "File lacks bit-depth metadata needed to verify output."
         }
         return "Output route cannot be verified as bit-perfect."
+    }
+
+    private static func lossyReason(song: Song) -> String {
+        if let codec = song.codec?.trimmingCharacters(in: .whitespacesAndNewlines), !codec.isEmpty {
+            return "Source codec is \(codec.uppercased()), which Volta classifies as lossy."
+        }
+        if let format = song.suffix?.trimmingCharacters(in: .whitespacesAndNewlines), !format.isEmpty {
+            return "Source format is \(format.uppercased()) and lacks lossless metadata."
+        }
+        if let contentType = song.contentType?.trimmingCharacters(in: .whitespacesAndNewlines), !contentType.isEmpty {
+            return "Source media type is \(contentType) and lacks lossless metadata."
+        }
+        return "Source file lacks lossless metadata."
+    }
+
+    private static func transcodingStatus(for song: Song, output: String) -> LosslessBadgeStatus {
+        LosslessBadgeStatus(
+            title: "Transcoding",
+            systemImage: "arrow.triangle.2.circlepath",
+            status: "Transcoding",
+            output: output,
+            reason: song.isLossless
+                ? "Lossless source file is being transcoded for playback, so the current stream is lossy."
+                : "Source file is being transcoded for playback, so the current stream is lossy."
+        )
     }
 
     private static func formatSampleRate(_ value: Int) -> String {

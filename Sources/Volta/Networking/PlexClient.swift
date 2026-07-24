@@ -784,33 +784,61 @@ final class PlexClient: MusicService, @unchecked Sendable {
     }
 
     func streamURL(id: String) -> URL? {
-        let kbps = StreamingPreferences.streamBitrateKbps
+        streamURL(id: id, decision: StreamingPreferences.streamDecision(for: nil))
+    }
+
+    func streamURL(for song: Song) -> URL? {
+        streamURL(id: song.id, decision: StreamingPreferences.streamDecision(for: song))
+    }
+
+    private func streamURL(id: String, decision: StreamingTranscodeDecision) -> URL? {
         // Serve the original file unless the user actually asked for a transcode.
-        if !StreamingPreferences.wantsTranscode(bitrateKbps: kbps), let part = cachedPart(id) {
+        if !decision.wantsTranscode, let part = cachedPart(id) {
             return url(part)   // original file, direct play
         }
-        return transcodeURL(id: id, bitrateKbps: kbps > 0 ? kbps : 320)
+        return transcodeURL(id: id, decision: decision)
     }
 
     func downloadURL(id: String) -> URL? {
-        let kbps = StreamingPreferences.downloadBitrateKbps
-        if !StreamingPreferences.wantsTranscode(bitrateKbps: kbps), let part = cachedPart(id) {
+        downloadURL(id: id, decision: StreamingPreferences.downloadDecision(for: nil))
+    }
+
+    func downloadURL(for song: Song) -> URL? {
+        downloadURL(id: song.id, decision: StreamingPreferences.downloadDecision(for: song))
+    }
+
+    private func downloadURL(id: String, decision: StreamingTranscodeDecision) -> URL? {
+        if !decision.wantsTranscode, let part = cachedPart(id) {
             return url(part)   // exact original bytes
         }
-        return transcodeURL(id: id, bitrateKbps: kbps > 0 ? kbps : 320)
+        return transcodeURL(id: id, decision: decision)
     }
 
     // Capped/format downloads use Plex's progressive transcoder; original uses the file part.
     func downloadIsProgressive(id: String) -> Bool {
-        let kbps = StreamingPreferences.downloadBitrateKbps
-        if !StreamingPreferences.wantsTranscode(bitrateKbps: kbps), cachedPart(id) != nil { return false }
+        downloadIsProgressive(id: id, decision: StreamingPreferences.downloadDecision(for: nil))
+    }
+
+    func downloadIsProgressive(for song: Song) -> Bool {
+        downloadIsProgressive(id: song.id, decision: StreamingPreferences.downloadDecision(for: song))
+    }
+
+    private func downloadIsProgressive(id: String, decision: StreamingTranscodeDecision) -> Bool {
+        if !decision.wantsTranscode, cachedPart(id) != nil { return false }
         return true
     }
 
     // The original-file path needs the cached part key; transcodes don't.
     func streamMetadataReady(id: String) -> Bool {
-        StreamingPreferences.wantsTranscode(bitrateKbps: StreamingPreferences.streamBitrateKbps)
-            || cachedPart(id) != nil
+        streamMetadataReady(id: id, decision: StreamingPreferences.streamDecision(for: nil))
+    }
+
+    func streamMetadataReady(for song: Song) -> Bool {
+        streamMetadataReady(id: song.id, decision: StreamingPreferences.streamDecision(for: song))
+    }
+
+    private func streamMetadataReady(id: String, decision: StreamingTranscodeDecision) -> Bool {
+        decision.wantsTranscode || cachedPart(id) != nil
     }
 
     // Cache the file part key for original-file streaming.
@@ -821,7 +849,13 @@ final class PlexClient: MusicService, @unchecked Sendable {
 
     func originalStreamURL(id: String) -> URL? {
         if let part = cachedPart(id) { return url(part) }
-        return transcodeURL(id: id, bitrateKbps: 320)
+        return transcodeURL(id: id, decision: StreamingTranscodeDecision(
+            requestedBitrateKbps: 320,
+            bitrateKbps: 320,
+            format: nil,
+            sourceKind: nil,
+            ruleTarget: nil
+        ))
     }
 
     func mediaRequestHeaders() -> [String: String] {
@@ -832,8 +866,10 @@ final class PlexClient: MusicService, @unchecked Sendable {
     }
 
     // Plex universal transcoder stream. Also used by the stream-cache experiment.
-    private func transcodeURL(id: String, bitrateKbps: Int) -> URL? {
-        let ext = StreamingPreferences.plexUniversalTranscodeExtension
+    private func transcodeURL(id: String, decision: StreamingTranscodeDecision) -> URL? {
+        let format = decision.format ?? StreamingPreferences.activeTranscodingFormat
+        let ext = StreamingPreferences.plexUniversalTranscodeExtension(for: format)
+        let bitrateKbps = decision.bitrateKbps > 0 ? decision.bitrateKbps : 320
         // One transcode session per track; shared sessions cancel each other.
         let session = "\(clientId)-\(id)"
         return url("/music/:/transcode/universal/start.\(ext)", query: [

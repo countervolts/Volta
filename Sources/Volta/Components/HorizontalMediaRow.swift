@@ -49,6 +49,7 @@ struct HorizontalPickRow: View {
                         case .album(let album):
                             PickCard(album: album)
                                 .onTapGesture { onSelectAlbum(album) }
+                                .albumContextMenu(album)
                         case .mix(let mix):
                             PickMixCard(mix: mix)
                                 .onTapGesture { onSelectMix(mix) }
