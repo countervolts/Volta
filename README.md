@@ -35,7 +35,7 @@
 
 ## Features
 
-- **Playback** Gapless and crossfade, plus an AutoMix mode that (tries to) beat-match tracks. ReplayGain, a sleep timer, and an infinite autoplay queue. Full lock screen, Control Center, and (WIP) Siri support.
+- **Playback** Gapless and crossfade, plus an AutoMix mode that (tries to) beat-match tracks. ReplayGain, a sleep timer, and an infinite autoplay queue. Full lock screen, Control Center, and Siri support.
  
 - **Audio** A 10-band graphic EQ, mono downmix, a 3D spatial widener, and an Audio Signal Path sheet so you can see exactly what's happening to the sound. Lossless / Hi-Res / True Hi-Res badges come from real data.
 
@@ -97,3 +97,5 @@ Build it yourself with [xtool](https://github.com/xtool-org/xtool) on Linux, Win
 xtool devices                       # list connected iPhones and their UDIDs
 xtool dev run --udid <DEVICE_UDID>  # build, install, and launch on device
 ```
+
+using xtool requires a xcode sdk, downloadable [here](https://developer.apple.com/download/all/?q=xcode) as well com.apple.developer.carplay-audio removed from entitlements, learn more [here](https://xtool.sh/documentation/xtool/) (xtool docs)

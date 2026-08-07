@@ -14,10 +14,12 @@ enum SettingsRoute: Hashable {
     case equalizer
     case language
     case hiddenAlbums
+    case savedLibrarySorts
     case performanceMode
     case developerTools
     case developerExperiments
     case playbackCacheDiagnostics
+    case reliabilityReports
     case performanceOverlay
     case notifications
     case scrobbling
@@ -76,6 +78,8 @@ private struct SettingsDestinations: ViewModifier {
                 LanguageSettingsView()
             case .hiddenAlbums:
                 HiddenAlbumsSettingsView(client: appState.client)
+            case .savedLibrarySorts:
+                SavedLibrarySortsSettingsView()
             case .performanceMode:
                 PerformanceModeView()
             case .developerTools:
@@ -84,6 +88,8 @@ private struct SettingsDestinations: ViewModifier {
                 DeveloperExperimentsView()
             case .playbackCacheDiagnostics:
                 PlaybackCacheDiagnosticsView()
+            case .reliabilityReports:
+                ReliabilityReportsView()
             case .performanceOverlay:
                 PerformanceOverlaySettingsView()
             case .notifications:

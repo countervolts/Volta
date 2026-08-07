@@ -24,7 +24,13 @@ struct AlbumContextMenu: ViewModifier {
             }
             Section {
                 Button { download() } label: { Label(L(.action_download), systemImage: Symbols.download) }
-                Button { favorite() } label: { Label(L(.action_favorite), systemImage: Symbols.starEmpty) }
+                RatingMenuItem(
+                    itemID: album.id,
+                    kind: .album,
+                    favoriteLabel: L(.action_favorite),
+                    favoriteSymbol: Symbols.starEmpty,
+                    favoriteAction: favorite
+                )
                 Button { showInformation = true } label: { Label(L(.action_info), systemImage: Symbols.info) }
                 Button { showStats = true } label: { Label(L(.action_view_stats), systemImage: Symbols.stats) }
             }

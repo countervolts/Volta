@@ -27,9 +27,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.3.1</string>
+	<string>1.3.2</string>
 	<key>CFBundleVersion</key>
-	<string>11</string>
+	<string>12</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>INIntentsSupported</key>
@@ -79,6 +79,8 @@
 	<string>Volta scans nearby AirPods broadcasts to identify the active output model.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Volta scans your local network to find compatible music servers.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_navidrome._tcp</string>

@@ -68,10 +68,13 @@ final class LibraryViewModel: ObservableObject {
     var rootFolderSource: FolderSource { .indexes(musicFolderID: selectedFolderID) }
 
     @Published var sortOrder: LibrarySortOrder = .name
+    @Published private(set) var activeCustomSort: SavedLibrarySort?
     @Published var genreFilter: String? = nil
     @Published var neverPlayedOnly = false
 
-    var hasActiveFilters: Bool { genreFilter != nil || neverPlayedOnly || sortOrder != .name }
+    var hasActiveFilters: Bool {
+        genreFilter != nil || neverPlayedOnly || sortOrder != .name || activeCustomSort != nil
+    }
 
     init() {
         sortOrder = Self.sortOrder(from: UserDefaults.standard.string(forKey: "albumSortOrder"))
@@ -97,12 +100,47 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func setSort(_ o: LibrarySortOrder) {
-        guard sortOrder != o else { return }
+        guard sortOrder != o || activeCustomSort != nil else { return }
         sortOrder = o
+        activeCustomSort = nil
         if let value = Self.settingValue(for: o) {
             UserDefaults.standard.set(value, forKey: "albumSortOrder")
         }
         AppLogger.shared.log("Library sort changed: \(o.rawValue)", category: .library)
+    }
+
+    var customSortTarget: SavedLibrarySortTarget? {
+        Self.sortTarget(for: filter)
+    }
+
+    static func sortTarget(for filter: LibraryFilter) -> SavedLibrarySortTarget? {
+        switch filter {
+        case .albums: return .albums
+        case .songs: return .songs
+        case .artists, .genres, .folders: return nil
+        }
+    }
+
+    func applyCustomSort(_ sort: SavedLibrarySort) {
+        guard customSortTarget == sort.target else { return }
+        activeCustomSort = sort
+        AppLogger.shared.log("Library custom sort applied: \(sort.name)", category: .library)
+    }
+
+    func reconcileActiveCustomSort(with sorts: [SavedLibrarySort]) {
+        guard let activeCustomSort else { return }
+        guard let updated = sorts.first(where: { $0.id == activeCustomSort.id }) else {
+            self.activeCustomSort = nil
+            return
+        }
+        self.activeCustomSort = updated
+    }
+
+    func customSortPreviewCount(for sort: SavedLibrarySort) -> Int {
+        switch sort.target {
+        case .albums: return filteredAlbumCandidates(customSortOverride: sort).count
+        case .songs: return filteredSongCandidates(customSortOverride: sort).count
+        }
     }
 
     func setGenreFilter(_ g: String?) {
@@ -111,6 +149,7 @@ final class LibraryViewModel: ObservableObject {
     }
     func clearFilters() {
         sortOrder = .name
+        activeCustomSort = nil
         genreFilter = nil
         neverPlayedOnly = false
         AppLogger.shared.log("Library filters cleared", category: .library)
@@ -164,6 +203,10 @@ final class LibraryViewModel: ObservableObject {
         searchText.isEmpty ? sourceArtists : sourceArtists.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
     var filteredAlbums: [Album] {
+        sortedAlbums(filteredAlbumCandidates(customSortOverride: activeCustomSort))
+    }
+
+    private func filteredAlbumCandidates(customSortOverride: SavedLibrarySort?) -> [Album] {
         var list = sourceAlbums
         if !searchText.isEmpty {
             list = list.filter { $0.name.localizedCaseInsensitiveContains(searchText) || ($0.artist ?? "").localizedCaseInsensitiveContains(searchText) }
@@ -174,9 +217,17 @@ final class LibraryViewModel: ObservableObject {
         if neverPlayedOnly {
             list = list.filter { ($0.playCount ?? 0) == 0 }
         }
-        return sortedAlbums(list)
+        if let customSortOverride, customSortOverride.target == .albums {
+            list = list.filter { customSortOverride.matchesAlbum($0) }
+        }
+        return list
     }
+
     var filteredSongs: [Song] {
+        sortedSongs(filteredSongCandidates(customSortOverride: activeCustomSort))
+    }
+
+    private func filteredSongCandidates(customSortOverride: SavedLibrarySort?) -> [Song] {
         var list = sourceSongs
         if !searchText.isEmpty {
             list = list.filter { $0.title.localizedCaseInsensitiveContains(searchText) || ($0.artist ?? "").localizedCaseInsensitiveContains(searchText) }
@@ -187,10 +238,17 @@ final class LibraryViewModel: ObservableObject {
         if neverPlayedOnly {
             list = list.filter { ($0.playCount ?? 0) == 0 }
         }
-        return sortedSongs(list)
+        if let customSortOverride, customSortOverride.target == .songs {
+            list = list.filter { customSortOverride.matchesSong($0) }
+        }
+        return list
     }
 
     private func sortedAlbums(_ list: [Album]) -> [Album] {
+        if let activeCustomSort, activeCustomSort.target == .albums {
+            return activeCustomSort.sortedAlbums(list)
+        }
+
         switch sortOrder {
         case .name:          return list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         case .album:         return list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -201,6 +259,10 @@ final class LibraryViewModel: ObservableObject {
     }
 
     private func sortedSongs(_ list: [Song]) -> [Song] {
+        if let activeCustomSort, activeCustomSort.target == .songs {
+            return activeCustomSort.sortedSongs(list)
+        }
+
         switch sortOrder {
         case .name:                 return list.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         case .album:
@@ -238,6 +300,9 @@ final class LibraryViewModel: ObservableObject {
     func setFilter(_ f: LibraryFilter) {
         guard filter != f || !searchText.isEmpty else { return }
         filter = f
+        if activeCustomSort?.target != customSortTarget {
+            activeCustomSort = nil
+        }
         searchText = ""
         AppLogger.shared.log("Library filter changed: \(f.rawValue)", category: .library)
     }

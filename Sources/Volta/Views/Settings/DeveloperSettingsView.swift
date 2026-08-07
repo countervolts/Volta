@@ -24,7 +24,7 @@ extension SettingsView {
         // Stays fully hidden (even from search) until unlocked via 7 taps on
         // the Version/Build row in About.
         if developerUnlocked,
-           sectionVisible(s, [["developer tools", "simulation", "simulate", "slow server", "expired session", "no network", "profiling", "ram", "automix", "autoplay"], ["experiments", "raw animated artwork", "disable ram optimizations", "app worker limit", "workers", "threads", "concurrency"], ["enhanced caching", "playback cache", "cache performance", "prefetch", "force cache mode", "seamless", "buffer"], ["performance overlay", "overlay", "fps", "ram", "frame pacing", "metrics"], ["notifications", "toast", "warning", "preview"], ["verbose logging", "logging"], ["log device specs", "device", "specs", "ios", "liquid glass", "diagnostics"], ["dump app files", "export app data", "zip", "all files"], ["export all logs"], ["clear all logs"], ["force refresh home"], ["logged play events"], ["queue length"], ["developer"]]) {
+           sectionVisible(s, [["developer tools", "simulation", "simulate", "slow server", "expired session", "no network", "profiling", "ram", "automix", "autoplay"], ["experiments", "raw animated artwork", "disable ram optimizations", "app worker limit", "workers", "threads", "concurrency"], ["enhanced caching", "playback cache", "cache performance", "prefetch", "force cache mode", "seamless", "buffer"], ["hangs", "crashes", "crash reports", "hang reports", "reliability", "send report", ".ips"], ["performance overlay", "overlay", "fps", "ram", "frame pacing", "metrics"], ["notifications", "toast", "warning", "preview"], ["verbose logging", "logging"], ["log device specs", "device", "specs", "ios", "liquid glass", "diagnostics"], ["dump app files", "export app data", "zip", "all files"], ["export all logs"], ["clear all logs"], ["force refresh home"], ["logged play events"], ["queue length"], ["developer"]]) {
         Section {
             NavigationLink(value: SettingsRoute.developerTools) {
                 Label("Developer Tools", systemImage: "hammer")
@@ -38,6 +38,11 @@ extension SettingsView {
 
             NavigationLink(value: SettingsRoute.playbackCacheDiagnostics) {
                 Label("Playback Cache", systemImage: "bolt.horizontal.circle")
+            }
+            .foregroundStyle(Theme.primaryText)
+
+            NavigationLink(value: SettingsRoute.reliabilityReports) {
+                Label("Hangs & Crashes", systemImage: "exclamationmark.triangle")
             }
             .foregroundStyle(Theme.primaryText)
 
@@ -295,6 +300,49 @@ struct DeveloperExperimentsView: View {
                     .tint(Theme.accent)
                 } footer: {
                     Text("Instant Scrobbling records local stats and sends third-party scrobbles 1 second into each song for debugging. Fake Listening Stats replaces the Listening tab in Stats with generated screenshot data; your real play history is kept separately.")
+                }
+                .listRowBackground(Theme.secondaryBackground)
+
+                Section {
+                    Button(role: .destructive) {
+                        DeveloperCrashTest.fatalError()
+                    } label: {
+                        Label("Swift Fatal Error", systemImage: "xmark.octagon")
+                    }
+
+                    Button(role: .destructive) {
+                        DeveloperCrashTest.failedPrecondition()
+                    } label: {
+                        Label("Failed Precondition", systemImage: "exclamationmark.octagon")
+                    }
+
+                    Button(role: .destructive) {
+                        DeveloperCrashTest.forceUnwrapNil()
+                    } label: {
+                        Label("Force-Unwrap nil", systemImage: "questionmark.diamond")
+                    }
+
+                    Button(role: .destructive) {
+                        DeveloperCrashTest.arrayIndexOutOfRange()
+                    } label: {
+                        Label("Array Index Out of Range", systemImage: "list.number")
+                    }
+
+                    Button(role: .destructive) {
+                        DeveloperCrashTest.abortSignal()
+                    } label: {
+                        Label("Abort Process (SIGABRT)", systemImage: "xmark.octagon")
+                    }
+
+                    Button(role: .destructive) {
+                        DeveloperCrashTest.segmentationFault()
+                    } label: {
+                        Label("Segmentation Fault (SIGSEGV)", systemImage: "memorychip")
+                    }
+                } header: {
+                    Text("Native Crash Tests")
+                } footer: {
+                    Text("Each button terminates Volta immediately. The trigger does not save a report itself; reopen Volta afterward so the normal recovery path can create its deferred .ips file. iOS may later add a fuller MetricKit diagnostic with a call stack.")
                 }
                 .listRowBackground(Theme.secondaryBackground)
             }

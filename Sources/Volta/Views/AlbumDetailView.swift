@@ -385,9 +385,30 @@ struct AlbumDetailView: View {
             .buttonStyle(.plain)
 
             DownloadAlbumButton(songs: vm.songs)
+
+            Menu {
+                RatingMenuItem(
+                    itemID: vm.album.id,
+                    kind: .album,
+                    favoriteLabel: L(.action_favorite),
+                    favoriteSymbol: Symbols.starEmpty,
+                    favoriteAction: favoriteAlbum
+                )
+            } label: {
+                Image(systemName: Symbols.more)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 50, height: 50)
+                    .glassCircle()
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
+    }
+
+    private func favoriteAlbum() {
+        Task { try? await appState.client?.star(id: vm.album.id) }
     }
 
     // MARK: - Description

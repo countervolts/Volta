@@ -153,6 +153,9 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case track_titles_sliding
     case track_titles_new_line
     case appearance_dynamic_background
+    case appearance_dynamic_background_style
+    case player_background_style_color
+    case player_background_style_gradient
     case appearance_accent_color
     case appearance_hidden_albums
     case hidden_albums_none
@@ -320,6 +323,114 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case sort_most_played
     case playlists_none_yet
 
+    // Library views / smart filters
+    case library_views_title
+    case library_views_saved
+    case library_views_manage
+    case library_view_create
+    case library_view_filter_settings
+    case library_view_edit_filter_settings
+    case library_view_saved_view
+    case library_view_saved_footer        // "%@" = target
+    case library_view_matching_now        // "%d" count, "%@" target
+    case library_view_quick_filters
+    case library_view_only_favorites
+    case library_view_hide_small_albums
+    case library_view_smart_filter
+    case library_view_smart_filter_footer
+    case library_view_no_rules
+    case library_view_add_rule
+    case library_view_add_rule_group
+    case library_view_delete_rule_group
+    case library_view_clear_filter
+    case library_view_rule_group
+    case library_view_view
+    case library_view_group_by
+    case library_view_add_sort_rule
+    case library_view_load_saved
+    case library_view_no_saved
+    case library_view_choose_criteria
+    case library_view_criteria
+    case library_view_condition
+    case library_view_sort_by
+    case library_view_order
+    case library_view_earlier
+    case library_view_later
+    case library_view_move_earlier
+    case library_view_move_later
+    case library_view_value
+    case library_view_minimum
+    case library_view_maximum
+    case library_view_settings_footer
+    case library_view_target_footer
+    case library_view_album_filters_grouping
+    case library_view_song_filters_grouping
+    case library_view_no_saved_album_views
+    case library_view_no_saved_song_views
+    case library_view_albums
+    case library_view_songs
+    case library_view_album
+    case library_view_song
+    case library_view_custom_album
+    case library_view_custom_song
+    case library_view_all_filters
+    case library_view_any_filter
+    case library_view_ascending
+    case library_view_descending
+    case library_view_album_name
+    case library_view_song_title
+    case library_view_album_artist
+    case library_view_tag_genre
+    case library_view_duration_minutes
+    case library_view_song_count
+    case library_view_disc_number
+    case library_view_track_number
+    case library_view_bitrate_kbps
+    case library_view_file_size_mb
+    case library_view_downloaded
+    case library_view_lossless
+    case library_view_hires
+    case library_view_explicit
+    case library_view_starred
+    case library_view_decade
+    case library_view_none
+    case library_view_stats
+    case library_view_status
+    case library_view_audio
+    case library_filter_contains
+    case library_filter_is
+    case library_filter_does_not_contain
+    case library_filter_at_least
+    case library_filter_at_most
+    case library_filter_between
+    case library_filter_is_set
+    case library_filter_is_missing
+    case library_view_summary_favorites
+    case library_view_summary_no_small_albums
+    case library_view_summary_filter_count_one
+    case library_view_summary_filter_count_many // "%d" = count
+    case library_view_summary_group_count_one
+    case library_view_summary_group_count_many  // "%d" = count
+    case library_view_summary_grouped_by        // "%@" = group label
+    case library_view_unknown_artist
+    case library_view_unknown_album
+    case library_view_unknown_album_artist
+    case library_view_no_tag
+    case library_view_unknown_year
+    case library_view_unknown_decade
+    case library_view_unknown_duration
+    case library_view_unknown_plays
+    case library_view_duration_under_3
+    case library_view_duration_3_5
+    case library_view_duration_5_10
+    case library_view_duration_10_30
+    case library_view_duration_30_60
+    case library_view_duration_over_60
+    case library_view_plays_never
+    case library_view_plays_1_4
+    case library_view_plays_5_19
+    case library_view_plays_20_plus
+
     // Playlists screen
     case playlists_search_prompt
     case playlists_count                  // "%d" = count
@@ -447,6 +558,10 @@ enum Strings {
             .polish: pl, .turkish: tr, .swedish: sv, .norwegian: nb,
             .danish: da, .finnish: fi, .chinese: zh, .japanese: ja, .korean: ko,
         ]
+    }
+
+    private static func en(_ value: String) -> [AppLanguage: String] {
+        [.english: value]
     }
 
     static let table: [LocKey: [AppLanguage: String]] = [
@@ -1412,6 +1527,9 @@ enum Strings {
             .danish: "Dynamisk afspillerbaggrund", .finnish: "Dynaaminen soittimen tausta", .chinese: "动态播放器背景",
             .japanese: "ダイナミックなプレーヤー背景", .korean: "동적 플레이어 배경",
         ],
+        .appearance_dynamic_background_style: en("Background Style"),
+        .player_background_style_color: en("Color"),
+        .player_background_style_gradient: en("Gradient"),
         .appearance_accent_color: [
             .english: "Accent Color", .spanish: "Color de acento", .french: "Couleur d'accent", .german: "Akzentfarbe",
             .portuguese: "Cor de destaque", .italian: "Colore d'accento", .dutch: "Accentkleur", .russian: "Акцентный цвет",
@@ -2431,6 +2549,115 @@ enum Strings {
             nl: "Nog geen afspeellijsten", ru: "Пока нет плейлистов", pl: "Brak playlist", tr: "Henüz çalma listesi yok", sv: "Inga spellistor än", nb: "Ingen spillelister ennå",
             da: "Ingen playlister endnu", fi: "Ei vielä soittolistoja", zh: "还没有播放列表", ja: "プレイリストはまだありません", ko: "아직 재생목록이 없습니다"
         ),
+
+        // MARK: Library views / smart filters
+        .library_views_title: en("Saved Library Views"),
+        .library_views_saved: en("Saved Views"),
+        .library_views_manage: en("Manage Library Views"),
+        .library_view_create: en("Create Library View"),
+        .library_view_filter_settings: en("Filter Settings"),
+        .library_view_edit_filter_settings: en("Edit Filter Settings"),
+        .library_view_saved_view: en("Saved View"),
+        .library_view_saved_footer: en("Saved views appear in the Library filter menu for %@."),
+        .library_view_matching_now: en("%d matching %@"),
+        .library_view_quick_filters: en("Quick Filters"),
+        .library_view_only_favorites: en("Only Favorites"),
+        .library_view_hide_small_albums: en("Hide Albums With Few Songs"),
+        .library_view_smart_filter: en("Smart Filter"),
+        .library_view_smart_filter_footer: en("Rules can target metadata such as artist, tag, duration, play count, audio quality, and favorite status."),
+        .library_view_no_rules: en("No rules"),
+        .library_view_add_rule: en("Add Rule"),
+        .library_view_add_rule_group: en("Add Rule Group"),
+        .library_view_delete_rule_group: en("Delete Rule Group"),
+        .library_view_clear_filter: en("Clear Filter"),
+        .library_view_rule_group: en("Rule Group"),
+        .library_view_view: en("View"),
+        .library_view_group_by: en("Group By"),
+        .library_view_add_sort_rule: en("Add Sort Rule"),
+        .library_view_load_saved: en("Load Saved View"),
+        .library_view_no_saved: en("No Saved Views"),
+        .library_view_choose_criteria: en("Choose Criteria"),
+        .library_view_criteria: en("Criteria"),
+        .library_view_condition: en("Condition"),
+        .library_view_sort_by: en("Sort By"),
+        .library_view_order: en("Order"),
+        .library_view_earlier: en("Earlier"),
+        .library_view_later: en("Later"),
+        .library_view_move_earlier: en("Move earlier"),
+        .library_view_move_later: en("Move later"),
+        .library_view_value: en("Value"),
+        .library_view_minimum: en("Minimum"),
+        .library_view_maximum: en("Maximum"),
+        .library_view_settings_footer: en("Create reusable album and song filters with grouping and sort rules. Saved views also appear in the Library filter menu."),
+        .library_view_target_footer: en("Pick Albums or Songs, then create saved filters, grouping, and sort rules for that Library tab."),
+        .library_view_album_filters_grouping: en("Album filters and grouping"),
+        .library_view_song_filters_grouping: en("Song filters and grouping"),
+        .library_view_no_saved_album_views: en("No saved album views"),
+        .library_view_no_saved_song_views: en("No saved song views"),
+        .library_view_albums: en("Albums"),
+        .library_view_songs: en("Songs"),
+        .library_view_album: en("Album"),
+        .library_view_song: en("Song"),
+        .library_view_custom_album: en("Custom Album View"),
+        .library_view_custom_song: en("Custom Song View"),
+        .library_view_all_filters: en("All Filters"),
+        .library_view_any_filter: en("Any Filter"),
+        .library_view_ascending: en("Ascending"),
+        .library_view_descending: en("Descending"),
+        .library_view_album_name: en("Album Name"),
+        .library_view_song_title: en("Song Title"),
+        .library_view_album_artist: en("Album Artist"),
+        .library_view_tag_genre: en("Tag / Genre"),
+        .library_view_duration_minutes: en("Duration (minutes)"),
+        .library_view_song_count: en("Song Count"),
+        .library_view_disc_number: en("Disc Number"),
+        .library_view_track_number: en("Track Number"),
+        .library_view_bitrate_kbps: en("Bitrate (kbps)"),
+        .library_view_file_size_mb: en("File Size (MB)"),
+        .library_view_downloaded: en("Downloaded"),
+        .library_view_lossless: en("Lossless"),
+        .library_view_hires: en("Hi-Res"),
+        .library_view_explicit: en("Explicit"),
+        .library_view_starred: en("Starred"),
+        .library_view_decade: en("Decade"),
+        .library_view_none: en("None"),
+        .library_view_stats: en("Stats"),
+        .library_view_status: en("Status"),
+        .library_view_audio: en("Audio"),
+        .library_filter_contains: en("Contains"),
+        .library_filter_is: en("Is"),
+        .library_filter_does_not_contain: en("Does Not Contain"),
+        .library_filter_at_least: en("At Least"),
+        .library_filter_at_most: en("At Most"),
+        .library_filter_between: en("Between"),
+        .library_filter_is_set: en("Is Set"),
+        .library_filter_is_missing: en("Is Missing"),
+        .library_view_summary_favorites: en("Favorites"),
+        .library_view_summary_no_small_albums: en("No small albums"),
+        .library_view_summary_filter_count_one: en("1 filter"),
+        .library_view_summary_filter_count_many: en("%d filters"),
+        .library_view_summary_group_count_one: en("1 group"),
+        .library_view_summary_group_count_many: en("%d groups"),
+        .library_view_summary_grouped_by: en("Grouped by %@"),
+        .library_view_unknown_artist: en("Unknown Artist"),
+        .library_view_unknown_album: en("Unknown Album"),
+        .library_view_unknown_album_artist: en("Unknown Album Artist"),
+        .library_view_no_tag: en("No Tag"),
+        .library_view_unknown_year: en("Unknown Year"),
+        .library_view_unknown_decade: en("Unknown Decade"),
+        .library_view_unknown_duration: en("Unknown Duration"),
+        .library_view_unknown_plays: en("Unknown Plays"),
+        .library_view_duration_under_3: en("Under 3 min"),
+        .library_view_duration_3_5: en("3-5 min"),
+        .library_view_duration_5_10: en("5-10 min"),
+        .library_view_duration_10_30: en("10-30 min"),
+        .library_view_duration_30_60: en("30-60 min"),
+        .library_view_duration_over_60: en("Over 60 min"),
+        .library_view_plays_never: en("Never Played"),
+        .library_view_plays_1_4: en("1-4 Plays"),
+        .library_view_plays_5_19: en("5-19 Plays"),
+        .library_view_plays_20_plus: en("20+ Plays"),
+
         .toast_added_count_to: tr(
             en: "Added %d to %@", es: "Se añadieron %d a %@", fr: "%d ajoutés à %@", de: "%d zu %@ hinzugefügt", pt: "%d adicionados a %@", it: "%d aggiunti a %@",
             nl: "%d toegevoegd aan %@", ru: "Добавлено %d в %@", pl: "Dodano %d do %@", tr: "%d öğe %@ listesine eklendi", sv: "%d tillagda i %@", nb: "%d lagt til i %@",

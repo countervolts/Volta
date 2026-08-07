@@ -1,4 +1,9 @@
 version: 1
 bundleID: com.ayo.music
+product: Volta
 infoPath: Info.plist
 entitlementsPath: Volta.entitlements
+extensions:
+  - product: VoltaLiveLyricsWidget
+    bundleID: com.ayo.music.LiveLyricsWidget
+    infoPath: LiveLyricsWidget-Info.plist

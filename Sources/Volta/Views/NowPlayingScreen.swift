@@ -7,6 +7,22 @@ import UniformTypeIdentifiers
 
 enum PlayerTab { case nowPlaying, queue, lyrics }
 
+enum PlayerDynamicBackgroundStyle: String, CaseIterable, Identifiable {
+    case color
+    case gradient
+
+    static let storageKey = "dynamicBackgroundStyle"
+    static let defaultStyle = Self.color.rawValue
+
+    var id: String { rawValue }
+    var labelKey: LocKey {
+        switch self {
+        case .color: return .player_background_style_color
+        case .gradient: return .player_background_style_gradient
+        }
+    }
+}
+
 struct NowPlayingScreen: View {
     @EnvironmentObject private var appState: AppState
     @Binding var isPresented: Bool
@@ -46,6 +62,7 @@ struct NowPlayingScreen: View {
     @AppStorage(DeveloperExperiments.preciseTimestampsKey) private var preciseTimestamps = false
     @AppStorage("artworkAnimation") private var artworkAnimation = true
     @AppStorage("dynamicBackground") private var dynamicBackground = true
+    @AppStorage(PlayerDynamicBackgroundStyle.storageKey) private var dynamicBackgroundStyle = PlayerDynamicBackgroundStyle.defaultStyle
     // present a normal (static) cover with the same edge-to-edge, gradient-fade
     // look animated covers get
     @AppStorage("stylizedPlayerCover") private var stylizedPlayerCover = false
@@ -55,7 +72,7 @@ struct NowPlayingScreen: View {
     // skip/prev nudge animation
     @State private var skipNudge: CGFloat = 0
     @State private var prevNudge: CGFloat = 0
-    @State private var playerBackground = Color(white: 0.08)
+    @State private var playerBackgroundColors = Self.fallbackPlayerBackgroundColors
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
@@ -64,6 +81,20 @@ struct NowPlayingScreen: View {
     private let queueContentAnchor = "queue-content-anchor"
     private var currentTaste: TasteState {
         audio.currentSong.map { tasteStore.state(for: $0.id) } ?? .neutral
+    }
+
+    @ViewBuilder
+    private var currentSongRatingMenuItem: some View {
+        if let song = audio.currentSong {
+            RatingMenuItem(
+                itemID: song.id,
+                kind: .song,
+                favoriteLabel: currentTaste == .loved ? L(.action_unlove) : L(.action_love),
+                favoriteSymbol: currentTaste == .loved ? "heart.fill" : "heart"
+            ) {
+                tasteStore.toggleLove(song.id)
+            }
+        }
     }
     private var isPhoneLandscape: Bool {
         UIDevice.current.userInterfaceIdiom == .phone && verticalSizeClass == .compact
@@ -82,9 +113,31 @@ struct NowPlayingScreen: View {
             ? .linear(duration: 0.01)
             : .spring(response: 0.42, dampingFraction: 1, blendDuration: 0.08)
     }
+    private static let fallbackPlayerBackgroundColors = [
+        Color(white: 0.08)
+    ]
+    private var selectedPlayerBackgroundStyle: PlayerDynamicBackgroundStyle {
+        PlayerDynamicBackgroundStyle(rawValue: dynamicBackgroundStyle) ?? .color
+    }
+    private var normalizedPlayerBackgroundColors: [Color] {
+        guard let first = playerBackgroundColors.first else {
+            return Self.fallbackPlayerBackgroundColors
+        }
+        return playerBackgroundColors.count == 1 ? [first, first] : playerBackgroundColors
+    }
+    private var playerBackgroundGradient: LinearGradient {
+        LinearGradient(
+            colors: normalizedPlayerBackgroundColors,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+    private var playerBackgroundFadeColor: Color {
+        normalizedPlayerBackgroundColors.last ?? Color(white: 0.08)
+    }
     var body: some View {
         ZStack {
-            playerBackground.ignoresSafeArea()
+            playerBackgroundGradient.ignoresSafeArea()
 
             if isPhoneLandscape {
                 phoneLandscapeLayout
@@ -230,6 +283,9 @@ struct NowPlayingScreen: View {
         .onChangeCompat(of: dynamicBackground) { _, _ in
             refreshPlayerBackground(animated: true)
         }
+        .onChangeCompat(of: dynamicBackgroundStyle) { _, _ in
+            refreshPlayerBackground(animated: true)
+        }
         .onChangeCompat(of: activeTab) { _, tab in
             if tab != .queue {
                 showQueueHistory = false
@@ -265,6 +321,7 @@ struct NowPlayingScreen: View {
                         .allowsHitTesting(activeTab == .lyrics)
                     }
                     .frame(height: stageHeight, alignment: .top)
+                    .clipped()
 
                     VStack(spacing: 0) {
                         scrubber
@@ -276,7 +333,6 @@ struct NowPlayingScreen: View {
                         bottomControls
                     }
                     .frame(height: controlsHeight)
-                    .background(playerBackground)
                     .zIndex(5)
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
@@ -402,8 +458,8 @@ struct NowPlayingScreen: View {
                         LinearGradient(
                             stops: [
                                 .init(color: .clear, location: 0),
-                                .init(color: playerBackground.opacity(0.55), location: 0.72),
-                                .init(color: playerBackground, location: 1)
+                                .init(color: playerBackgroundFadeColor.opacity(0.55), location: 0.72),
+                                .init(color: playerBackgroundFadeColor, location: 1)
                             ],
                             startPoint: .top,
                             endPoint: .bottom
@@ -501,7 +557,10 @@ struct NowPlayingScreen: View {
         return ZStack(alignment: .topLeading) {
             VStack(spacing: 0) {
                 Color.clear.frame(height: 60)
-                LyricsViewWithState()
+                // The lyrics destination stays mounted so the hero transition
+                // remains instant, but its display-rate clock must not run while
+                // this stage is fully hidden behind Now Playing or Queue.
+                LyricsViewWithState(isPlaybackRenderingActive: activeTab == .lyrics)
                     .frame(maxHeight: .infinity)
                     .opacity(lyricsBodyOpacity)
                     .offset(y: lyricsBodyOffset)
@@ -528,8 +587,8 @@ struct NowPlayingScreen: View {
                 LinearGradient(
                     stops: [
                         .init(color: .clear, location: 0),
-                        .init(color: playerBackground.opacity(0.55), location: 0.72),
-                        .init(color: playerBackground, location: 1)
+                        .init(color: playerBackgroundFadeColor.opacity(0.55), location: 0.72),
+                        .init(color: playerBackgroundFadeColor, location: 1)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
@@ -737,12 +796,7 @@ struct NowPlayingScreen: View {
 
     private var landscapeMoreMenu: some View {
         Menu {
-            Button {
-                if let s = audio.currentSong { tasteStore.toggleLove(s.id) }
-            } label: {
-                Label(currentTaste == .loved ? L(.action_unlove) : L(.action_love),
-                      systemImage: currentTaste == .loved ? "heart.fill" : "heart")
-            }
+            currentSongRatingMenuItem
             Button {
                 if let s = audio.currentSong { tasteStore.toggleDislike(s.id) }
             } label: {
@@ -1681,12 +1735,7 @@ struct NowPlayingScreen: View {
                                value: audio.currentSong.map { audio.isStarred($0.id) })
 
                     Menu {
-                        Button {
-                            if let s = audio.currentSong { tasteStore.toggleLove(s.id) }
-                        } label: {
-                            Label(currentTaste == .loved ? L(.action_unlove) : L(.action_love),
-                                  systemImage: currentTaste == .loved ? "heart.fill" : "heart")
-                        }
+                        currentSongRatingMenuItem
                         Button {
                             if let s = audio.currentSong { tasteStore.toggleDislike(s.id) }
                         } label: {
@@ -1843,12 +1892,7 @@ struct NowPlayingScreen: View {
                            value: audio.currentSong.map { audio.isStarred($0.id) })
 
                 Menu {
-                    Button {
-                        if let s = audio.currentSong { tasteStore.toggleLove(s.id) }
-                    } label: {
-                        Label(currentTaste == .loved ? L(.action_unlove) : L(.action_love),
-                              systemImage: currentTaste == .loved ? "heart.fill" : "heart")
-                    }
+                    currentSongRatingMenuItem
                     Button {
                         if let s = audio.currentSong { tasteStore.toggleDislike(s.id) }
                     } label: {
@@ -2099,20 +2143,26 @@ struct NowPlayingScreen: View {
 
     private func refreshPlayerBackground(animated: Bool) {
         guard dynamicBackground, !PerformanceMode.disableDynamicBackground else {
-            let fallback = Color(white: 0.08)
+            let fallback = Self.fallbackPlayerBackgroundColors
             if animated {
-                withAnimation(.easeInOut(duration: 0.2)) { playerBackground = fallback }
+                withAnimation(.easeInOut(duration: 0.2)) { playerBackgroundColors = fallback }
             } else {
-                playerBackground = fallback
+                playerBackgroundColors = fallback
             }
             return
         }
         guard let image = audio.currentArtwork else { return }
-        let next = ColorExtractor.backgroundSwiftUI(from: image)
+        let next: [Color]
+        switch selectedPlayerBackgroundStyle {
+        case .color:
+            next = [ColorExtractor.backgroundSwiftUI(from: image)]
+        case .gradient:
+            next = ColorExtractor.backgroundPaletteSwiftUI(from: image, maxColors: 3)
+        }
         if animated {
-            withAnimation(.easeInOut(duration: 0.55)) { playerBackground = next }
+            withAnimation(.easeInOut(duration: 0.55)) { playerBackgroundColors = next }
         } else {
-            playerBackground = next
+            playerBackgroundColors = next
         }
     }
 
@@ -2223,7 +2273,7 @@ private struct LandscapeLyricsPreview: View {
         .task(id: audio.currentSong?.id) {
             await loadLyrics()
         }
-        .onChangeCompat(of: audio.currentTime) { _, time in
+        .onReceive(audio.$currentTime) { time in
             updateActiveLine(for: time)
         }
     }

@@ -64,7 +64,7 @@ extension SettingsView {
     @ViewBuilder
     var appearanceSection: some View {
         let s = "Appearance"
-        if sectionVisible(s, [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]) {
+        if sectionVisible(s, [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]) {
             Section {
                 if rowVisible(s, ["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"]) {
                     NavigationLink(value: SettingsRoute.language) {
@@ -151,11 +151,22 @@ extension SettingsView {
                     .tint(Theme.accent)
                 }
 
-                if rowVisible(s, ["dynamic player background", "dynamic", "background"]) {
+                if rowVisible(s, ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"]) {
                     Toggle(isOn: $dynamicBackground) {
                         Label(L(.appearance_dynamic_background), systemImage: "paintpalette")
                     }
                     .tint(Theme.accent)
+
+                    if dynamicBackground {
+                        Picker(selection: $dynamicBackgroundStyle) {
+                            ForEach(PlayerDynamicBackgroundStyle.allCases) { style in
+                                Text(L(style.labelKey)).tag(style.rawValue)
+                            }
+                        } label: {
+                            Label(L(.appearance_dynamic_background_style), systemImage: "swatchpalette")
+                        }
+                        .tint(Theme.accent)
+                    }
                 }
 
                 if rowVisible(s, ["accent color", "accent", "color", "colour", "theme"]) {

@@ -5,6 +5,9 @@ import Translation
 
 struct LyricsViewWithState: View {
     @EnvironmentObject private var appState: AppState
+    // The portrait player keeps this view mounted for its hero transition. Keep
+    // its data warm, while allowing its display-rate renderer to sleep offstage.
+    var isPlaybackRenderingActive = true
     @State private var lines: [LyricLine] = []
     @State private var isLoading = false
     @State private var activeLine: Int = 0
@@ -41,7 +44,14 @@ struct LyricsViewWithState: View {
         .overlay(alignment: .topTrailing) { translationButton }
         .background(translationTaskView)
         .task(id: audio.currentSong?.id) { await loadLyrics() }
-        .onChangeCompat(of: audio.currentTime) { _, t in updateActiveLine(for: t) }
+        .onReceive(audio.$currentTime) { time in
+            guard isPlaybackRenderingActive else { return }
+            updateActiveLine(for: time)
+        }
+        .onChangeCompat(of: isPlaybackRenderingActive) { _, isActive in
+            guard isActive else { return }
+            updateActiveLine(for: audio.playbackTimeSnapshot().elapsed)
+        }
     }
 
     private var lyricsContentKey: String {
@@ -57,7 +67,7 @@ struct LyricsViewWithState: View {
         TimelineView(
             .animation(
                 minimumInterval: FrameRateGovernor.minimumInterval,
-                paused: !audio.isPlaying
+                paused: !isPlaybackRenderingActive || !audio.isPlaying
             )
         ) { _ in
             let displayTime = audio.playbackTimeSnapshot().elapsed
@@ -70,7 +80,7 @@ struct LyricsViewWithState: View {
         GeometryReader { geo in
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(0..<lines.count, id: \.self) { idx in
                             let line = lines[idx]
                             let isActive = isLineActive(line, displayActiveLine: displayActiveLine)

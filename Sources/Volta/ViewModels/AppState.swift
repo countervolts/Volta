@@ -34,7 +34,39 @@ final class AppState: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
 
     private init() {
-        audioPlayer.objectWillChange
+        // `currentTime` advances throughout playback. Relaying AudioPlayer's
+        // unfiltered objectWillChange here invalidates every AppState consumer
+        // (including hidden tabs and player stages) for each clock update.
+        // Keep global presentation in sync with real player state changes, and
+        // let time-sensitive surfaces subscribe to the playback clock directly.
+        let audioStateChanges: [AnyPublisher<Void, Never>] = [
+            audioPlayer.$currentSong.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$hasActivePlaybackSession.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$isPlaying.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$duration.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$currentArtwork.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$currentAnimatedArtwork.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$currentLiveArtwork.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$currentPlaybackUsesTranscode.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$queue.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$currentIndex.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$queueSourceTitle.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$queueSourceAlbum.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$queueSourcePlaylist.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$playbackHistory.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$isShuffle.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$repeatMode.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$autoplayMode.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$transitionMode.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$starredIDs.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$isMixing.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$autoplayArtistName.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$autoplayArtistId.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$sleepTimerActive.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$sleepEndsAtTrackEnd.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+            audioPlayer.$sleepRemaining.dropFirst().map { _ in () }.eraseToAnyPublisher(),
+        ]
+        Publishers.MergeMany(audioStateChanges)
             .sink { [weak self] _ in
                 Task { @MainActor in self?.objectWillChange.send() }
             }
@@ -45,6 +77,8 @@ final class AppState: ObservableObject {
                 Task { @MainActor in self?.objectWillChange.send() }
             }
             .store(in: &cancellables)
+
+        LiveLyricsActivityManager.shared.connect(appState: self)
     }
 
     func restoreSession() {

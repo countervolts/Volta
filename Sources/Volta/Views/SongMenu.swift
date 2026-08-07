@@ -44,11 +44,13 @@ struct SongMenu<Trigger: View>: View {
                     Label(isStarred ? L(.action_unfavorite) : L(.action_favorite),
                           systemImage: isStarred ? Symbols.star : Symbols.starEmpty)
                 }
-                Button {
+                RatingMenuItem(
+                    itemID: song.id,
+                    kind: .song,
+                    favoriteLabel: taste == .loved ? L(.action_unlove) : L(.action_love),
+                    favoriteSymbol: taste == .loved ? "heart.fill" : "heart"
+                ) {
                     tasteStore.toggleLove(song.id)
-                } label: {
-                    Label(taste == .loved ? L(.action_unlove) : L(.action_love),
-                          systemImage: taste == .loved ? "heart.fill" : "heart")
                 }
                 Button {
                     tasteStore.toggleDislike(song.id)

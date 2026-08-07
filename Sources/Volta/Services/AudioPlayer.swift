@@ -15,7 +15,7 @@ struct PlaybackTimeSnapshot: Sendable {
     var remaining: TimeInterval { max(0, duration - elapsed) }
 }
 
-private struct SavedPlaybackSession: Codable {
+private struct SavedPlaybackSession: Codable, Sendable {
     let version: Int
     let serverID: String
     let savedAt: Date
@@ -33,6 +33,12 @@ private struct SavedPlaybackSession: Codable {
 private enum SavedPlaybackSessionStore {
     static let key = "lastPlaybackSession"
     static let version = 1
+    // Encoding a queue can be relatively expensive. Keep routine autosaves off
+    // the main actor so they cannot interrupt rendering during playback.
+    static let persistenceQueue = DispatchQueue(
+        label: "com.ayo.music.playback-session",
+        qos: .utility
+    )
 }
 
 private enum PlaybackHistoryStore {
@@ -920,17 +926,30 @@ final class AudioPlayer: ObservableObject {
             queueSourcePlaylist: nil
         )
 
-        do {
-            let data = try JSONEncoder().encode(session)
-            UserDefaults.standard.set(data, forKey: SavedPlaybackSessionStore.key)
-            lastSessionAutosaveAt = Date()
-            if synchronize { UserDefaults.standard.synchronize() }
-        } catch {
-            AppLogger.shared.log(
-                "Saved playback session failed: \(error.localizedDescription)",
-                category: .playback,
-                level: .warning
-            )
+        let save = { @Sendable in
+            do {
+                let data = try JSONEncoder().encode(session)
+                UserDefaults.standard.set(data, forKey: SavedPlaybackSessionStore.key)
+                if synchronize { UserDefaults.standard.synchronize() }
+            } catch {
+                let message = error.localizedDescription
+                Task { @MainActor in
+                    AppLogger.shared.log(
+                        "Saved playback session failed: \(message)",
+                        category: .playback,
+                        level: .warning
+                    )
+                }
+            }
+        }
+
+        lastSessionAutosaveAt = Date()
+        if synchronize {
+            // App lifecycle persistence needs to finish before the caller
+            // returns; it is not part of the regular playback-time path.
+            save()
+        } else {
+            SavedPlaybackSessionStore.persistenceQueue.async(execute: save)
         }
     }
 
