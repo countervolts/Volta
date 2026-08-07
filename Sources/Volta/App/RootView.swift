@@ -39,6 +39,8 @@ struct RootView: View {
         .animation(.spring(response: 0.55, dampingFraction: 0.9), value: appState.phase)
         .animation(.easeInOut(duration: 0.2), value: accentRefreshKey)
         .task {
+            CrashHangReporter.shared.start()
+            updateReliabilityMonitoring(for: scenePhase)
             if !didLogDiagnostics {
                 didLogDiagnostics = true
                 AppDiagnostics.logLaunch()
@@ -46,8 +48,23 @@ struct RootView: View {
             appState.restoreSession()
         }
         .onChangeCompat(of: scenePhase) { _, phase in
-            guard phase == .background else { return }
-            appState.persistPlaybackSession()
+            updateReliabilityMonitoring(for: phase)
+            if phase == .background {
+                appState.persistPlaybackSession()
+            }
+        }
+    }
+
+    private func updateReliabilityMonitoring(for phase: ScenePhase) {
+        switch phase {
+        case .active:
+            CrashHangReporter.shared.beginForegroundMonitoring()
+        case .inactive:
+            CrashHangReporter.shared.pauseForegroundMonitoring()
+        case .background:
+            CrashHangReporter.shared.endForegroundMonitoring()
+        @unknown default:
+            CrashHangReporter.shared.pauseForegroundMonitoring()
         }
     }
 }

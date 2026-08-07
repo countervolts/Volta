@@ -65,6 +65,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
     case audio
     case streaming
     case appearance
+    case library
     case server
     case storage
     case backups
@@ -81,6 +82,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .audio: return "Audio"
         case .streaming: return "Streaming & Downloads"
         case .appearance: return "Appearance"
+        case .library: return "Library"
         case .server: return "Server"
         case .storage: return "Storage"
         case .backups: return "Backups"
@@ -97,6 +99,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .audio: return "speaker.wave.2.fill"
         case .streaming: return "arrow.down.circle"
         case .appearance: return "paintbrush"
+        case .library: return "square.stack.3d.up"
         case .server: return "server.rack"
         case .storage: return "internaldrive"
         case .backups: return "clock.arrow.circlepath"
@@ -118,11 +121,12 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
 
     var summary: String {
         switch self {
-        case .playback: return "Autoplay, transitions, pairings"
+        case .playback: return "Autoplay, transitions, lyrics, pairings"
         case .scrobbling: return "Last.fm and ListenBrainz"
         case .audio: return "Equalizer, normalization, spatial"
         case .streaming: return "Quality, downloads, limits"
         case .appearance: return "Theme, language, artwork"
+        case .library: return "Saved filters and views"
         case .server: return "Connection, health, logout"
         case .storage: return "Caches, lyrics, local files"
         case .backups: return "Settings and playlists"
@@ -135,7 +139,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
     var searchRows: [[String]] {
         switch self {
         case .playback:
-            return [["autoplay", "play"], ["autoplay", "infinite play", "infinite", "autoplay style", "fill", "similar", "random", "genre"], ["crossfade", "fade", "automix", "transition", "duration", "style", "blend", "silence", "bpm", "tempo"], ["track pairings", "linked tracks", "linked songs", "song pair", "play after", "bleed together"], ["gapless playback"], ["enhanced caching", "playback cache", "prefetch", "seamless", "buffer"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"], ["resume playback after interruption", "resume", "interruption", "interrupt", "phone call", "siri", "other app", "force stop"]]
+            return [["autoplay", "play"], ["autoplay", "infinite play", "infinite", "autoplay style", "fill", "similar", "random", "genre"], ["crossfade", "fade", "automix", "transition", "duration", "style", "blend", "silence", "bpm", "tempo"], ["live lyrics", "lyrics", "live activity", "lock screen", "carplay"], ["track pairings", "linked tracks", "linked songs", "song pair", "play after", "bleed together"], ["gapless playback"], ["enhanced caching", "playback cache", "prefetch", "seamless", "buffer"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"], ["resume playback after interruption", "resume", "interruption", "interrupt", "phone call", "siri", "other app", "force stop"]]
         case .scrobbling:
             return [["last.fm", "listenbrainz", "scrobbling", "now playing"]]
         case .audio:
@@ -143,7 +147,9 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .streaming:
             return [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["download quality", "download", "bitrate"], ["transcode", "transcoding", "codec", "file type", "rules", "format", "mp3", "aac", "opus", "flac", "alac"], ["download mode", "multithreaded", "threads", "single", "parallel"], ["download speed limit", "speed", "limit", "throttle"], ["storage cap", "cap", "max size", "storage"], ["auto-evict", "auto evict", "evict"]]
         case .appearance:
-            return [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]
+            return [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]
+        case .library:
+            return [["custom sorting", "saved sorts", "saved views", "smart filters", "library views", "albums", "songs", "sort", "group", "filters"], ["rating", "ratings", "stars", "favorite", "favourite", "love"]]
         case .server:
             return [["connected to", "server url", "cellular url", "data", "wifi", "username", "edit connection", "test connection", "log out", "logout", "sign out"], ["server health & speed test", "speed test", "server health", "latency", "connection"]]
         case .storage:
@@ -153,7 +159,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .performance:
             return [["performance mode", "battery", "power save", "saver", "low power"], ["image loading", "images", "speed", "power", "threads", "fast", "conservative"], ["data caching", "cache", "aggressive", "memory"], ["prefetch artist images", "prefetch", "artist", "profile", "pictures"]]
         case .developer:
-            return [["developer tools", "developer", "tools", "diagnostics"], ["experiments", "flags"], ["playback cache diagnostics", "cache diagnostics"], ["performance overlay", "overlay", "fps"], ["notifications", "toast"], ["dump app files", "export", "logs"], ["logging", "logs"]]
+            return [["developer tools", "developer", "tools", "diagnostics"], ["experiments", "flags"], ["playback cache diagnostics", "cache diagnostics"], ["hangs", "crashes", "crash reports", "hang reports", "reliability", "send report", ".ips"], ["performance overlay", "overlay", "fps"], ["notifications", "toast"], ["dump app files", "export", "logs"], ["logging", "logs"]]
         case .about:
             return [["version", "build", "about", "app"], ["support", "donate", "tip", "buy me a coffee", "coffee"], ["changelog", "release notes"], ["logs", "diagnostics"]]
         }
@@ -183,6 +189,7 @@ struct SettingsView: View {
     @AppStorage("spatialWidenerAmount") var spatialWidenerAmount = 0.65
     @AppStorage("spatialWidenerMode")  var spatialWidenerMode   = "enhanced"
     @AppStorage("resumeAfterInterruption") var resumeAfterInterruption = true
+    @AppStorage(LiveLyricsPreferences.enabledKey) var liveLyricsEnabled = false
 
     @AppStorage("streamingBitrate")    var streamingBitrate    = 0
     @AppStorage("streamingBitrateCell")var streamingBitrateCell = 0
@@ -204,6 +211,7 @@ struct SettingsView: View {
     @AppStorage("showLosslessBadge")   var showLosslessBadge   = true
     @AppStorage("showExplicitBadge")   var showExplicitBadge   = true
     @AppStorage("dynamicBackground")   var dynamicBackground   = true
+    @AppStorage(PlayerDynamicBackgroundStyle.storageKey) var dynamicBackgroundStyle = PlayerDynamicBackgroundStyle.defaultStyle
     @AppStorage("showTrackArtwork")    var showTrackArtwork    = true
     @AppStorage("albumTrackTitleDisplayMode") var albumTrackTitleDisplayMode = AlbumTrackTitleDisplayMode.truncate.rawValue
     @AppStorage("accentColorName")     var accentColorName     = "purple"
@@ -497,6 +505,7 @@ struct SettingsView: View {
         audioSection
         streamingSection
         appearanceSection
+        librarySection
         serverSection
         cacheSection
         backupSection
@@ -548,6 +557,8 @@ struct SettingsView: View {
             streamingSection
         case .appearance:
             appearanceSection
+        case .library:
+            librarySection
         case .server:
             serverSection
         case .storage:

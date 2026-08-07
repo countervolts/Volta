@@ -312,6 +312,14 @@ private final class PerformanceOverlayMonitor: NSObject, ObservableObject {
     private var frames = 0
     private var elapsed: TimeInterval = 0
     private var lastCPUTime: TimeInterval?
+    // Keep measuring every display refresh, but do not make the diagnostic
+    // overlay itself trigger a SwiftUI/Canvas rebuild every refresh.
+    private var latestFrameMS: Double = 16.7
+    private var frameSamplesBuffer: [Double] = Array(repeating: 16.7, count: 36)
+    private var samplePublishElapsed: TimeInterval = 0
+    private var systemMetricsElapsed: TimeInterval = 0
+    private let samplePublishInterval: TimeInterval = 1.0 / 12.0
+    private let systemMetricsInterval: TimeInterval = 1.0
 
     var targetFrameMS: Double {
         1_000 / max(1, targetFPS)
@@ -348,18 +356,25 @@ private final class PerformanceOverlayMonitor: NSObject, ObservableObject {
         frames = 0
         elapsed = 0
         lastCPUTime = nil
+        samplePublishElapsed = 0
+        systemMetricsElapsed = 0
     }
 
     func refreshFrameRate(resetSamples: Bool) {
         isHalfRate = FrameRateGovernor.isHalfRate
         targetFPS = Double(FrameRateGovernor.maxFPS)
         if resetSamples {
-            frameSamples = Array(repeating: targetFrameMS, count: 36)
+            let samples = Array(repeating: targetFrameMS, count: 36)
+            frameSamples = samples
+            frameSamplesBuffer = samples
             frameMS = targetFrameMS
+            latestFrameMS = targetFrameMS
             fps = targetFPS
             lastTimestamp = 0
             frames = 0
             elapsed = 0
+            samplePublishElapsed = 0
+            systemMetricsElapsed = 0
         }
         if let displayLink {
             FrameRateGovernor.apply(to: displayLink)
@@ -375,20 +390,34 @@ private final class PerformanceOverlayMonitor: NSObject, ObservableObject {
         guard lastTimestamp > 0 else { return }
         let delta = link.timestamp - lastTimestamp
         guard delta.isFinite, delta > 0 else { return }
-        frameMS = delta * 1_000
-        frameSamples.append(frameMS)
-        if frameSamples.count > 36 { frameSamples.removeFirst(frameSamples.count - 36) }
+        let measuredFrameMS = delta * 1_000
+        latestFrameMS = measuredFrameMS
+        frameSamplesBuffer.append(measuredFrameMS)
+        if frameSamplesBuffer.count > 36 {
+            frameSamplesBuffer.removeFirst(frameSamplesBuffer.count - 36)
+        }
         frames += 1
         elapsed += delta
+        samplePublishElapsed += delta
+        systemMetricsElapsed += delta
+
+        if samplePublishElapsed >= samplePublishInterval {
+            frameMS = latestFrameMS
+            frameSamples = frameSamplesBuffer
+            samplePublishElapsed = 0
+        }
         if elapsed >= 0.5 {
             fps = Double(frames) / elapsed
-            memoryBytes = Self.memoryFootprintBytes()
-            threadSummary = Self.threadSummary()
-            updateCPUAndPower(elapsed: elapsed)
-            thermalState = Self.thermalStateLabel(ProcessInfo.processInfo.thermalState)
-            batterySummary = Self.batterySummary()
             frames = 0
             elapsed = 0
+        }
+        if systemMetricsElapsed >= systemMetricsInterval {
+            memoryBytes = Self.memoryFootprintBytes()
+            threadSummary = Self.threadSummary()
+            updateCPUAndPower(elapsed: systemMetricsElapsed)
+            thermalState = Self.thermalStateLabel(ProcessInfo.processInfo.thermalState)
+            batterySummary = Self.batterySummary()
+            systemMetricsElapsed = 0
         }
     }
 

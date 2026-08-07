@@ -5,6 +5,7 @@ struct LibraryView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = LibraryViewModel()
     @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
+    @StateObject private var savedSortStore = SavedLibrarySortStore.shared
     @Binding var path: NavigationPath
     @Namespace private var heroNamespace
     @AppStorage("albumSortOrder") private var albumSortOrder = "alphabetical"
@@ -14,6 +15,7 @@ struct LibraryView: View {
     @State private var showBatchPlaylistSheet = false
     @State private var addToPlaylistSong: Song?
     @State private var batchToast: String? = nil
+    @State private var customSortEditor: SavedLibrarySortEditorContext?
 
     private var selectedSongs: [Song] {
         vm.filteredSongs.filter { selectedSongIDs.contains($0.id) }
@@ -61,6 +63,18 @@ struct LibraryView: View {
                     showToast(L(.toast_added_to, name))
                 }
             }
+            .sheet(item: $customSortEditor) { context in
+                NavigationStack {
+                    SavedLibrarySortEditorView(
+                        target: context.target,
+                        sort: context.sort,
+                        previewCountProvider: { vm.customSortPreviewCount(for: $0) }
+                    ) { sort in
+                        savedSortStore.upsert(sort)
+                        vm.applyCustomSort(sort)
+                    }
+                }
+            }
             .onChangeCompat(of: vm.filter) { _, _ in exitSelection() }
             .onChangeCompat(of: vm.source) { _, _ in exitSelection() }
             .onChangeCompat(of: albumSortOrder) { _, value in
@@ -68,6 +82,9 @@ struct LibraryView: View {
             }
             .onChangeCompat(of: hiddenAlbums.revision) { _, _ in
                 exitSelection()
+            }
+            .onReceive(savedSortStore.$sorts) { sorts in
+                vm.reconcileActiveCustomSort(with: sorts)
             }
             .background(NavigationBarRestorer())
         }
@@ -169,10 +186,53 @@ struct LibraryView: View {
 
     private var filterMenu: some View {
         Menu {
+            if let activeCustomSort = vm.activeCustomSort {
+                Label(activeCustomSort.name, systemImage: "checkmark.circle.fill")
+                Divider()
+            }
+
             Picker(L(.library_sort_by), selection: Binding(get: { vm.sortOrder }, set: { vm.setSort($0) })) {
                 ForEach(LibrarySortOrder.allCases) { Text($0.label).tag($0) }
             }
+
+            if let target = vm.customSortTarget {
+                let targetSorts = savedSortStore.sorts(for: target)
+                Divider()
+                if !targetSorts.isEmpty {
+                    Menu {
+                        ForEach(targetSorts) { sort in
+                            Button {
+                                vm.applyCustomSort(sort)
+                            } label: {
+                                Label(
+                                    sort.name,
+                                    systemImage: vm.activeCustomSort?.id == sort.id ? "checkmark.circle.fill" : "arrow.up.arrow.down"
+                                )
+                            }
+                        }
+                    } label: {
+                        Label(L(.library_views_saved), systemImage: "slider.horizontal.3")
+                    }
+                }
+
+                Button {
+                    customSortEditor = SavedLibrarySortEditorContext(target: target, sort: vm.activeCustomSort)
+                } label: {
+                    Label(
+                        vm.activeCustomSort == nil ? L(.library_view_filter_settings) : L(.library_view_edit_filter_settings),
+                        systemImage: "line.3.horizontal.decrease.circle"
+                    )
+                }
+
+                Button {
+                    path.append(SettingsRoute.savedLibrarySorts)
+                } label: {
+                    Label(L(.library_views_manage), systemImage: "list.bullet.rectangle")
+                }
+            }
+
             if !vm.availableGenres.isEmpty {
+                Divider()
                 Picker(L(.media_genre), selection: Binding(
                     get: { vm.genreFilter ?? "" },
                     set: { vm.setGenreFilter($0.isEmpty ? nil : $0) }
@@ -320,17 +380,48 @@ struct LibraryView: View {
                        GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
                        GridItem(.flexible(), spacing: Theme.Layout.gridSpacing)]
         let trailingPadding = alphabetContentTrailingPadding
-        if usesAlbumAlphabetSections {
-            LazyVStack(spacing: Theme.Layout.gridSpacing) {
-                ForEach(albumAlphabetSections) { section in
-                    VStack(spacing: 0) {
-                        LazyVGrid(columns: columns, spacing: Theme.Layout.gridSpacing) {
-                            ForEach(section.items) { album in
-                                albumGridItem(album)
+        let groupedSections = albumGroupSections
+        if !groupedSections.isEmpty {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                ForEach(groupedSections) { section in
+                    VStack(alignment: .leading, spacing: 10) {
+                        libraryGroupHeader(section.label, horizontalPadding: false)
+                        ForEach(albumGridRows(for: section.items, prefix: section.id)) { row in
+                            HStack(alignment: .top, spacing: Theme.Layout.gridSpacing) {
+                                ForEach(row.items) { album in
+                                    albumGridItem(album)
+                                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                                }
+                                ForEach(row.items.count..<3, id: \.self) { _ in
+                                    Color.clear
+                                        .frame(maxWidth: .infinity)
+                                        .accessibilityHidden(true)
+                                }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id(row.id)
                         }
                     }
-                    .id(section.targetID)
+                }
+            }
+            .padding(.horizontal, Theme.Layout.screenPadding)
+            .padding(.vertical, 12)
+        } else if usesAlbumAlphabetSections {
+            LazyVStack(spacing: Theme.Layout.gridSpacing) {
+                ForEach(albumGridRows) { row in
+                    HStack(alignment: .top, spacing: Theme.Layout.gridSpacing) {
+                        ForEach(row.items) { album in
+                            albumGridItem(album)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+                        ForEach(row.items.count..<3, id: \.self) { _ in
+                            Color.clear
+                                .frame(maxWidth: .infinity)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .id(row.id)
                 }
             }
             .padding(.leading, Theme.Layout.screenPadding)
@@ -387,17 +478,47 @@ struct LibraryView: View {
     }
 
     private var songsList: some View {
+        let groupedSections = songGroupSections
+        if !groupedSections.isEmpty {
+            return AnyView(
+                LazyVStack(spacing: 0) {
+                    if !vm.filteredSongs.isEmpty {
+                        librarySongsActions
+                    }
+                    ForEach(groupedSections) { section in
+                        libraryGroupHeader(section.label)
+                        ForEach(section.items) { entry in
+                            songListEntry(entry, trailingPadding: Theme.Layout.screenPadding)
+                        }
+                    }
+                }
+            )
+        }
+
         let sections = usesSongAlphabetSections ? songAlphabetSections : []
         let entries = sections.isEmpty ? songListEntries : songListEntries(from: sections)
         let trailingPadding = showsAlphabetJumpBar(jumpItems(from: sections)) ? 48 : Theme.Layout.screenPadding
-        return LazyVStack(spacing: 0) {
-            if !vm.filteredSongs.isEmpty {
-                librarySongsActions
+        return AnyView(
+            LazyVStack(spacing: 0) {
+                if !vm.filteredSongs.isEmpty {
+                    librarySongsActions
+                }
+                ForEach(entries) { entry in
+                    songListEntry(entry, trailingPadding: trailingPadding)
+                }
             }
-            ForEach(entries) { entry in
-                songListEntry(entry, trailingPadding: trailingPadding)
-            }
-        }
+        )
+    }
+
+    private func libraryGroupHeader(_ title: String, horizontalPadding: Bool = true) -> some View {
+        Text(title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(Theme.secondaryText)
+            .textCase(.uppercase)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, horizontalPadding ? Theme.Layout.screenPadding : 0)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
     }
 
     @ViewBuilder
@@ -700,7 +821,12 @@ struct LibraryView: View {
             )
         case .albums:
             guard usesAlbumAlphabetSections else { return [] }
-            return albumAlphabetSections.map { AlphabetJumpItem(label: $0.label, targetID: $0.targetID) }
+            return alphabetJumpItems(
+                vm.filteredAlbums.map { album in
+                    let key = alphabetSectionKey(for: album.name)
+                    return (album.name, alphabetAnchorID(kind: "album", rawID: "section-\(key)"))
+                }
+            )
         case .songs:
             guard usesSongAlphabetSections else { return [] }
             return songAlphabetSections.map { AlphabetJumpItem(label: $0.label, targetID: $0.targetID) }
@@ -710,11 +836,17 @@ struct LibraryView: View {
     }
 
     private var usesAlbumAlphabetSections: Bool {
-        vm.sortOrder == .name || vm.sortOrder == .album
+        if let activeCustomSort = vm.activeCustomSort {
+            return activeCustomSort.usesAlbumAlphabetSections
+        }
+        return vm.sortOrder == .name || vm.sortOrder == .album
     }
 
     private var usesSongAlphabetSections: Bool {
-        vm.sortOrder == .name
+        if let activeCustomSort = vm.activeCustomSort {
+            return activeCustomSort.usesSongAlphabetSections
+        }
+        return vm.sortOrder == .name
     }
 
     private var albumAlphabetSections: [AlphabetSection<Album>] {
@@ -725,8 +857,66 @@ struct LibraryView: View {
         )
     }
 
+    private var albumGridRows: [AlbumGridRow] {
+        var rows: [AlbumGridRow] = []
+        var anchoredLetters: Set<String> = []
+
+        for section in albumAlphabetSections {
+            for offset in stride(from: 0, to: section.items.count, by: 3) {
+                let end = min(offset + 3, section.items.count)
+                let items = Array(section.items[offset..<end])
+                guard let firstAlbumID = items.first?.id else { continue }
+                let anchorID: String?
+                if offset == 0, anchoredLetters.insert(section.label).inserted {
+                    anchorID = section.targetID
+                } else {
+                    anchorID = nil
+                }
+                rows.append(
+                    AlbumGridRow(
+                        id: anchorID ?? "library-album-row-\(firstAlbumID)",
+                        items: items
+                    )
+                )
+            }
+        }
+
+        return rows
+    }
+
+    private var albumGroupSections: [LibraryGroupSection<Album>] {
+        guard let activeCustomSort = vm.activeCustomSort,
+              activeCustomSort.groupMode != .none else { return [] }
+        return groupedSections(
+            kind: "album",
+            items: vm.filteredAlbums,
+            label: { activeCustomSort.groupLabel(for: $0) }
+        )
+    }
+
+    private func albumGridRows(for albums: [Album], prefix: String) -> [AlbumGridRow] {
+        var rows: [AlbumGridRow] = []
+        for offset in stride(from: 0, to: albums.count, by: 3) {
+            let end = min(offset + 3, albums.count)
+            let items = Array(albums[offset..<end])
+            guard let firstAlbumID = items.first?.id else { continue }
+            rows.append(AlbumGridRow(id: "\(prefix)-row-\(firstAlbumID)", items: items))
+        }
+        return rows
+    }
+
     private var songListEntries: [SongListEntry] {
         vm.filteredSongs.enumerated().map { SongListEntry(visibleIndex: $0.offset, song: $0.element) }
+    }
+
+    private var songGroupSections: [LibraryGroupSection<SongListEntry>] {
+        guard let activeCustomSort = vm.activeCustomSort,
+              activeCustomSort.groupMode != .none else { return [] }
+        return groupedSections(
+            kind: "song",
+            items: songListEntries,
+            label: { activeCustomSort.groupLabel(for: $0.song) }
+        )
     }
 
     private var songAlphabetSections: [AlphabetSection<SongListEntry>] {
@@ -755,6 +945,28 @@ struct LibraryView: View {
 
     private func jumpItems<Item>(from sections: [AlphabetSection<Item>]) -> [AlphabetJumpItem] {
         sections.map { AlphabetJumpItem(label: $0.label, targetID: $0.targetID) }
+    }
+
+    private func groupedSections<Item>(
+        kind: String,
+        items: [Item],
+        label: (Item) -> String
+    ) -> [LibraryGroupSection<Item>] {
+        var sections: [LibraryGroupSection<Item>] = []
+        var sectionIndexes: [String: Int] = [:]
+
+        for item in items {
+            let groupLabel = label(item)
+            if let index = sectionIndexes[groupLabel] {
+                sections[index].items.append(item)
+            } else {
+                let id = "library-\(kind)-group-\(sections.count)"
+                sectionIndexes[groupLabel] = sections.count
+                sections.append(LibraryGroupSection(id: id, label: groupLabel, items: [item]))
+            }
+        }
+
+        return sections
     }
 
     private func alphabetSections<Item>(
@@ -829,6 +1041,17 @@ private struct AlphabetSection<Item>: Identifiable {
     var items: [Item]
 
     var id: String { targetID }
+}
+
+private struct AlbumGridRow: Identifiable {
+    let id: String
+    let items: [Album]
+}
+
+private struct LibraryGroupSection<Item>: Identifiable {
+    let id: String
+    let label: String
+    var items: [Item]
 }
 
 private struct SongListEntry: Identifiable {

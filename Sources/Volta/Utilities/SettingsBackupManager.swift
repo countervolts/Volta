@@ -85,8 +85,8 @@ struct SettingsBackupPayload: Codable {
 
 enum SettingsBackupManager {
     private static let keys: Set<String> = [
-        "gaplessPlayback", "replayGainMode", "crossfadeDurationSeconds",
-        "enhancedPlaybackCaching", "developerPlaybackCacheMode",
+        "gaplessPlayback", "replayGainMode", "crossfadeDurationSeconds", RatingMode.storageKey,
+        "enhancedPlaybackCaching", LiveLyricsPreferences.enabledKey, "developerPlaybackCacheMode",
         "automixStyle", "automixMaxBlendSeconds", "automixSilenceTrim",
         "automixTempoMatch", "autoplayEnabled", "playbackTransitionMode",
         "crossfadeEnabled", "streamingBitrate", "streamingBitrateCell",
@@ -95,7 +95,7 @@ enum SettingsBackupManager {
         "transcodeRuleDefaultBitrate", "transcodingSettingsMigrationVersion", "downloadThreadingMode",
         "downloadSpeedLimitKBps", "downloadCapMB", "autoEvictDownloads",
         "artworkAnimation", "liveArtwork", "showLosslessBadge", "showExplicitBadge",
-        "dynamicBackground", "showTrackArtwork", "albumTrackTitleDisplayMode", "accentColorName",
+        "dynamicBackground", "dynamicBackgroundStyle", "showTrackArtwork", "albumTrackTitleDisplayMode", "accentColorName",
         "customAccentRed", "customAccentGreen", "customAccentBlue",
         "imageLoadMode", "cacheMode", "prefetchArtistImages",
         "localArtworkLibraryDownloaded", "albumSortOrder",
@@ -113,7 +113,7 @@ enum SettingsBackupManager {
         "pmDisableLiveArtwork", "pmDisableDynamicBackground", "pmReduceAnimations",
         "pmDisablePrefetch", "pmSimpleTransitions",
         "pmLowerStreamQuality", "pmBypassAudioEffects",
-        "smartPlaylists", "playlistFolders"
+        "smartPlaylists", "playlistFolders", SavedLibrarySortStore.key
     ]
 
     static func exportURL() throws -> URL {

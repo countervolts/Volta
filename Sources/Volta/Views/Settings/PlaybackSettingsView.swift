@@ -8,7 +8,7 @@ extension SettingsView {
     @ViewBuilder
     var playbackSection: some View {
         let s = "Playback"
-        if sectionVisible(s, [["autoplay", "play"], ["autoplay", "infinite play", "infinite", "autoplay style", "fill", "similar", "random", "genre"], ["crossfade", "fade", "automix", "transition", "duration", "style", "blend", "silence", "bpm", "tempo"], ["track pairings", "linked tracks", "linked songs", "song pair", "play after", "bleed together"], ["gapless playback"], ["enhanced caching", "playback cache", "prefetch", "seamless", "buffer"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"], ["resume playback after interruption", "resume", "interruption", "interrupt", "phone call", "siri", "other app", "force stop"]]) {
+        if sectionVisible(s, [["autoplay", "play"], ["autoplay", "infinite play", "infinite", "autoplay style", "fill", "similar", "random", "genre"], ["crossfade", "fade", "automix", "transition", "duration", "style", "blend", "silence", "bpm", "tempo"], ["live lyrics", "lyrics", "live activity", "lock screen", "carplay"], ["track pairings", "linked tracks", "linked songs", "song pair", "play after", "bleed together"], ["gapless playback"], ["enhanced caching", "playback cache", "prefetch", "seamless", "buffer"], ["shuffle"], ["artwork zoom on play", "artwork", "zoom"], ["resume playback after interruption", "resume", "interruption", "interrupt", "phone call", "siri", "other app", "force stop"]]) {
             Section(sectionTitle(s)) {
                 if rowVisible(s, ["autoplay", "play"]) {
                     Toggle(isOn: Binding(
@@ -61,6 +61,18 @@ extension SettingsView {
                         Label("Track Pairings", systemImage: "link")
                     }
                     .foregroundStyle(Theme.primaryText)
+                }
+
+                if rowVisible(s, ["live lyrics", "lyrics", "live activity", "lock screen", "carplay"]) {
+                    if #available(iOS 16.1, *) {
+                        Toggle(isOn: $liveLyricsEnabled) {
+                            Label("Live Lyrics", systemImage: "quote.bubble")
+                        }
+                        .tint(Theme.accent)
+                        .onChangeCompat(of: liveLyricsEnabled) { _, enabled in
+                            LiveLyricsActivityManager.shared.setEnabled(enabled)
+                        }
+                    }
                 }
 
                 if rowVisible(s, ["gapless playback"]) {
