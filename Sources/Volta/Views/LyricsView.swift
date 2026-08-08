@@ -43,6 +43,7 @@ struct LyricsViewWithState: View {
         .animation(.easeInOut(duration: 0.28), value: lyricsContentKey)
         .overlay(alignment: .topTrailing) { translationButton }
         .background(translationTaskView)
+        .allowsHitTesting(isPlaybackRenderingActive)
         .task(id: audio.currentSong?.id) { await loadLyrics() }
         .onReceive(audio.$currentTime) { time in
             guard isPlaybackRenderingActive else { return }
@@ -101,6 +102,7 @@ struct LyricsViewWithState: View {
                                 .contentShape(Rectangle())
                                 // tap a synced line to seek playback to that timestamp
                                 .onTapGesture {
+                                    guard isPlaybackRenderingActive else { return }
                                     let t = line.time
                                     guard t >= 0 else { return }
                                     audio.seek(to: t)
