@@ -1,12 +1,3 @@
-### 1.3.2
-  - [X] live widget support
-  - [X] improved song rating ability
-  - [X] bug fixes for larger libraries
-  - [X] gradient dynamic background player
-  - [X] smart/custom sorting in library
-  - [X] performance improvements for when listening to music and using the app
-  - [X] hanging and crash detection 
-
 ### 1.4
   - [ ] dynamic playlists (eg playlist for liked songs, when song is liked or unliked it will be added or removed)
   - [ ] library redesign (more apple music like while giving the option of a "legacy view" in settings)
@@ -18,7 +9,8 @@
   - [ ] improved downloading management (songs, lyrics etc)
   - [ ] landscape view improvements on ios
   - [ ] visualizer redesign
-  - [ ] playlist improvements 
+  - [ ] playlist improvements
+  - [ ] carplay support (ideally) 
   - [ ] improvements to stats sharing (not a list but something else (wip))
   - [ ] improvements to importing/exporting playlists
 

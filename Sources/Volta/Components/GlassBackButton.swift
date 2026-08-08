@@ -3,8 +3,13 @@ import UIKit
 
 // Back affordance that keeps edge-swipe intact.
 struct SwipeBackEnabler: UIViewControllerRepresentable {
+    var onNavigationWillAppear: (() -> Void)? = nil
+    var onNavigationWillDisappear: (() -> Void)? = nil
+
     func makeUIViewController(context: Context) -> _VC { _VC() }
     func updateUIViewController(_ v: _VC, context: Context) {
+        v.onNavigationWillAppear = onNavigationWillAppear
+        v.onNavigationWillDisappear = onNavigationWillDisappear
         v.scheduleApplyGestureIfNeeded()
     }
 
@@ -13,9 +18,12 @@ struct SwipeBackEnabler: UIViewControllerRepresentable {
         private var didApplyForCurrentLayoutCycle = false
         private var pendingImmediateApply = false
         private var pendingDelayedApply = false
+        var onNavigationWillAppear: (() -> Void)?
+        var onNavigationWillDisappear: (() -> Void)?
 
         override func viewWillAppear(_ animated: Bool) {
             super.viewWillAppear(animated)
+            onNavigationWillAppear?()
             didApplyForCurrentLayoutCycle = false
             scheduleApplyGesture(force: true)
             scheduleDelayedApply()
@@ -23,7 +31,15 @@ struct SwipeBackEnabler: UIViewControllerRepresentable {
 
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
+            // An interrupted interactive pop returns to this view without a
+            // new navigation push. Keep its controls available in that case.
+            onNavigationWillAppear?()
             scheduleApplyGesture(force: true)
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            onNavigationWillDisappear?()
         }
 
         override func viewDidLayoutSubviews() {

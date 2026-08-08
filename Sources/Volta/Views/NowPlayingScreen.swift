@@ -135,9 +135,24 @@ struct NowPlayingScreen: View {
     private var playerBackgroundFadeColor: Color {
         normalizedPlayerBackgroundColors.last ?? Color(white: 0.08)
     }
+    private var usesGradientPlayerBackground: Bool {
+        dynamicBackground
+            && !PerformanceMode.disableDynamicBackground
+            && selectedPlayerBackgroundStyle == .gradient
+    }
+    @ViewBuilder
+    private var playerBackgroundSurface: some View {
+        if usesGradientPlayerBackground {
+            playerBackgroundGradient
+        } else {
+            // Preserve the original 1.3.1 solid-color rendering path when the
+            // gradient style is not actively selected.
+            playerBackgroundFadeColor
+        }
+    }
     var body: some View {
         ZStack {
-            playerBackgroundGradient.ignoresSafeArea()
+            playerBackgroundSurface.ignoresSafeArea()
 
             if isPhoneLandscape {
                 phoneLandscapeLayout
@@ -315,13 +330,12 @@ struct NowPlayingScreen: View {
                         .allowsHitTesting(activeTab != .lyrics)
 
                         QueueTransitionAnimator(progress: lyricsTransitionProgress) { progress in
-                            portraitLyricsStage(in: geo, progress: progress)
+                            portraitLyricsStage(in: geo, stageHeight: stageHeight, progress: progress)
                         }
                         .opacity(lyricsStageOpacity)
                         .allowsHitTesting(activeTab == .lyrics)
                     }
                     .frame(height: stageHeight, alignment: .top)
-                    .clipped()
 
                     VStack(spacing: 0) {
                         scrubber
@@ -333,6 +347,10 @@ struct NowPlayingScreen: View {
                         bottomControls
                     }
                     .frame(height: controlsHeight)
+                    // Solid mode retains the exact 1.3.1 lower surface. In
+                    // gradient mode, keep it transparent so the same gradient
+                    // continues through the controls without a color seam.
+                    .background(usesGradientPlayerBackground ? Color.clear : playerBackgroundFadeColor)
                     .zIndex(5)
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
@@ -431,6 +449,13 @@ struct NowPlayingScreen: View {
                         // Keep live artwork at a stable render size. Scaling its
                         // layer is much cheaper than resizing AVPlayer every frame.
                         .frame(width: sourceWidth, height: sourceHeight)
+                        .mask {
+                            portraitArtworkFadeMask(
+                                sourceHeight: sourceHeight,
+                                width: width,
+                                progress: progress
+                            )
+                        }
                         .scaleEffect(artworkRenderScale, anchor: .topLeading)
                         .offset(y: artworkCropOffset)
                         .frame(width: artworkWidth, height: artworkHeight, alignment: .topLeading)
@@ -454,7 +479,7 @@ struct NowPlayingScreen: View {
                         .opacity(transitionHeaderOpacity)
                         .id(audio.currentSong?.id)
 
-                    if prefersFullBleedCover {
+                    if prefersFullBleedCover && !usesGradientPlayerBackground {
                         LinearGradient(
                             stops: [
                                 .init(color: .clear, location: 0),
@@ -508,7 +533,11 @@ struct NowPlayingScreen: View {
 
     /// Mirrors the queue hero for lyrics: the cover settles into the compact
     /// lyrics header while the lyric body rises into place behind it.
-    private func portraitLyricsStage(in geo: GeometryProxy, progress rawProgress: CGFloat) -> some View {
+    private func portraitLyricsStage(
+        in geo: GeometryProxy,
+        stageHeight: CGFloat,
+        progress rawProgress: CGFloat
+    ) -> some View {
         let width = geo.size.width
         let topInset = geo.safeAreaInsets.top
         let progress = min(max(rawProgress, 0), 1)
@@ -569,6 +598,13 @@ struct NowPlayingScreen: View {
 
             portraitArtworkSurface
                 .frame(width: sourceWidth, height: sourceHeight)
+                .mask {
+                    portraitArtworkFadeMask(
+                        sourceHeight: sourceHeight,
+                        width: width,
+                        progress: progress
+                    )
+                }
                 .scaleEffect(artworkRenderScale, anchor: .topLeading)
                 .offset(y: artworkCropOffset)
                 .frame(width: artworkWidth, height: artworkHeight, alignment: .topLeading)
@@ -583,7 +619,7 @@ struct NowPlayingScreen: View {
                 .offset(x: artworkX, y: artworkY)
                 .id(audio.currentSong?.id)
 
-            if prefersFullBleedCover {
+            if prefersFullBleedCover && !usesGradientPlayerBackground {
                 LinearGradient(
                     stops: [
                         .init(color: .clear, location: 0),
@@ -628,8 +664,39 @@ struct NowPlayingScreen: View {
             .accessibilityLabel("Back to Now Playing")
             .accessibilityHidden(progress <= 0.95)
         }
-        .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+        // Keep both drawing and hit testing inside the visible player stage.
+        // A full-screen frame here left clipped lyric rows tappable over the
+        // scrubber and transport controls below it.
+        .frame(width: geo.size.width, height: stageHeight, alignment: .topLeading)
+        .contentShape(Rectangle())
         .clipped()
+    }
+
+    @ViewBuilder
+    private func portraitArtworkFadeMask(
+        sourceHeight: CGFloat,
+        width: CGFloat,
+        progress: CGFloat
+    ) -> some View {
+        if prefersFullBleedCover && usesGradientPlayerBackground {
+            let fadeHeight = width * 0.30
+            let fadeStart = sourceHeight > 0
+                ? max(0, min(1, (sourceHeight - fadeHeight) / sourceHeight))
+                : 1
+            let fadeAmount = 1 - smoothStep(progress, from: 0, to: 0.40)
+
+            LinearGradient(
+                stops: [
+                    .init(color: .white, location: 0),
+                    .init(color: .white, location: fadeStart),
+                    .init(color: .white.opacity(1 - fadeAmount), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        } else {
+            Rectangle()
+        }
     }
 
     private var portraitArtworkSurface: some View {

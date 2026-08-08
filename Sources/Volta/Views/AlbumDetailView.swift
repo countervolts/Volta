@@ -26,6 +26,7 @@ struct AlbumDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var iPadPanel: iPadDetailPanel = .songs
+    @State private var acceptsPlaybackInput = true
 
     init(album: Album, fromArtist: Bool = false) {
         _vm = StateObject(wrappedValue: AlbumDetailViewModel(album: album))
@@ -64,7 +65,15 @@ struct AlbumDetailView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .preferredColorScheme(Theme.colorScheme)
-        .background(SwipeBackEnabler())
+        .background(
+            SwipeBackEnabler(
+                onNavigationWillAppear: { acceptsPlaybackInput = true },
+                onNavigationWillDisappear: { acceptsPlaybackInput = false }
+            )
+        )
+        // During the navigation close animation the outgoing album is still
+        // drawn briefly. Do not let its track buttons receive a late tap.
+        .allowsHitTesting(acceptsPlaybackInput)
         .navigationDestinationItemCompat(item: $drillArtist) { artist in
             ArtistDetailView(artist: artist)
         }
@@ -476,6 +485,7 @@ struct AlbumDetailView: View {
                 index: song.track ?? (i + 1),
                 isCurrentlyPlaying: appState.audioPlayer.currentSong?.id == song.id,
                 onTap: {
+                    guard acceptsPlaybackInput else { return }
                     if let idx = vm.songs.firstIndex(where: { $0.id == song.id }) {
                         appState.audioPlayer.playQueue(vm.songs, startIndex: idx, source: vm.album.name, album: vm.album)
                     }
