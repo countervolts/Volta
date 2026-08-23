@@ -153,7 +153,7 @@ extension SettingsView {
             } header: {
                 Text(sectionTitle(s))
             } footer: {
-                Text("Playlist backups are kept as local JSON and refresh after playlist edits. Export/Import recreates server playlists as portable JSON files. Settings backups include app preferences and smart playlists. Server passwords stay in Keychain and are not exported.")
+                Text("Playlist backups are kept as local JSON and refresh after playlist edits. Exports carry track metadata so they can restore to another server; existing playlist names are skipped, and unmatched tracks are reported. Settings backups include app preferences and smart playlists. Server passwords stay in Keychain and are not exported.")
             }
             .listRowBackground(Theme.secondaryBackground)
         }
@@ -228,9 +228,17 @@ extension SettingsView {
                 let scoped = url.startAccessingSecurityScopedResource()
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                 do {
-                    let count = try await PlaylistTransfer.importPlaylists(from: url, client: client)
-                    playlistTransferStatus = "Imported \(count) playlist\(count == 1 ? "" : "s")"
-                    VoltaNotificationCenter.shared.post(L(.notif_imported_playlists, count), tone: .success)
+                    let importResult = try await PlaylistTransfer.importPlaylists(from: url, client: client)
+                    playlistTransferStatus = importResult.statusText
+                    if importResult.playlistsCreated > 0, PlaylistBackupStore.shared.isEnabled {
+                        await PlaylistBackupStore.shared.backupAll(client: client)
+                        updateDeletedPlaylistBackupsFromStore()
+                    }
+                    VoltaNotificationCenter.shared.post(
+                        L(.notif_imported_playlists, importResult.playlistsCreated),
+                        tone: importResult.hasWarnings ? .warning : .success,
+                        force: importResult.hasWarnings
+                    )
                 } catch {
                     playlistTransferStatus = "Import failed: \(error.localizedDescription)"
                     VoltaNotificationCenter.shared.post(L(.notif_playlist_import_failed), tone: .error)

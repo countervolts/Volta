@@ -26,32 +26,32 @@ extension SettingsView {
         if developerUnlocked,
            sectionVisible(s, [["developer tools", "simulation", "simulate", "slow server", "expired session", "no network", "profiling", "ram", "automix", "autoplay"], ["experiments", "raw animated artwork", "disable ram optimizations", "app worker limit", "workers", "threads", "concurrency"], ["enhanced caching", "playback cache", "cache performance", "prefetch", "force cache mode", "seamless", "buffer"], ["hangs", "crashes", "crash reports", "hang reports", "reliability", "send report", ".ips"], ["performance overlay", "overlay", "fps", "ram", "frame pacing", "metrics"], ["notifications", "toast", "warning", "preview"], ["verbose logging", "logging"], ["log device specs", "device", "specs", "ios", "liquid glass", "diagnostics"], ["dump app files", "export app data", "zip", "all files"], ["export all logs"], ["clear all logs"], ["force refresh home"], ["logged play events"], ["queue length"], ["developer"]]) {
         Section {
-            NavigationLink(value: SettingsRoute.developerTools) {
+            SettingsDetailNavigationLink(.developerTools) {
                 Label("Developer Tools", systemImage: "hammer")
             }
             .foregroundStyle(Theme.primaryText)
 
-            NavigationLink(value: SettingsRoute.developerExperiments) {
+            SettingsDetailNavigationLink(.developerExperiments) {
                 Label("Experiments", systemImage: "testtube.2")
             }
             .foregroundStyle(Theme.primaryText)
 
-            NavigationLink(value: SettingsRoute.playbackCacheDiagnostics) {
+            SettingsDetailNavigationLink(.playbackCacheDiagnostics) {
                 Label("Playback Cache", systemImage: "bolt.horizontal.circle")
             }
             .foregroundStyle(Theme.primaryText)
 
-            NavigationLink(value: SettingsRoute.reliabilityReports) {
+            SettingsDetailNavigationLink(.reliabilityReports) {
                 Label("Hangs & Crashes", systemImage: "exclamationmark.triangle")
             }
             .foregroundStyle(Theme.primaryText)
 
-            NavigationLink(value: SettingsRoute.performanceOverlay) {
+            SettingsDetailNavigationLink(.performanceOverlay) {
                 Label("Performance Overlay", systemImage: "chart.xyaxis.line")
             }
             .foregroundStyle(Theme.primaryText)
 
-            NavigationLink(value: SettingsRoute.notifications) {
+            SettingsDetailNavigationLink(.notifications) {
                 Label("Notifications", systemImage: "bell.badge")
             }
             .foregroundStyle(Theme.primaryText)

@@ -1,6 +1,11 @@
 import Foundation
 import Combine
 
+enum WidgetStatsDestination: Equatable {
+    case listening
+    case library
+}
+
 @MainActor
 final class AppState: ObservableObject {
     // Shared instance so non-SwiftUI scenes (CarPlay) can drive session restore
@@ -20,6 +25,8 @@ final class AppState: ObservableObject {
     @Published private(set) var phase: Phase = .loading
     @Published private(set) var client: (any MusicService)?
     @Published private(set) var currentServer: ServerRecord?
+    // Set by a Home Screen widget URL and consumed once the Stats tab is ready.
+    @Published private(set) var requestedWidgetStatsDestination: WidgetStatsDestination?
     // probed once on activate
     @Published private(set) var sharingAvailable = false
     // current effective URL is the cellular override
@@ -89,6 +96,16 @@ final class AppState: ObservableObject {
         NetworkMonitor.shared.onConnectionChange { [weak self] conn in
             self?.handleNetworkChange(cellular: conn == .cellular)
         }
+        NetworkMonitor.shared.onSSIDChange { [weak self] _ in
+            self?.reapplyNetworkURL()
+        }
+        Task { [weak self] in
+            await NetworkMonitor.shared.refreshCurrentSSID()
+            self?.restoreStoredSession()
+        }
+    }
+
+    private func restoreStoredSession() {
         let cellular = NetworkMonitor.shared.isCellular
         let candidates = store.startupServers()
         if let restored = candidates.compactMap({ record -> (ServerRecord, SubsonicConfig)? in
@@ -99,7 +116,12 @@ final class AppState: ObservableObject {
             AppLogger.shared.log("Stored session found; server=\(record.displayName); cellular=\(cellular)", category: .networking)
             store.setCurrent(record)
             activeIsCellular = cellular
-            activate(config: config, record: store.currentServer() ?? record, allowFallback: true)
+            let activeRecord = store.currentServer() ?? record
+            if wifiLoginAllowed {
+                activate(config: config, record: activeRecord, allowFallback: true)
+            } else {
+                suspendServerConnection(record: activeRecord)
+            }
             phase = .authenticated
         } else {
             AppLogger.shared.log("No stored session; showing login", category: .ui)
@@ -119,7 +141,11 @@ final class AppState: ObservableObject {
         let cellular = NetworkMonitor.shared.isCellular
         let effective = store.config(for: record, cellular: cellular) ?? config
         activeIsCellular = cellular
-        activate(config: effective, record: record)
+        if wifiLoginAllowed {
+            activate(config: effective, record: record)
+        } else {
+            suspendServerConnection(record: record)
+        }
         phase = .authenticated
     }
 
@@ -141,7 +167,12 @@ final class AppState: ObservableObject {
     }
 
     private func reapplyNetworkURL() {
-        guard phase == .authenticated, let record = currentServer,
+        guard phase == .authenticated, let record = currentServer else { return }
+        guard wifiLoginAllowed else {
+            suspendServerConnection(record: record)
+            return
+        }
+        guard
               let config = store.config(for: record, cellular: activeIsCellular) else { return }
         if config == client?.config, let plex = client as? PlexClient {
             AppLogger.shared.log(
@@ -157,6 +188,33 @@ final class AppState: ObservableObject {
         activate(config: config, record: record, allowFallback: true)
     }
 
+    func refreshWiFiLoginPolicy() {
+        Task {
+            await NetworkMonitor.shared.refreshCurrentSSID()
+            reapplyNetworkURL()
+        }
+    }
+
+    private var wifiLoginAllowed: Bool {
+        WiFiSSIDPolicy.allows(
+            connection: NetworkMonitor.shared.connection,
+            currentSSID: NetworkMonitor.shared.currentSSID
+        )
+    }
+
+    private func suspendServerConnection(record: ServerRecord) {
+        activationID = UUID()
+        currentServer = record
+        client = nil
+        sharingAvailable = false
+        audioPlayer.updateClient(nil)
+        IntentBridge.shared.teardown()
+        AppLogger.shared.log(
+            "Server login suspended by Wi-Fi SSID policy; server=\(record.displayName)",
+            category: .networking
+        )
+    }
+
     func logout() {
         AppLogger.shared.logAlways("Logout started; server=\(currentServer?.displayName ?? "none")", category: .settings)
         audioPlayer.stopAndClear()
@@ -170,6 +228,17 @@ final class AppState: ObservableObject {
 
     func persistPlaybackSession() {
         audioPlayer.persistLastPlaybackSession(synchronize: true)
+    }
+
+    func handleIncomingURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "volta", url.host?.lowercased() == "stats" else { return }
+        let destination = url.pathComponents.drop(while: { $0 == "/" }).first?.lowercased()
+        requestedWidgetStatsDestination = destination == "library" ? .library : .listening
+    }
+
+    func consumeWidgetStatsDestination() -> WidgetStatsDestination? {
+        defer { requestedWidgetStatsDestination = nil }
+        return requestedWidgetStatsDestination
     }
 
     func servers() -> [ServerRecord] {
@@ -215,11 +284,19 @@ final class AppState: ObservableObject {
         }
         store.setCurrent(record)
         activeIsCellular = cellular
-        activate(config: config, record: record)
+        if wifiLoginAllowed {
+            activate(config: config, record: record)
+        } else {
+            suspendServerConnection(record: record)
+        }
         phase = .authenticated
     }
 
     private func activate(config: SubsonicConfig, record: ServerRecord, allowFallback: Bool = false) {
+        guard wifiLoginAllowed else {
+            suspendServerConnection(record: record)
+            return
+        }
         currentServer = record
         sharingAvailable = false
         AppLogger.shared.log("Activating server: \(record.displayName) [\(record.backend.rawValue)]", category: .networking)
@@ -254,6 +331,10 @@ final class AppState: ObservableObject {
     }
 
     private func finishActivation(service: any MusicService, config: SubsonicConfig, record: ServerRecord, started: TimeInterval) {
+        guard wifiLoginAllowed else {
+            suspendServerConnection(record: record)
+            return
+        }
         var activeRecord = record
         if record.backend == .plex, service.config != config {
             activeRecord = store.update(
@@ -281,6 +362,7 @@ final class AppState: ObservableObject {
     private func shouldUseFallback(afterBuilding service: any MusicService, record: ServerRecord, allowFallback: Bool) async -> Bool {
         guard allowFallback,
               NetworkMonitor.shared.connection != .none,
+              wifiLoginAllowed,
               store.fallbackServer(excluding: record) != nil else { return false }
         do {
             try await service.ping()
@@ -293,6 +375,7 @@ final class AppState: ObservableObject {
 
     private func beginFallbackActivation(from record: ServerRecord, reason: String) -> Bool {
         guard NetworkMonitor.shared.connection != .none,
+              wifiLoginAllowed,
               let fallback = store.fallbackServer(excluding: record),
               let config = store.config(for: fallback, cellular: activeIsCellular) else { return false }
         AppLogger.shared.log("Trying fallback server; from=\(record.displayName); fallback=\(fallback.displayName); reason=\(reason)", category: .networking)

@@ -16,6 +16,7 @@ final class TasteStore: ObservableObject {
 
     @Published private(set) var lovedIDs: Set<String>
     @Published private(set) var dislikedIDs: Set<String>
+    @Published private(set) var revision = 0
 
     private init() {
         lovedIDs = Set(UserDefaults.standard.stringArray(forKey: Self.lovedKey) ?? [])
@@ -36,6 +37,7 @@ final class TasteStore: ObservableObject {
             dislikedIDs.remove(songID)
         }
         save()
+        revision &+= 1
     }
 
     func toggleDislike(_ songID: String) {
@@ -46,6 +48,7 @@ final class TasteStore: ObservableObject {
             lovedIDs.remove(songID)
         }
         save()
+        revision &+= 1
     }
 
     private func save() {

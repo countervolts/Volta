@@ -121,10 +121,17 @@ struct MainTabView: View {
         .preferredColorScheme(Theme.colorScheme)
         .onAppear {
             AppDiagnostics.logMainTabDecision()
+            if appState.requestedWidgetStatsDestination != nil {
+                tabSelection.wrappedValue = 3
+            }
         }
         .onDisappear {
             playerPresentationTask?.cancel()
             playerPresentationTask = nil
+        }
+        .onChangeCompat(of: appState.requestedWidgetStatsDestination) { _, destination in
+            guard destination != nil else { return }
+            tabSelection.wrappedValue = 3
         }
         .onChangeCompat(of: shouldShowMiniPlayer) { _, available in
             guard !available else { return }

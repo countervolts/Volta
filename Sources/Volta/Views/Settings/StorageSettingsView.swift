@@ -30,8 +30,8 @@ extension SettingsView {
 
     @ViewBuilder
     var streamingSection: some View {
-        let s = "Streaming & Downloads"
-        if sectionVisible(s, [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["download quality", "download", "bitrate"], ["transcode", "transcoding", "codec", "file type", "rules", "format", "mp3", "aac", "opus", "flac", "alac"], ["download mode", "multithreaded", "threads", "single", "parallel"], ["download speed limit", "speed", "limit", "throttle"], ["storage cap", "cap", "max size", "storage"], ["auto-evict", "auto evict", "evict"]]) {
+        let s = "Streaming"
+        if sectionVisible(s, [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["transcode", "transcoding", "codec", "file type", "rules", "format", "mp3", "aac", "opus", "flac", "alac"]]) {
             Section {
                 if rowVisible(s, ["wi-fi quality", "wifi", "streaming", "quality", "bitrate"]) {
                     Picker(selection: $streamingBitrate) {
@@ -60,20 +60,8 @@ extension SettingsView {
                     .tint(Theme.accent)
                 }
 
-                if rowVisible(s, ["download quality", "download", "bitrate"]) {
-                    Picker(selection: $downloadBitrate) {
-                        Text("Original").tag(0)
-                        Text("320 kbps").tag(320)
-                        Text("256 kbps").tag(256)
-                        Text("192 kbps").tag(192)
-                    } label: {
-                        Label(L(.settings_download_quality), systemImage: "arrow.down.circle")
-                    }
-                    .tint(Theme.accent)
-                }
-
                 if rowVisible(s, ["transcode", "transcoding", "codec", "file type", "rules", "format", "mp3", "aac", "opus", "flac", "alac"]) {
-                    NavigationLink(value: SettingsRoute.transcoding) {
+                    SettingsDetailNavigationLink(.transcoding) {
                         LabeledContent {
                             Text(transcodeSummary).foregroundStyle(Theme.secondaryText)
                         } label: {
@@ -83,71 +71,10 @@ extension SettingsView {
                     .foregroundStyle(Theme.primaryText)
                 }
 
-                if rowVisible(s, ["download mode", "multithreaded", "threads", "single", "parallel"]) {
-                    Picker(selection: $downloadThreadingMode) {
-                        Text("Multithreaded").tag("multi")
-                        Text("Single Thread").tag("single")
-                    } label: {
-                        Label(L(.settings_download_mode), systemImage: "square.stack.3d.down.right")
-                    }
-                    .tint(Theme.accent)
-                }
-
-                if rowVisible(s, ["download speed limit", "speed", "limit", "throttle"]) {
-                    Menu {
-                        Button("Unlimited") { downloadSpeedLimitKBps = 0 }
-                        ForEach([1, 2, 5, 10, 20, 50, 100], id: \.self) { mb in
-                            Button("\(mb) MB/s") { downloadSpeedLimitKBps = mb * 1024 }
-                        }
-                        Divider()
-                        Button("Custom…") {
-                            customSpeedText = downloadSpeedLimitKBps > 0
-                                ? String(format: "%g", Double(downloadSpeedLimitKBps) / 1024) : ""
-                            showCustomSpeedAlert = true
-                        }
-                    } label: {
-                        LabeledContent {
-                            Text(speedLimitLabel).foregroundStyle(Theme.secondaryText)
-                        } label: {
-                            Label(L(.settings_download_speed_limit), systemImage: "speedometer")
-                        }
-                    }
-                    .tint(Theme.primaryText)
-                }
-
-                if rowVisible(s, ["storage cap", "cap", "limit", "max size", "storage"]) {
-                    Menu {
-                        Button("Unlimited") { downloadCapMB = 0 }
-                        ForEach([1, 2, 5, 10, 20, 50, 100], id: \.self) { gb in
-                            Button("\(gb) GB") { downloadCapMB = gb * 1024 }
-                        }
-                        Divider()
-                        Button("Custom…") {
-                            customCapText = downloadCapMB > 0
-                                ? String(format: "%g", Double(downloadCapMB) / 1024) : ""
-                            showCustomCapAlert = true
-                        }
-                    } label: {
-                        LabeledContent {
-                            Text(capLabel).foregroundStyle(Theme.secondaryText)
-                        } label: {
-                            Label(L(.settings_download_storage_cap), systemImage: "internaldrive")
-                        }
-                    }
-                    .tint(Theme.primaryText)
-                }
-
-                if rowVisible(s, ["auto-evict", "auto evict", "evict", "storage cap"]) {
-                    Toggle(isOn: $autoEvictDownloads) {
-                        Label(L(.settings_auto_evict), systemImage: "trash.circle")
-                    }
-                    .tint(Theme.accent)
-                    .disabled(downloadCapMB == 0)
-                }
             } header: {
                 Text(sectionTitle(s))
             } footer: {
-                Text("Cellular quality applies when not on Wi-Fi. Transcode targets require server support. Multithreaded downloads fetch several chunks in parallel for faster saves.")
+                Text("Cellular quality applies when not on Wi-Fi. Transcode targets require server support. Download controls now live in Download Manager.")
             }
             .listRowBackground(Theme.secondaryBackground)
         }
@@ -158,17 +85,25 @@ extension SettingsView {
     @ViewBuilder
     var cacheSection: some View {
         let s = "Storage"
-        if sectionVisible(s, [["downloaded tracks", "download missing songs", "download all missing", "download all music", "playback cache", "enhanced caching", "prefetch", "artwork cache", "local artwork library", "cover", "artist pictures", "lyrics cache", "local lyrics", "save lyrics", "app data", "total", "clear downloads", "clear playback cache", "clear artwork", "delete local artwork", "clear lyrics", "cache", "storage"], ["download local artwork library", "cover", "covers", "album artwork", "artist pictures", "local images"]]) {
+        if sectionVisible(s, [["download manager", "active downloads", "queued downloads", "downloaded tracks", "downloaded albums", "lyrics", "artwork", "playback cache", "enhanced caching", "prefetch", "artwork cache", "app data", "total", "clear playback cache", "clear artwork", "cache", "storage"]]) {
         Section {
-            LabeledContent("Downloaded Tracks", value: downloadsSize)
-                .foregroundStyle(Theme.primaryText)
+            SettingsDetailNavigationLink(.downloadManager) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L(.download_manager_open))
+                            .foregroundStyle(Theme.primaryText)
+                        Text(L(.download_manager_open_detail))
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                } icon: {
+                    Image(systemName: "arrow.down.circle")
+                }
+            }
+
             LabeledContent("Playback Cache", value: playbackCacheSize)
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("Artwork Cache", value: artworkSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Local Artwork Library", value: localArtworkSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Lyrics Cache", value: lyricsSize)
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("Logged Play Events", value: playEventsSize)
                 .foregroundStyle(Theme.primaryText)
@@ -179,22 +114,6 @@ extension SettingsView {
             LabeledContent("Total", value: totalCacheSize)
                 .foregroundStyle(Theme.secondaryText)
 
-            downloadAllMusicRow
-
-            if rowVisible(s, ["download local artwork library", "cover", "covers", "album artwork", "artist pictures", "local images"]) {
-                artworkLibraryDownloadRow
-            }
-
-            Toggle(isOn: $saveLyricsLocally) {
-                Label("Save Lyrics Locally", systemImage: Symbols.lyrics)
-            }
-            .tint(Theme.accent)
-            lyricsDownloadRow
-            Button(role: .destructive) {
-                showClearCacheAlert = true
-            } label: {
-                Label("Clear Downloads", systemImage: "trash")
-            }
             Button(role: .destructive) {
                 clearPlaybackCache()
             } label: {
@@ -206,16 +125,6 @@ extension SettingsView {
                 Label("Clear Artwork & Data Cache", systemImage: "photo.stack")
             }
             Button(role: .destructive) {
-                showClearLocalArtworkAlert = true
-            } label: {
-                Label("Delete Local Artwork Library", systemImage: "photo.badge.minus")
-            }
-            Button(role: .destructive) {
-                clearLocalLyrics()
-            } label: {
-                Label("Clear Local Lyrics", systemImage: "quote.bubble.badge.minus")
-            }
-            Button(role: .destructive) {
                 showClearPlayEventsFirstAlert = true
             } label: {
                 Label("Clear Logged Play Events", systemImage: "chart.bar.xaxis")
@@ -223,7 +132,7 @@ extension SettingsView {
         } header: {
             Text(sectionTitle(s))
         } footer: {
-            Text("Downloaded tracks and saved lyrics are kept for offline use. Artwork and data caches rebuild automatically.")
+            Text("Downloaded media is managed in Download Manager. Playback and artwork caches rebuild automatically.")
         }
         .listRowBackground(Theme.secondaryBackground)
         }
@@ -696,10 +605,7 @@ extension SettingsView {
     }
 
     func clearDownloads() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dir  = docs.appendingPathComponent("volta-downloads")
-        try? FileManager.default.removeItem(at: dir)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        downloadService.removeAllDownloads()
         AppLogger.shared.log("Downloads cleared by user", category: .downloads)
         VoltaNotificationCenter.shared.post(L(.notif_downloads_cleared), tone: .success)
         refreshCacheSize()

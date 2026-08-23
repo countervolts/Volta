@@ -51,12 +51,12 @@ extension SettingsView {
                 }
                 .foregroundStyle(Theme.primaryText)
 
-                NavigationLink(value: SettingsRoute.changelog) {
+                SettingsDetailNavigationLink(.changelog) {
                     Label("Changelog", systemImage: "clock.arrow.circlepath")
                 }
                 .foregroundStyle(Theme.primaryText)
 
-                NavigationLink(value: SettingsRoute.logs) {
+                SettingsDetailNavigationLink(.logs) {
                     Label("Logs", systemImage: Symbols.logs)
                 }
                 .foregroundStyle(Theme.primaryText)

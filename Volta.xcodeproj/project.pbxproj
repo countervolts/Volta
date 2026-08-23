@@ -41,6 +41,7 @@
 		2A02F1D42C35A4CC00A00004 /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = "<group>"; };
 		2A02F1D42C35A4CC00A00101 /* VoltaLiveLyricsWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = VoltaLiveLyricsWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		2A02F1D42C35A4CC00A00102 /* LiveLyricsWidget-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "LiveLyricsWidget-Info.plist"; sourceTree = "<group>"; };
+		2A02F1D42C35A4CC00A00110 /* VoltaWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VoltaWidgets.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -88,6 +89,7 @@
 				2A02F1D42C35A4CC00A00002 /* Info.plist */,
 				2A02F1D42C35A4CC00A00102 /* LiveLyricsWidget-Info.plist */,
 				2A02F1D42C35A4CC00A00003 /* Volta.entitlements */,
+				2A02F1D42C35A4CC00A00110 /* VoltaWidgets.entitlements */,
 				2A02F1D42C35A4CC00A00004 /* Package.swift */,
 				2A02F1D42C35A4CC00A00008 /* Products */,
 			);
@@ -427,6 +429,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = VoltaWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = T3D62F3936;
@@ -454,6 +457,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = VoltaWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = T3D62F3936;

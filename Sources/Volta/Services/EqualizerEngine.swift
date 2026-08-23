@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Accelerate
 import os
 
 extension Notification.Name {
@@ -9,8 +10,10 @@ extension Notification.Name {
 
 struct AudioVisualizerSnapshot: Sendable {
     static let bandCount = 48
+    static let waveformCount = 192
     static let silent = AudioVisualizerSnapshot(
         bands: [Double](repeating: 0, count: bandCount),
+        waveform: [Double](repeating: 0, count: waveformCount),
         rms: 0,
         peak: 0,
         beat: 0,
@@ -18,6 +21,7 @@ struct AudioVisualizerSnapshot: Sendable {
     )
 
     let bands: [Double]
+    let waveform: [Double]
     let rms: Double
     let peak: Double
     let beat: Double
@@ -29,6 +33,7 @@ final class AudioVisualizerEngine {
 
     private let windowSize = 1024
     private let analysisHop = 512
+    private let fftLog2n = vDSP_Length(10)
     private let bandCount = AudioVisualizerSnapshot.bandCount
     private var lock = os_unfair_lock_s()
     private var active = false
@@ -36,10 +41,14 @@ final class AudioVisualizerEngine {
     private var ring = [Double](repeating: 0, count: 1024)
     private var window: [Double]
     private var bandFrequencies: [Double]
+    private var fftSetup: FFTSetup?
+    private var fftReal = [Float](repeating: 0, count: 512)
+    private var fftImaginary = [Float](repeating: 0, count: 512)
     private var writeIndex = 0
     private var hasWindow = false
     private var samplesSinceAnalysis = 0
     private var bands = [Double](repeating: 0, count: AudioVisualizerSnapshot.bandCount)
+    private var waveform = [Double](repeating: 0, count: AudioVisualizerSnapshot.waveformCount)
     private var rms = 0.0
     private var peak = 0.0
     private var beat = 0.0
@@ -48,12 +57,19 @@ final class AudioVisualizerEngine {
     private var timestamp = 0.0
 
     private init() {
-        let size = 1024
+        let size = windowSize
         let initialSampleRate = 44_100.0
         window = (0..<size).map { i in
             0.5 - 0.5 * cos((2.0 * Double.pi * Double(i)) / Double(size - 1))
         }
         bandFrequencies = Self.makeBandFrequencies(count: AudioVisualizerSnapshot.bandCount, sampleRate: initialSampleRate)
+        fftSetup = vDSP_create_fftsetup(fftLog2n, FFTRadix(kFFTRadix2))
+    }
+
+    deinit {
+        if let fftSetup {
+            vDSP_destroy_fftsetup(fftSetup)
+        }
     }
 
     var isActive: Bool {
@@ -68,6 +84,7 @@ final class AudioVisualizerEngine {
         active = enabled
         if !enabled {
             bands = [Double](repeating: 0, count: bandCount)
+            waveform = [Double](repeating: 0, count: AudioVisualizerSnapshot.waveformCount)
             rms = 0
             peak = 0
             beat = 0
@@ -79,6 +96,7 @@ final class AudioVisualizerEngine {
         os_unfair_lock_lock(&lock)
         let snapshot = AudioVisualizerSnapshot(
             bands: bands,
+            waveform: waveform,
             rms: rms,
             peak: peak,
             beat: beat,
@@ -162,27 +180,63 @@ final class AudioVisualizerEngine {
 
     private func analyzeLocked() {
         let now = ProcessInfo.processInfo.systemUptime
-        for band in 0..<bandCount {
-            let frequency = bandFrequencies[band]
-            let omega = (2.0 * Double.pi * frequency) / sampleRate
-            let coefficient = 2.0 * cos(omega)
-            var q1 = 0.0
-            var q2 = 0.0
+        guard let fftSetup else { return }
 
-            for i in 0..<windowSize {
-                let index = (writeIndex + i) % windowSize
-                let sample = ring[index] * window[i]
-                let q0 = coefficient * q1 - q2 + sample
-                q2 = q1
-                q1 = q0
+        // vDSP expects a real signal packed as the even samples in the real
+        // buffer and odd samples in the imaginary buffer. Window it first to
+        // keep leakage from neighbouring frequencies out of the spectrum.
+        fftReal.withUnsafeMutableBufferPointer { realBuffer in
+            fftImaginary.withUnsafeMutableBufferPointer { imaginaryBuffer in
+                guard let real = realBuffer.baseAddress,
+                      let imaginary = imaginaryBuffer.baseAddress else { return }
+
+                for complexIndex in 0..<(windowSize / 2) {
+                    let sampleIndex = complexIndex * 2
+                    real[complexIndex] = Float(ring[(writeIndex + sampleIndex) % windowSize] * window[sampleIndex])
+                    imaginary[complexIndex] = Float(ring[(writeIndex + sampleIndex + 1) % windowSize] * window[sampleIndex + 1])
+                }
+
+                var splitComplex = DSPSplitComplex(realp: real, imagp: imaginary)
+                vDSP_fft_zrip(
+                    fftSetup,
+                    &splitComplex,
+                    1,
+                    fftLog2n,
+                    FFTDirection(FFT_FORWARD)
+                )
+            }
+        }
+
+        for band in 0..<bandCount {
+            let centerBin = min(
+                (windowSize / 2) - 1,
+                max(1, Int((bandFrequencies[band] / sampleRate) * Double(windowSize)))
+            )
+            let radius = max(1, min(6, Int(Double(centerBin) * 0.14)))
+            let lowerBin = max(1, centerBin - radius)
+            let upperBin = min((windowSize / 2) - 1, centerBin + radius)
+            var power = 0.0
+
+            for bin in lowerBin...upperBin {
+                let real = Double(fftReal[bin])
+                let imaginary = Double(fftImaginary[bin])
+                power += real * real + imaginary * imaginary
             }
 
-            let power = max(q1 * q1 + q2 * q2 - coefficient * q1 * q2, 1.0e-12)
-            let db = 10.0 * log10(power / Double(windowSize))
-            let normalized = max(0.0, min(1.0, (db + 72.0) / 56.0))
+            let magnitude = sqrt(power / Double(upperBin - lowerBin + 1)) / (Double(windowSize) * 0.5)
+            let db = 20.0 * log10(max(magnitude, 1.0e-7))
+            let normalized = max(0.0, min(1.0, (db + 78.0) / 66.0))
             let shaped = pow(normalized, 0.58)
             let smoothing = shaped > bands[band] ? 0.48 : 0.16
             bands[band] += (shaped - bands[band]) * smoothing
+        }
+
+        for waveformIndex in waveform.indices {
+            let sourceIndex = min(
+                windowSize - 1,
+                Int((Double(waveformIndex) + 0.5) * Double(windowSize) / Double(waveform.count))
+            )
+            waveform[waveformIndex] = ring[(writeIndex + sourceIndex) % windowSize]
         }
 
         let bassValues = zip(bands, bandFrequencies).filter { $0.1 <= 180 }.map(\.0)
@@ -216,9 +270,11 @@ final class EqualizerEngine {
     static let frequencies: [Double] = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
     static let bandCount = frequencies.count
     static let range: ClosedRange<Double> = -12.0...12.0
+    static let filterQ = 1.4
 
     private var lock = os_unfair_lock_s()
     private(set) var gains = [Double](repeating: 0, count: bandCount)   // dB
+    private(set) var preampDB = 0.0
     // Bumped when running taps need fresh coefficients.
     private(set) var generation: UInt64 = 0
 
@@ -270,12 +326,14 @@ final class EqualizerEngine {
         os_unfair_lock_unlock(&lock)
     }
 
-    func setAll(_ values: [Double]) {
+    func setAll(_ values: [Double], preampDB: Double = 0) {
         os_unfair_lock_lock(&lock)
         for i in 0..<Self.bandCount where i < values.count {
             gains[i] = min(Self.range.upperBound, max(Self.range.lowerBound, values[i]))
             UserDefaults.standard.set(gains[i], forKey: "eqBand\(i)")
         }
+        self.preampDB = min(0, max(-24, preampDB))
+        UserDefaults.standard.set(self.preampDB, forKey: "equalizerPreampDB")
         generation &+= 1
         os_unfair_lock_unlock(&lock)
     }
@@ -286,13 +344,14 @@ final class EqualizerEngine {
         for i in 0..<Self.bandCount {
             gains[i] = UserDefaults.standard.object(forKey: "eqBand\(i)") as? Double ?? 0
         }
+        preampDB = UserDefaults.standard.object(forKey: "equalizerPreampDB") as? Double ?? 0
     }
 
     // Tap snapshot for coefficients and effect state.
-    func snapshot() -> (gains: [Double], generation: UInt64, eqEnabled: Bool, mono: Bool, spatial: Bool, spatialAmount: Double, enhanced: Bool) {
+    func snapshot() -> (gains: [Double], preampDB: Double, generation: UInt64, eqEnabled: Bool, mono: Bool, spatial: Bool, spatialAmount: Double, enhanced: Bool) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
-        return (gains, generation, eqEnabled, monoEnabled, spatialEnabled, spatialAmount, spatialEnhanced)
+        return (gains, preampDB, generation, eqEnabled, monoEnabled, spatialEnabled, spatialAmount, spatialEnhanced)
     }
 
     // MARK: - Tap creation
@@ -333,6 +392,7 @@ private final class TapContext {
 
     // Cached effect flags.
     private var eqEnabled = false
+    private var preampLinear = 1.0
     private var mono = false
     private var spatial = false
     private var spatialAmount = 0.65
@@ -376,11 +436,12 @@ private final class TapContext {
         let snap = EqualizerEngine.shared.snapshot()
         generation = snap.generation
         eqEnabled = !bypassEffects && snap.eqEnabled
+        preampLinear = pow(10, snap.preampDB / 20)
         mono = !bypassEffects && snap.mono
         spatial = !bypassEffects && snap.spatial
         spatialAmount = snap.spatialAmount
         spatialEnhanced = snap.enhanced
-        let q = 1.4
+        let q = EqualizerEngine.filterQ
         for b in 0..<EqualizerEngine.bandCount {
             let f0 = EqualizerEngine.frequencies[b]
             let gainDB = snap.gains[b]
@@ -415,7 +476,7 @@ private final class TapContext {
                 let samples = raw.assumingMemoryBound(to: Float.self)
 
                 for i in 0..<n {
-                    var x = Double(samples[i])
+                    var x = Double(samples[i]) * preampLinear
                     // Cascade bands without per-sample allocation.
                     for b in 0..<EqualizerEngine.bandCount {
                         let x1 = state[ch][b][0], x2 = state[ch][b][1]

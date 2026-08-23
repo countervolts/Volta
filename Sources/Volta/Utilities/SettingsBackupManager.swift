@@ -92,9 +92,9 @@ enum SettingsBackupManager {
         "crossfadeEnabled", "streamingBitrate", "streamingBitrateCell",
         "downloadBitrate", "transcodingFormat", "transcodingEnabled",
         "transcodingSettingsMode", "transcodingCellularOnly", "transcodingRulesEnabled", "transcodeFileTypeRules",
-        "transcodeRuleDefaultBitrate", "transcodingSettingsMigrationVersion", "downloadThreadingMode",
+        "transcodeRuleDefaultBitrate", "transcodingSettingsMigrationVersion",
         "downloadSpeedLimitKBps", "downloadCapMB", "autoEvictDownloads",
-        "artworkAnimation", "liveArtwork", "showLosslessBadge", "showExplicitBadge",
+        "artworkAnimation", "liveArtwork", "stylizedAlbumCover", "showLosslessBadge", "showExplicitBadge",
         "dynamicBackground", "dynamicBackgroundStyle", "showTrackArtwork", "albumTrackTitleDisplayMode", "accentColorName",
         "customAccentRed", "customAccentGreen", "customAccentBlue",
         "imageLoadMode", "cacheMode", "prefetchArtistImages",
@@ -103,7 +103,7 @@ enum SettingsBackupManager {
         "developerLogging", "developerPerformanceOverlay", "performanceOverlayItems", "rawAnimatedArtwork",
         "disableRAMOptimizations", "appWorkerLimit", "singleThreadedMode", "preciseTimestamps",
         "showWarningNotifications", "showOfflineErrorNotifications",
-        "autoPlaylistBackupEnabled", "saveLyricsLocally", "lyricsDownloadSource", "forceLiquidGlass",
+        "autoPlaylistBackupEnabled", "saveLyricsLocally", "downloadLyricsWithSongs", "lyricsDownloadSource", "allowedWiFiLoginSSIDs", "forceLiquidGlass",
         "thirdPartyScrobbleLastFMEnabled", "thirdPartyScrobbleLastFMAPIKey", "thirdPartyScrobbleLastFMUsername",
         "thirdPartyScrobbleKoitoEnabled", "thirdPartyScrobbleKoitoURL",
         "thirdPartyScrobbleMalojaEnabled", "thirdPartyScrobbleMalojaURL",
@@ -113,7 +113,8 @@ enum SettingsBackupManager {
         "pmDisableLiveArtwork", "pmDisableDynamicBackground", "pmReduceAnimations",
         "pmDisablePrefetch", "pmSimpleTransitions",
         "pmLowerStreamQuality", "pmBypassAudioEffects",
-        "smartPlaylists", "playlistFolders", SavedLibrarySortStore.key
+        "smartPlaylists", "playlistFolders", SavedLibrarySortStore.key,
+        HomeSectionPreferencesStore.storageKey
     ]
 
     static func exportURL() throws -> URL {

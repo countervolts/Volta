@@ -112,7 +112,7 @@ extension SettingsView {
 
         case .autoMix:
             return AnyView(
-                NavigationLink(value: SettingsRoute.autoMix) {
+                SettingsDetailNavigationLink(.autoMix) {
                     Label("AutoMix", systemImage: "waveform.path")
                 }
                 .foregroundStyle(Theme.primaryText)
@@ -135,7 +135,7 @@ extension SettingsView {
 
         case .trackPairings:
             return AnyView(
-                NavigationLink(value: SettingsRoute.trackPairings) {
+                SettingsDetailNavigationLink(.trackPairings) {
                     Label("Track Pairings", systemImage: "link")
                 }
                 .foregroundStyle(Theme.primaryText)
@@ -231,7 +231,7 @@ extension SettingsView {
         if sectionVisible(s, [["volume normalization", "replaygain", "replay gain", "normalize", "loudness"], ["equalizer", "eq", "bands", "graphic"], ["mono audio", "mono", "accessibility", "downmix"], ["spatial widener", "spatial", "3d", "stereo", "widener", "spatialize"]]) {
             Section(sectionTitle(s)) {
                 if rowVisible(s, ["equalizer", "eq", "bands", "graphic"]) {
-                    NavigationLink(value: SettingsRoute.equalizer) {
+                    SettingsDetailNavigationLink(.equalizer) {
                         Label(L(.settings_equalizer), systemImage: "slider.vertical.3")
                     }
                     .foregroundStyle(Theme.primaryText)

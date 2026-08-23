@@ -50,6 +50,72 @@ struct DownloadBulkProgress: Equatable, Sendable {
     }
 }
 
+enum DownloadTransferPhase: String, Equatable, Sendable {
+    case queued
+    case downloading
+    case waitingForNetwork
+}
+
+struct DownloadTransfer: Identifiable, Equatable, Sendable {
+    let id: String
+    let song: Song
+    var phase: DownloadTransferPhase
+    var bytesReceived: Int64
+    var totalBytes: Int64?
+    var fallbackProgress: Double
+    var bytesPerSecond: Double
+    var updatedAt: Date
+
+    var fraction: Double {
+        if let totalBytes, totalBytes > 0 {
+            return min(1, max(0, Double(bytesReceived) / Double(totalBytes)))
+        }
+        return min(1, max(0, fallbackProgress))
+    }
+
+    var remainingBytes: Int64? {
+        guard let totalBytes else { return nil }
+        return max(0, totalBytes - bytesReceived)
+    }
+
+    var etaSeconds: TimeInterval? {
+        guard phase == .downloading,
+              let remainingBytes,
+              remainingBytes > 0,
+              bytesPerSecond > 1_024 else { return nil }
+        return Double(remainingBytes) / bytesPerSecond
+    }
+}
+
+struct DownloadTransferSummary: Equatable, Sendable {
+    var itemCount = 0
+    var activeCount = 0
+    var queuedCount = 0
+    var waitingCount = 0
+    var bytesReceived: Int64 = 0
+    var totalBytes: Int64 = 0
+    var bytesRemaining: Int64 = 0
+    var bytesPerSecond = 0.0
+
+    var fraction: Double {
+        guard totalBytes > 0 else { return 0 }
+        return min(1, max(0, Double(bytesReceived) / Double(totalBytes)))
+    }
+
+    var etaSeconds: TimeInterval? {
+        guard bytesRemaining > 0, bytesPerSecond > 1_024 else { return nil }
+        return Double(bytesRemaining) / bytesPerSecond
+    }
+}
+
+struct DownloadedTrackItem: Identifiable, Equatable, Sendable {
+    let id: String
+    let song: Song?
+    let fileName: String
+    let bytes: Int64
+    let downloadedAt: Date?
+}
+
 @MainActor
 private final class DownloadItemState: ObservableObject {
     var state: DownloadState
@@ -167,19 +233,40 @@ private struct PendingDownloadResume {
     let token: UUID
 }
 
+private struct QueuedDownload {
+    let song: Song
+    let url: URL
+    let client: any MusicService
+    let notifyOnCompletion: Bool
+    let belongsToBulkDownload: Bool
+}
+
+private struct DownloadSpeedSample {
+    var bytes: Int64
+    var date: Date
+    var smoothedBytesPerSecond: Double
+}
+
 @MainActor
 final class DownloadService: ObservableObject {
     static let shared = DownloadService()
+    static let concurrentDownloadLimitKey = "concurrentDownloadLimit"
 
     @Published private(set) var bulkProgress = DownloadBulkProgress()
     @Published private(set) var downloadedRevision = 0
+    @Published private(set) var transfers: [DownloadTransfer] = []
 
     private var stateItems: [String: DownloadItemState] = [:]
     private var activeTasks: [String: URLSessionDownloadTask] = [:]
-    private var observations: [String: NSKeyValueObservation] = [:]
+    private var progressPollingTasks: [String: Task<Void, Never>] = [:]
     private var segmentTasks: [String: Task<Void, Never>] = [:]
     private var startTimes: [String: Date] = [:]
     private var pendingResumes: [String: PendingDownloadResume] = [:]
+    private var queuedDownloads: [QueuedDownload] = []
+    private var runningDownloadIDs: Set<String> = []
+    private var transferItems: [String: DownloadTransfer] = [:]
+    private var transferOrder: [String] = []
+    private var speedSamples: [String: DownloadSpeedSample] = [:]
     private var mutedCompletionNotifications: Set<String> = []
     private var downloadTokens: [String: UUID] = [:]
     private var client: (any MusicService)?
@@ -187,7 +274,6 @@ final class DownloadService: ObservableObject {
     private var pinnedCovers: Set<String> = []
     private var pinnedArtists: Set<String> = []
 
-    private var bulkQueue: [Song] = []
     private var bulkSongsByID: [String: Song] = [:]
     private var bulkActiveIDs: Set<String> = []
     private var bulkCompletedCount = 0
@@ -202,7 +288,7 @@ final class DownloadService: ObservableObject {
     private var manifestSaveSequence = 0
 
     private nonisolated static let progressThrottler = DownloadProgressThrottler()
-    private nonisolated static let bulkMaxConcurrent = 2
+    private nonisolated static let defaultMaxConcurrent = 2
 
     static let artworkSizes = [80, 100, 200, 300, 400, 600, 800]
 
@@ -227,6 +313,35 @@ final class DownloadService: ObservableObject {
         // recovered from disk (or migrated from a legacy manifest) so they
         // reappear in the Downloaded / offline lists.
         if client != nil { reconcileDownloadedMetadata() }
+    }
+
+    var concurrentDownloadLimit: Int {
+        let saved = UserDefaults.standard.integer(forKey: Self.concurrentDownloadLimitKey)
+        return min(8, max(1, saved == 0 ? Self.defaultMaxConcurrent : saved))
+    }
+
+    var transferSummary: DownloadTransferSummary {
+        transfers.reduce(into: DownloadTransferSummary()) { summary, transfer in
+            summary.itemCount += 1
+            switch transfer.phase {
+            case .queued: summary.queuedCount += 1
+            case .downloading: summary.activeCount += 1
+            case .waitingForNetwork: summary.waitingCount += 1
+            }
+            summary.bytesReceived += max(0, transfer.bytesReceived)
+            if let total = transfer.totalBytes {
+                summary.totalBytes += max(0, total)
+                summary.bytesRemaining += max(0, total - transfer.bytesReceived)
+            }
+            summary.bytesPerSecond += max(0, transfer.bytesPerSecond)
+        }
+    }
+
+    func setConcurrentDownloadLimit(_ limit: Int) {
+        let clamped = min(8, max(1, limit))
+        UserDefaults.standard.set(clamped, forKey: Self.concurrentDownloadLimitKey)
+        AppLogger.shared.log("Download concurrency changed to \(clamped)", category: .downloads)
+        pumpDownloads()
     }
 
     func state(for song: Song) -> DownloadState {
@@ -275,25 +390,110 @@ final class DownloadService: ObservableObject {
 
     func download(song: Song, notifyOnCompletion: Bool = true) {
         if pendingResumes[song.id] != nil {
-            resumePendingDownload(id: song.id)
+            pumpDownloads()
             return
         }
         guard case .notDownloaded = state(for: song) else { return }
+        guard transferItems[song.id] == nil else { return }
         guard let client, let streamURL = client.downloadURL(for: song) else { return }
         // Demo servers are stream-only; never save their content to the device.
         if DemoServers.isDemo(client.config.baseURL) {
             VoltaNotificationCenter.shared.post(L(.notif_demo_no_downloads), tone: .info)
             return
         }
-        startDownload(song: song, streamURL: streamURL, client: client, notifyOnCompletion: notifyOnCompletion)
+        enqueueDownload(
+            song: song,
+            streamURL: streamURL,
+            client: client,
+            notifyOnCompletion: notifyOnCompletion,
+            belongsToBulkDownload: false
+        )
+    }
+
+    private func enqueueDownload(
+        song: Song,
+        streamURL: URL,
+        client: any MusicService,
+        notifyOnCompletion: Bool,
+        belongsToBulkDownload: Bool,
+        pumpImmediately: Bool = true
+    ) {
+        guard transferItems[song.id] == nil else { return }
+        queuedDownloads.append(QueuedDownload(
+            song: song,
+            url: streamURL,
+            client: client,
+            notifyOnCompletion: notifyOnCompletion,
+            belongsToBulkDownload: belongsToBulkDownload
+        ))
+        setState(.downloading(progress: 0), forID: song.id)
+        transferItems[song.id] = DownloadTransfer(
+            id: song.id,
+            song: song,
+            phase: .queued,
+            bytesReceived: 0,
+            totalBytes: song.size.flatMap { $0 > 0 ? Int64($0) : nil },
+            fallbackProgress: 0,
+            bytesPerSecond: 0,
+            updatedAt: .now
+        )
+        transferOrder.append(song.id)
+        publishTransfers()
+        if pumpImmediately { pumpDownloads() }
+    }
+
+    private func pumpDownloads() {
+        guard NetworkMonitor.shared.connection != .none else { return }
+
+        while runningDownloadIDs.count < concurrentDownloadLimit {
+            if let resumeID = transferOrder.first(where: {
+                pendingResumes[$0] != nil && !(bulkProgress.isPaused && bulkActiveIDs.contains($0))
+            }), let pending = pendingResumes.removeValue(forKey: resumeID) {
+                runningDownloadIDs.insert(resumeID)
+                markTransferStarted(resumeID)
+                AppLogger.shared.log("Download resuming: \(pending.song.title)", category: .downloads)
+                startSingle(
+                    song: pending.song,
+                    url: pending.url,
+                    dest: pending.dest,
+                    manifestURL: pending.manifestURL,
+                    method: pending.method,
+                    resumeData: pending.resumeData,
+                    token: pending.token
+                )
+                continue
+            }
+
+            guard let queueIndex = queuedDownloads.firstIndex(where: {
+                !($0.belongsToBulkDownload && bulkProgress.isPaused)
+            }) else { break }
+            let request = queuedDownloads.remove(at: queueIndex)
+            runningDownloadIDs.insert(request.song.id)
+            startDownload(
+                song: request.song,
+                streamURL: request.url,
+                client: request.client,
+                notifyOnCompletion: request.notifyOnCompletion
+            )
+        }
+        refreshBulkProgress(force: true)
+    }
+
+    private func markTransferStarted(_ songID: String) {
+        guard var transfer = transferItems[songID] else { return }
+        transfer.phase = .downloading
+        transfer.updatedAt = .now
+        transferItems[songID] = transfer
+        speedSamples[songID] = DownloadSpeedSample(bytes: transfer.bytesReceived, date: .now, smoothedBytesPerSecond: 0)
+        publishTransfers()
     }
 
     private func startDownload(song: Song, streamURL: URL, client: any MusicService, notifyOnCompletion: Bool) {
-        guard case .notDownloaded = state(for: song) else { return }
+        guard runningDownloadIDs.contains(song.id) else { return }
 
         let songID = song.id
         let token = beginDownloadToken(for: songID)
-        setState(.downloading(progress: 0), forID: songID)
+        markTransferStarted(songID)
         startTimes[songID] = Date()
         if notifyOnCompletion {
             mutedCompletionNotifications.remove(songID)
@@ -302,6 +502,11 @@ final class DownloadService: ObservableObject {
         }
         Task { await Self.progressThrottler.start(songID) }
         prefetchArtwork(for: song)
+        if UserDefaults.standard.bool(forKey: LyricsBulkDownloader.downloadWithSongsKey) {
+            let sourceValue = UserDefaults.standard.string(forKey: "lyricsDownloadSource")
+            let source = LyricsDownloadSource(rawValue: sourceValue ?? "") ?? .lrclib
+            LyricsBulkDownloader.shared.enqueueCompanionLyrics(for: song, client: client, source: source)
+        }
 
         let title    = song.title
         let progressiveDownload = client.downloadIsProgressive(for: song)
@@ -309,13 +514,14 @@ final class DownloadService: ObservableObject {
         let total    = progressiveDownload ? 0 : (song.size ?? 0)
         let destURL  = directory.appendingPathComponent(Self.safeFileName(id: songID, suffix: suffix))
         let manifestURL = manifestURL
-        let mode = UserDefaults.standard.string(forKey: "downloadThreadingMode") ?? "multi"
-
         let speedLimit = UserDefaults.standard.integer(forKey: "downloadSpeedLimitKBps") * 1024
+        // File-level concurrency is controlled by the Download Manager. A
+        // segmented transfer is only used internally when a speed cap needs
+        // chunk-level throttling; otherwise each song owns one network task.
         let useSegmentedTransfer = !progressiveDownload
             && total > 0
             && !DeveloperExperiments.isAppWorkerSerialized
-            && ((mode != "single" && total > 1_048_576) || speedLimit > 0)
+            && speedLimit > 0
 
         if useSegmentedTransfer {
             let segments = max(2, min(DeveloperExperiments.constrainedConcurrency(default: 6), total / (512 * 1024)))
@@ -325,7 +531,7 @@ final class DownloadService: ObservableObject {
                     try await DownloadService.downloadSegmented(url: streamURL, title: title, total: total, dest: destURL, speedLimit: speedLimit) { progress in
                         if let publish = await Self.progressThrottler.record(songID, progress: progress) {
                             await MainActor.run {
-                                self.publishProgress(songID, publish)
+                                self.publishProgress(songID, publish, completedBytes: nil, totalBytes: Int64(total))
                             }
                         }
                     }
@@ -366,37 +572,76 @@ final class DownloadService: ObservableObject {
         activeTasks[song.id]?.cancel()
         segmentTasks[song.id]?.cancel()
         activeTasks.removeValue(forKey: song.id)
-        observations.removeValue(forKey: song.id)
+        stopProgressPolling(song.id)
         segmentTasks.removeValue(forKey: song.id)
+        queuedDownloads.removeAll { $0.song.id == song.id }
+        runningDownloadIDs.remove(song.id)
         startTimes.removeValue(forKey: song.id)
         pendingResumes.removeValue(forKey: song.id)
         downloadTokens.removeValue(forKey: song.id)
         mutedCompletionNotifications.remove(song.id)
+        LyricsBulkDownloader.shared.cancelCompanionLyrics(for: song.id)
         setState(.notDownloaded, forID: song.id)
+        removeTransfer(song.id)
         Task { await Self.progressThrottler.finish(song.id) }
         if updateBulk {
             handleBulkSongFinished(song.id, success: false)
         }
+        pumpDownloads()
     }
 
     func removeDownload(for song: Song) {
-        AppLogger.shared.log("Download removed: \(song.title)", category: .downloads)
+        removeDownload(id: song.id)
+    }
+
+    func removeDownload(id: String) {
+        let song = manifest[id]?.song
+        let title = song?.title ?? id
+        AppLogger.shared.log("Download removed: \(title)", category: .downloads)
         VoltaNotificationCenter.shared.post(L(.notif_download_removed), tone: .info)
-        cancelDownload(for: song)
-        if let rec = manifest[song.id] {
+        if let song {
+            cancelDownload(for: song)
+        }
+        if let rec = manifest[id] {
             try? FileManager.default.removeItem(atPath: rec.path)
         }
-        manifest.removeValue(forKey: song.id)
+        manifest.removeValue(forKey: id)
+        setState(.notDownloaded, forID: id)
         downloadedRevision += 1
         saveManifest(to: manifestURL)
-        unpinOrphanedArtwork(after: song)
+        if let song { unpinOrphanedArtwork(after: song) }
+    }
+
+    func removeDownloads(ids: [String]) {
+        let uniqueIDs = Array(Set(ids))
+        guard !uniqueIDs.isEmpty else { return }
+        var removedSongs: [Song] = []
+        for id in uniqueIDs {
+            let song = manifest[id]?.song
+            if let song {
+                cancelDownload(for: song, notify: false, updateBulk: false)
+                removedSongs.append(song)
+            }
+            if let record = manifest[id] {
+                try? FileManager.default.removeItem(atPath: record.path)
+            }
+            manifest.removeValue(forKey: id)
+            setState(.notDownloaded, forID: id)
+        }
+        downloadedRevision += 1
+        saveManifest(to: manifestURL)
+        for song in removedSongs { unpinOrphanedArtwork(after: song) }
+        AppLogger.shared.log("Downloaded tracks removed: count=\(uniqueIDs.count)", category: .downloads)
+        VoltaNotificationCenter.shared.post(L(.notif_download_removed), tone: .info)
     }
 
     private func unpinOrphanedArtwork(after song: Song) {
         let remaining = downloadedSongs()
-        if let cover = song.coverArt, !remaining.contains(where: { $0.coverArt == cover }) {
-            pinnedCovers.remove(cover)
+        let artworkGroupID = Self.artworkGroupID(for: song)
+        if let cover = song.coverArt, !remaining.contains(where: { Self.artworkGroupID(for: $0) == artworkGroupID }) {
+            pinnedCovers.remove(artworkGroupID)
             let urls = Self.artworkSizes.compactMap { client?.coverArtURL(id: cover, size: $0) }
+                + (client?.liveArtworkURLs(id: cover) ?? [])
             DeveloperExperiments.launch(priority: .utility) { await ArtworkLoader.shared.unpin(urls) }
         }
         if let artistId = song.artistId, !remaining.contains(where: { $0.artistId == artistId }) {
@@ -512,20 +757,59 @@ final class DownloadService: ObservableObject {
             task = URLSession.shared.downloadTask(with: req, completionHandler: completion)
         }
 
-        let obs = task.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
-            guard let service = self else { return }
-            let fraction = progress.fractionCompleted
-            Task(priority: .utility) { [service] in
-                if let publish = await Self.progressThrottler.record(songID, progress: fraction) {
-                    await MainActor.run {
-                        service.publishProgress(songID, publish)
-                    }
-                }
-            }
-        }
-        observations[songID] = obs
         activeTasks[songID] = task
         task.resume()
+        startProgressPolling(songID, task: task)
+    }
+
+    /// `URLSessionTask.progress` is sometimes a percentage-style `Progress`
+    /// whose units are 0...100. Those values are not byte counts (and were the
+    /// source of the persistent "5 bytes / 100 bytes" display). Poll the task's
+    /// transfer counters instead; they are the actual network byte totals and
+    /// also keep speed moving when a response has no known content length.
+    private func startProgressPolling(_ songID: String, task: URLSessionDownloadTask) {
+        stopProgressPolling(songID)
+        progressPollingTasks[songID] = Task { @MainActor [weak self, weak task] in
+            while !Task.isCancelled {
+                guard let self, let task else { return }
+
+                let completedBytes = max(0, task.countOfBytesReceived)
+                let expectedCandidates = [
+                    task.countOfBytesExpectedToReceive,
+                    task.response?.expectedContentLength ?? NSURLSessionTransferSizeUnknown
+                ]
+                // A real audio payload cannot be 100 bytes. Reject the
+                // percentage-unit placeholder while retaining metadata size as
+                // the fallback for chunked/progressive responses.
+                let responseTotal = expectedCandidates.first {
+                    $0 > 1_024 && $0 >= completedBytes
+                }
+                let resolvedTotal = responseTotal ?? self.transferItems[songID]?.totalBytes
+                let fraction = resolvedTotal.flatMap { total in
+                    total > 0 ? min(1, Double(completedBytes) / Double(total)) : nil
+                } ?? 0
+
+                if let publish = await Self.progressThrottler.record(
+                    songID,
+                    progress: fraction,
+                    force: true
+                ) {
+                    self.publishProgress(
+                        songID,
+                        publish,
+                        completedBytes: completedBytes,
+                        totalBytes: responseTotal
+                    )
+                }
+
+                if task.state == .completed || task.state == .canceling { return }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+        }
+    }
+
+    private func stopProgressPolling(_ songID: String) {
+        progressPollingTasks.removeValue(forKey: songID)?.cancel()
     }
 
     private nonisolated static func downloadValidationFailure(
@@ -570,8 +854,9 @@ final class DownloadService: ObservableObject {
         let songID = song.id
         guard isCurrentDownload(songID, token: token) else { return }
         activeTasks.removeValue(forKey: songID)
-        observations.removeValue(forKey: songID)
+        stopProgressPolling(songID)
         segmentTasks.removeValue(forKey: songID)
+        runningDownloadIDs.remove(songID)
         pendingResumes[songID] = PendingDownloadResume(
             song: song,
             url: url,
@@ -588,36 +873,25 @@ final class DownloadService: ObservableObject {
             progress = 0
         }
         setState(.downloading(progress: progress), forID: songID)
+        if var transfer = transferItems[songID] {
+            transfer.phase = .waitingForNetwork
+            transfer.bytesPerSecond = 0
+            transfer.updatedAt = .now
+            transferItems[songID] = transfer
+            publishTransfers()
+        }
         AppLogger.shared.log("Download paused: \(song.title); connection lost, will resume when network returns", category: .downloads, level: .warning)
         if NetworkMonitor.shared.connection != .none {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-                self?.resumePendingDownload(id: songID)
+                self?.pumpDownloads()
             }
         }
+        pumpDownloads()
     }
 
     private func resumePendingDownloads() {
-        for id in pendingResumes.keys.sorted() {
-            resumePendingDownload(id: id)
-        }
-    }
-
-    private func resumePendingDownload(id: String) {
-        guard activeTasks[id] == nil,
-              segmentTasks[id] == nil,
-              let pending = pendingResumes.removeValue(forKey: id) else { return }
-        if startTimes[id] == nil { startTimes[id] = Date() }
-        AppLogger.shared.log("Download resuming: \(pending.song.title)", category: .downloads)
-        startSingle(
-            song: pending.song,
-            url: pending.url,
-            dest: pending.dest,
-            manifestURL: pending.manifestURL,
-            method: pending.method,
-            resumeData: pending.resumeData,
-            token: pending.token
-        )
+        pumpDownloads()
     }
 
     // MARK: - Multithreaded (segmented) transfer
@@ -698,10 +972,21 @@ final class DownloadService: ObservableObject {
 
     // MARK: - Completion handlers (MainActor state mutations)
 
-    private func publishProgress(_ songID: String, _ publish: DownloadProgressPublish) {
+    private func publishProgress(
+        _ songID: String,
+        _ publish: DownloadProgressPublish,
+        completedBytes: Int64?,
+        totalBytes: Int64?
+    ) {
         guard case .downloading = state(forID: songID) else { return }
         let started = Date()
         setState(.downloading(progress: publish.progress), forID: songID)
+        updateTransferProgress(
+            songID,
+            fraction: publish.progress,
+            completedBytes: completedBytes,
+            totalBytes: totalBytes
+        )
         refreshBulkProgress(force: false)
 
         let elapsed = Date().timeIntervalSince(started)
@@ -719,15 +1004,73 @@ final class DownloadService: ObservableObject {
         }
     }
 
+    private func updateTransferProgress(
+        _ songID: String,
+        fraction: Double,
+        completedBytes: Int64?,
+        totalBytes: Int64?
+    ) {
+        guard var transfer = transferItems[songID] else { return }
+        let now = Date()
+        if let totalBytes, totalBytes > 1_024 { transfer.totalBytes = totalBytes }
+
+        let resolvedBytes: Int64
+        if let completedBytes, completedBytes >= 0 {
+            resolvedBytes = completedBytes
+        } else if let total = transfer.totalBytes {
+            resolvedBytes = Int64((Double(total) * min(1, max(0, fraction))).rounded())
+        } else {
+            resolvedBytes = transfer.bytesReceived
+        }
+
+        var smoothedSpeed = transfer.bytesPerSecond
+        if let previous = speedSamples[songID] {
+            let elapsed = now.timeIntervalSince(previous.date)
+            let delta = resolvedBytes - previous.bytes
+            if elapsed >= 0.08, delta >= 0 {
+                let instant = Double(delta) / elapsed
+                smoothedSpeed = previous.smoothedBytesPerSecond > 0
+                    ? (previous.smoothedBytesPerSecond * 0.68) + (instant * 0.32)
+                    : instant
+            }
+        }
+
+        transfer.phase = .downloading
+        transfer.bytesReceived = max(0, resolvedBytes)
+        transfer.fallbackProgress = fraction
+        transfer.bytesPerSecond = max(0, smoothedSpeed)
+        transfer.updatedAt = now
+        transferItems[songID] = transfer
+        speedSamples[songID] = DownloadSpeedSample(
+            bytes: transfer.bytesReceived,
+            date: now,
+            smoothedBytesPerSecond: transfer.bytesPerSecond
+        )
+        publishTransfers()
+    }
+
+    private func publishTransfers() {
+        transfers = transferOrder.compactMap { transferItems[$0] }
+    }
+
+    private func removeTransfer(_ songID: String) {
+        transferItems.removeValue(forKey: songID)
+        transferOrder.removeAll { $0 == songID }
+        speedSamples.removeValue(forKey: songID)
+        publishTransfers()
+    }
+
     private func complete(_ songID: String, song: Song, path: String, manifestURL: URL, method: String, token: UUID) {
         guard isCurrentDownload(songID, token: token) else { return }
-        manifest[songID] = Record(path: path, song: song, lastPlayed: nil)
+        manifest[songID] = Record(path: path, song: song, lastPlayed: nil, downloadedAt: .now)
         setState(.downloaded, forID: songID)
         activeTasks.removeValue(forKey: songID)
-        observations.removeValue(forKey: songID)
+        stopProgressPolling(songID)
         segmentTasks.removeValue(forKey: songID)
         pendingResumes.removeValue(forKey: songID)
+        runningDownloadIDs.remove(songID)
         clearDownloadToken(songID, token: token)
+        removeTransfer(songID)
         Task { await Self.progressThrottler.finish(songID) }
         saveManifest(to: manifestURL)
         enforceStorageCap(keeping: songID)
@@ -744,6 +1087,7 @@ final class DownloadService: ObservableObject {
         let muted = mutedCompletionNotifications.remove(songID) != nil
         downloadedRevision += 1
         handleBulkSongFinished(songID, success: true)
+        pumpDownloads()
         if !muted {
             VoltaNotificationCenter.shared.post(L(.notif_downloaded, song.title), tone: .success)
         }
@@ -752,12 +1096,33 @@ final class DownloadService: ObservableObject {
     private func prefetchArtwork(for song: Song) {
         guard let client else { return }
 
-        if let cover = song.coverArt, pinnedCovers.insert(cover).inserted {
+        let artworkGroupID = Self.artworkGroupID(for: song)
+        if let cover = song.coverArt, pinnedCovers.insert(artworkGroupID).inserted {
             // Save the original first so downloaded live covers work offline.
             let originalURL = client.coverArtURL(id: cover)
             let urls = ([originalURL].compactMap { $0 }) + Self.artworkSizes.compactMap { client.coverArtURL(id: cover, size: $0) }
+            let liveURLs = client.liveArtworkURLs(id: cover)
             DeveloperExperiments.launch(priority: .utility) {
-                for url in urls { await ArtworkLoader.shared.persist(url) }
+                for url in urls {
+                    await ArtworkLoader.shared.persist(
+                        url,
+                        label: song.album ?? song.title,
+                        kind: "Album Cover",
+                        groupID: artworkGroupID
+                    )
+                }
+                // Backend live-artwork endpoints often include several static
+                // fallbacks. Persist only the first response that actually has
+                // multiple frames, keeping the group as one animated asset.
+                for url in liveURLs {
+                    if await ArtworkLoader.shared.persist(
+                        url,
+                        label: song.album ?? song.title,
+                        kind: "Animated",
+                        groupID: artworkGroupID,
+                        requireAnimation: true
+                    ) { break }
+                }
             }
         }
 
@@ -765,9 +1130,22 @@ final class DownloadService: ObservableObject {
             DeveloperExperiments.launch(priority: .utility) { [client] in
                 guard let info = try? await client.artistInfo(id: artistId),
                       let urlStr = info.bestImageUrl, let url = URL(string: urlStr) else { return }
-                await ArtworkLoader.shared.persistArtistImage(id: artistId, from: url)
+                await ArtworkLoader.shared.persistArtistImage(
+                    id: artistId,
+                    from: url,
+                    label: song.artist
+                )
             }
         }
+    }
+
+    private nonisolated static func artworkGroupID(for song: Song) -> String {
+        if let albumID = song.albumId?.trimmingCharacters(in: .whitespacesAndNewlines), !albumID.isEmpty {
+            return "album:\(albumID)"
+        }
+        let album = (song.album ?? song.title).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let artist = (song.albumArtist ?? song.artist ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return "album-label:\(artist)|\(album)"
     }
 
     private func fail(_ songID: String, removing dest: URL, updateBulk: Bool = true, token: UUID? = nil) {
@@ -779,16 +1157,21 @@ final class DownloadService: ObservableObject {
         }
         setState(.notDownloaded, forID: songID)
         activeTasks.removeValue(forKey: songID)
-        observations.removeValue(forKey: songID)
+        stopProgressPolling(songID)
         segmentTasks.removeValue(forKey: songID)
+        queuedDownloads.removeAll { $0.song.id == songID }
+        runningDownloadIDs.remove(songID)
         startTimes.removeValue(forKey: songID)
         pendingResumes.removeValue(forKey: songID)
         mutedCompletionNotifications.remove(songID)
+        LyricsBulkDownloader.shared.cancelCompanionLyrics(for: songID)
+        removeTransfer(songID)
         Task { await Self.progressThrottler.finish(songID) }
         try? FileManager.default.removeItem(at: dest)
         if updateBulk {
             handleBulkSongFinished(songID, success: false)
         }
+        pumpDownloads()
     }
 
     // MARK: - Bulk missing-song downloads
@@ -809,9 +1192,8 @@ final class DownloadService: ObservableObject {
         }
         guard !pending.isEmpty else { return }
 
-        bulkQueue = pending
         bulkSongsByID = Dictionary(uniqueKeysWithValues: pending.map { ($0.id, $0) })
-        bulkActiveIDs.removeAll()
+        bulkActiveIDs = Set(pending.map(\.id))
         bulkCompletedCount = 0
         bulkFailedCount = 0
         bulkSkippedCount = 0
@@ -829,74 +1211,53 @@ final class DownloadService: ObservableObject {
         )
 
         AppLogger.shared.log(
-            "Bulk missing-song download queued: total=\(bulkTotalCount), bytes=\(bulkBytesTotal), concurrency=\(bulkConcurrencyLimit)",
+            "Bulk missing-song download queued: total=\(bulkTotalCount), bytes=\(bulkBytesTotal), concurrency=\(concurrentDownloadLimit)",
             category: .downloads
         )
         VoltaNotificationCenter.shared.post(L(.notif_downloading_n, pending.count), tone: .success)
-        pumpBulkDownloads()
+        for song in pending {
+            guard let streamURL = client.downloadURL(for: song) else {
+                bulkActiveIDs.remove(song.id)
+                bulkSkippedCount += 1
+                bulkBytesFinished += song.size ?? 0
+                continue
+            }
+            enqueueDownload(
+                song: song,
+                streamURL: streamURL,
+                client: client,
+                notifyOnCompletion: false,
+                belongsToBulkDownload: true,
+                pumpImmediately: false
+            )
+        }
+        pumpDownloads()
     }
 
     func pauseBulkDownloads() {
         guard bulkProgress.phase == .running else { return }
         bulkProgress.phase = .paused
         refreshBulkProgress(force: true)
-        AppLogger.shared.log("Bulk missing-song download paused: completed=\(bulkCompletedCount)/\(bulkTotalCount), active=\(bulkActiveIDs.count)", category: .downloads)
+        AppLogger.shared.log("Bulk missing-song download paused: completed=\(bulkCompletedCount)/\(bulkTotalCount), active=\(runningDownloadIDs.intersection(bulkActiveIDs).count)", category: .downloads)
     }
 
     func resumeBulkDownloads() {
         guard bulkProgress.phase == .paused else { return }
         bulkProgress.phase = .running
         AppLogger.shared.log("Bulk missing-song download resumed", category: .downloads)
-        pumpBulkDownloads()
+        pumpDownloads()
     }
 
     func cancelBulkDownloads() {
         guard bulkProgress.isRunning else { return }
-        let activeSongs = bulkActiveIDs.compactMap { bulkSongsByID[$0] }
-        bulkQueue.removeAll()
-        for song in activeSongs {
+        bulkProgress.phase = .paused
+        let outstandingSongs = bulkActiveIDs.compactMap { bulkSongsByID[$0] }
+        for song in outstandingSongs {
             cancelDownload(for: song, notify: false, updateBulk: false)
         }
         bulkActiveIDs.removeAll()
         finishBulkDownloads(cancelled: true)
-    }
-
-    private var bulkConcurrencyLimit: Int {
-        DeveloperExperiments.constrainedConcurrency(default: Self.bulkMaxConcurrent)
-    }
-
-    private func pumpBulkDownloads() {
-        if bulkProgress.phase == .paused {
-            if bulkActiveIDs.isEmpty, bulkQueue.isEmpty {
-                finishBulkDownloads(cancelled: false)
-            } else {
-                refreshBulkProgress(force: true)
-            }
-            return
-        }
-
-        guard bulkProgress.phase == .running, let client else {
-            refreshBulkProgress(force: true)
-            return
-        }
-
-        while bulkActiveIDs.count < bulkConcurrencyLimit, !bulkQueue.isEmpty {
-            let song = bulkQueue.removeFirst()
-            guard case .notDownloaded = state(for: song),
-                  let streamURL = client.downloadURL(for: song) else {
-                bulkSkippedCount += 1
-                bulkBytesFinished += song.size ?? 0
-                continue
-            }
-            bulkActiveIDs.insert(song.id)
-            startDownload(song: song, streamURL: streamURL, client: client, notifyOnCompletion: false)
-        }
-
-        if bulkActiveIDs.isEmpty, bulkQueue.isEmpty {
-            finishBulkDownloads(cancelled: false)
-        } else {
-            refreshBulkProgress(force: true)
-        }
+        pumpDownloads()
     }
 
     private func handleBulkSongFinished(_ songID: String, success: Bool) {
@@ -907,7 +1268,11 @@ final class DownloadService: ObservableObject {
         } else {
             bulkFailedCount += 1
         }
-        pumpBulkDownloads()
+        if bulkActiveIDs.isEmpty {
+            finishBulkDownloads(cancelled: false)
+        } else {
+            refreshBulkProgress(force: true)
+        }
     }
 
     private func refreshBulkProgress(force: Bool) {
@@ -917,11 +1282,7 @@ final class DownloadService: ObservableObject {
         lastBulkSnapshotAt = now
 
         let activeFraction = bulkActiveIDs.reduce(0.0) { total, id in
-            switch state(forID: id) {
-            case .downloading(let progress): return total + progress
-            case .downloaded: return total + 1
-            case .notDownloaded: return total
-            }
+            total + (transferItems[id]?.fraction ?? 0)
         }
         bulkProgress = DownloadBulkProgress(
             phase: bulkProgress.phase,
@@ -929,7 +1290,7 @@ final class DownloadService: ObservableObject {
             completed: bulkCompletedCount,
             failed: bulkFailedCount,
             skipped: bulkSkippedCount,
-            active: bulkActiveIDs.count,
+            active: runningDownloadIDs.intersection(bulkActiveIDs).count,
             bytesTotal: bulkBytesTotal,
             bytesFinished: bulkBytesFinished,
             activeFraction: activeFraction,
@@ -969,7 +1330,6 @@ final class DownloadService: ObservableObject {
             VoltaNotificationCenter.shared.post("Downloaded \(bulkCompletedCount) missing songs", tone: .success)
         }
 
-        bulkQueue.removeAll()
         bulkSongsByID.removeAll()
         bulkActiveIDs.removeAll()
         bulkStartedAt = nil
@@ -981,6 +1341,7 @@ final class DownloadService: ObservableObject {
         let path: String
         var song: Song?
         var lastPlayed: Date?
+        var downloadedAt: Date?
     }
 
     private var manifest: [String: Record] = [:]
@@ -1008,6 +1369,86 @@ final class DownloadService: ObservableObject {
         manifest.values.reduce(0) { sum, rec in
             sum + ((try? FileManager.default.attributesOfItem(atPath: rec.path)[.size] as? Int) ?? 0)
         }
+    }
+
+    func downloadedItems() -> [DownloadedTrackItem] {
+        manifest.map { id, record in
+            let url = URL(fileURLWithPath: record.path)
+            return DownloadedTrackItem(
+                id: id,
+                song: record.song,
+                fileName: url.lastPathComponent,
+                bytes: Int64(Self.fileSize(at: url)),
+                downloadedAt: record.downloadedAt
+            )
+        }
+        .filter { $0.bytes > 0 }
+        .sorted { lhs, rhs in
+            if lhs.downloadedAt != rhs.downloadedAt {
+                return (lhs.downloadedAt ?? .distantPast) > (rhs.downloadedAt ?? .distantPast)
+            }
+            let lhsName = lhs.song?.title ?? lhs.fileName
+            let rhsName = rhs.song?.title ?? rhs.fileName
+            return lhsName.localizedCaseInsensitiveCompare(rhsName) == .orderedAscending
+        }
+    }
+
+    func downloadedItemsSnapshot() async -> [DownloadedTrackItem] {
+        let records = manifest.map { id, record in
+            DownloadedRecordSnapshot(
+                id: id,
+                song: record.song,
+                path: record.path,
+                downloadedAt: record.downloadedAt
+            )
+        }
+        return await DeveloperExperiments.runSync(priority: .utility) {
+            records.compactMap { record in
+                let url = URL(fileURLWithPath: record.path)
+                let bytes = Int64(Self.fileSize(at: url))
+                guard bytes > 0 else { return nil }
+                return DownloadedTrackItem(
+                    id: record.id,
+                    song: record.song,
+                    fileName: url.lastPathComponent,
+                    bytes: bytes,
+                    downloadedAt: record.downloadedAt
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.downloadedAt != rhs.downloadedAt {
+                    return (lhs.downloadedAt ?? .distantPast) > (rhs.downloadedAt ?? .distantPast)
+                }
+                let lhsName = lhs.song?.title ?? lhs.fileName
+                let rhsName = rhs.song?.title ?? rhs.fileName
+                return lhsName.localizedCaseInsensitiveCompare(rhsName) == .orderedAscending
+            }
+        }
+    }
+
+    func removeAllDownloads() {
+        if bulkProgress.isRunning { bulkProgress.phase = .paused }
+        let transfersToCancel = transferItems.values.map(\.song)
+        queuedDownloads.removeAll()
+        for song in transfersToCancel {
+            cancelDownload(for: song, notify: false, updateBulk: false)
+        }
+        if bulkProgress.isRunning {
+            bulkActiveIDs.removeAll()
+            finishBulkDownloads(cancelled: true)
+        }
+
+        let ids = Array(manifest.keys)
+        for (id, record) in manifest {
+            try? FileManager.default.removeItem(atPath: record.path)
+            setState(.notDownloaded, forID: id)
+        }
+        manifest.removeAll()
+        downloadedSongsCache = nil
+        downloadedRecentCache = nil
+        downloadedRevision += 1
+        saveManifest(to: manifestURL)
+        AppLogger.shared.log("All downloaded tracks removed: count=\(ids.count)", category: .downloads)
     }
 
     private func enforceStorageCap(keeping protectedID: String?) {
@@ -1212,6 +1653,13 @@ final class DownloadService: ObservableObject {
             await writer.save(snapshot, to: url, sequence: sequence)
         }
     }
+}
+
+private struct DownloadedRecordSnapshot: Sendable {
+    let id: String
+    let song: Song?
+    let path: String
+    let downloadedAt: Date?
 }
 
 private actor DownloadManifestWriter {
