@@ -58,6 +58,8 @@ struct PlaylistDetailView: View {
             }
         }
         .navigationBarHidden(true)
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         .preferredColorScheme(Theme.colorScheme)
         .background(SwipeBackEnabler())
         .sheet(item: $activeSheet) { sheet in

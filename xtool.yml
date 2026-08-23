@@ -7,3 +7,4 @@ extensions:
   - product: VoltaLiveLyricsWidget
     bundleID: com.ayo.music.LiveLyricsWidget
     infoPath: LiveLyricsWidget-Info.plist
+    entitlementsPath: VoltaWidgets.entitlements

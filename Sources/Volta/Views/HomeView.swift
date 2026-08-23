@@ -16,6 +16,7 @@ struct HomeView: View {
     @State private var toastMessage: String?
     @State private var savingMixIDs = Set<String>()
     @StateObject private var networkMonitor = NetworkMonitor.shared
+    @StateObject private var homeSectionPreferences = HomeSectionPreferencesStore.shared
     @Namespace private var heroNamespace
 
     private let pad = Theme.Layout.screenPadding
@@ -46,6 +47,11 @@ struct HomeView: View {
         .preferredColorScheme(Theme.colorScheme)
         .task(id: appState.currentServer?.id) {
             if !vm.hasLoaded { await vm.load(appState: appState) }
+        }
+        .onChangeCompat(of: homeSectionPreferences.mixPreferences) { _, _ in
+            Task {
+                await vm.refreshMixes(appState: appState)
+            }
         }
     }
 
@@ -259,53 +265,76 @@ struct HomeView: View {
         let uniqueSongs = songs.filter { seen.insert($0.id).inserted }
         guard uniqueSongs.count >= 3 else { return [] }
 
+        let preferences = homeSectionPreferences.mixPreferences
         var rng = SeededRNG(seed: SeededRNG.daySeed() &+ 0x5150)
         func mixSongs(_ source: [Song], salt: UInt64) -> [Song] {
             var localRNG = SeededRNG(seed: SeededRNG.daySeed() &+ salt)
-            return Array(source.shuffled(using: &localRNG).prefix(min(50, source.count)))
+            let count = preferences.length.songCount(available: source.count, rng: &localRNG)
+            return Array(source.shuffled(using: &localRNG).prefix(count))
         }
 
-        var mixes: [MusicMix] = [
-            MusicMix(
+        var mixes: [MusicMix] = []
+        if preferences.isEnabled(.discovery) {
+            mixes.append(MusicMix(
                 id: "offline-downloaded-\(SeededRNG.daySeed())",
                 title: "Downloaded Mix",
                 subtitle: "Available offline",
                 coverArt: uniqueSongs.first(where: { $0.coverArt != nil })?.coverArt,
                 songs: mixSongs(uniqueSongs, salt: 0xD0A)
-            )
-        ]
+            ))
+        }
+
+        if preferences.isEnabled(.heavyRotation) {
+            var recentSeen = Set<String>()
+            let recentlyPlayed = DownloadService.shared.downloadedSongsByRecentPlay()
+                .filter { recentSeen.insert($0.id).inserted }
+            if recentlyPlayed.count >= 3 {
+                let picked = mixSongs(recentlyPlayed, salt: 0x48454156)
+                mixes.append(MusicMix(
+                    id: "station-heavy-\(SeededRNG.daySeed())",
+                    title: "Heavy Rotation",
+                    subtitle: "Songs you keep coming back to",
+                    coverArt: picked.first(where: { $0.coverArt != nil })?.coverArt,
+                    songs: picked
+                ))
+            }
+        }
 
         let genreGroups = Dictionary(grouping: uniqueSongs) { $0.genre ?? "" }
             .filter { !$0.key.isEmpty && $0.value.count >= 3 }
             .sorted { $0.value.count > $1.value.count }
-        for (genre, group) in genreGroups.prefix(2) {
-            let picked = mixSongs(group, salt: stableSeed(genre))
-            mixes.append(MusicMix(
-                id: "genre-\(genre)",
-                title: "\(genre) Mix",
-                subtitle: "Daily \(genre.lowercased()) mix",
-                coverArt: picked.first(where: { $0.coverArt != nil })?.coverArt,
-                songs: picked
-            ))
+        if preferences.isEnabled(.genres) {
+            for (genre, group) in genreGroups.prefix(preferences.genreMixCount) {
+                let picked = mixSongs(group, salt: stableSeed(genre))
+                mixes.append(MusicMix(
+                    id: "genre-\(genre)",
+                    title: "\(genre) Mix",
+                    subtitle: "Daily \(genre.lowercased()) mix",
+                    coverArt: picked.first(where: { $0.coverArt != nil })?.coverArt,
+                    songs: picked
+                ))
+            }
         }
 
         let artistGroups = Dictionary(grouping: uniqueSongs) { artistKey(for: $0) }
             .filter { $0.value.count >= 3 }
             .sorted { $0.value.count > $1.value.count }
-        if let (_, group) = artistGroups.first {
-            let artist = group.first?.primaryArtistName ?? ArtistNameResolver.unknownArtist
-            let picked = mixSongs(group, salt: 0xA27157)
-            mixes.append(MusicMix(
-                id: "artist-\(artist)",
-                title: "\(artist) Mix",
-                subtitle: "Based on \(artist)",
-                coverArt: picked.first(where: { $0.coverArt != nil })?.coverArt,
-                songs: picked
-            ))
+        if preferences.isEnabled(.artists) {
+            for (artistID, group) in artistGroups.prefix(preferences.artistMixCount) {
+                let artist = group.first?.primaryArtistName ?? ArtistNameResolver.unknownArtist
+                let picked = mixSongs(group, salt: stableSeed(artistID))
+                mixes.append(MusicMix(
+                    id: "artist-\(artistID)",
+                    title: "\(artist) Mix",
+                    subtitle: "Based on \(artist)",
+                    coverArt: picked.first(where: { $0.coverArt != nil })?.coverArt,
+                    songs: picked
+                ))
+            }
         }
 
         mixes.shuffle(using: &rng)
-        return Array(mixes.prefix(4))
+        return Array(mixes.prefix(10))
     }
 
     private func offlineMoreLikeSections(songs: [Song], albums: [Album]) -> [HomeViewModel.MoreLikeSection] {
@@ -354,57 +383,67 @@ struct HomeView: View {
     private func homeSectionContent(_ data: HomeSectionSnapshot) -> some View {
         homeHeader
 
-        if !data.picksFeed.isEmpty {
-            section(title: L(.home_picks_for_you)) {
-                HorizontalPickRow(items: data.picksFeed,
-                    onSelectAlbum: { path.append(HomeRoute.album($0)) },
-                    onSelectMix: { path.append(HomeRoute.mix($0)) },
-                    onSaveMix: { saveMixAsPlaylist($0) },
-                    isSavingMix: { savingMixIDs.contains($0.id) })
-            }
+        ForEach(homeSectionPreferences.visibleSections) { homeSection in
+            homeContentSection(homeSection, data: data)
         }
+    }
 
-        if !data.recentlyPlayed.isEmpty {
-            VStack(alignment: .leading, spacing: 14) {
-                SectionHeaderView(L(.home_recently_played)) {
-                    path.append(HomeRoute.mediaGrid(title: L(.home_recently_played), items: data.recentlyPlayed))
-                }
-                .padding(.horizontal, pad)
-                HorizontalMediaRow(items: data.recentlyPlayed) { item in
-                    navigate(to: item)
+    @ViewBuilder
+    private func homeContentSection(_ homeSection: HomeSection, data: HomeSectionSnapshot) -> some View {
+        switch homeSection {
+        case .picks:
+            if !data.picksFeed.isEmpty {
+                section(title: L(.home_picks_for_you)) {
+                    HorizontalPickRow(items: data.picksFeed,
+                        onSelectAlbum: { path.append(HomeRoute.album($0)) },
+                        onSelectMix: { path.append(HomeRoute.mix($0)) },
+                        onSaveMix: { saveMixAsPlaylist($0) },
+                        isSavingMix: { savingMixIDs.contains($0.id) })
                 }
             }
-        }
-
-        if !data.topArtists.isEmpty {
-            section(title: L(.home_artists)) {
-                ArtistScrollRow(artists: data.topArtists) { artist in
-                    path.append(HomeRoute.artist(artist))
+        case .recentlyPlayed:
+            if !data.recentlyPlayed.isEmpty {
+                VStack(alignment: .leading, spacing: 14) {
+                    SectionHeaderView(L(.home_recently_played)) {
+                        path.append(HomeRoute.mediaGrid(title: L(.home_recently_played), items: data.recentlyPlayed))
+                    }
+                    .padding(.horizontal, pad)
+                    HorizontalMediaRow(items: data.recentlyPlayed) { item in
+                        navigate(to: item)
+                    }
                 }
             }
-        }
-
-        ForEach(data.moreLike) { item in
-            section(title: L(.home_more_like, item.artistName)) {
-                HorizontalMediaRow(items: item.albums.map(MediaItem.init(album:))) { mediaItem in
-                    if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+        case .artists:
+            if !data.topArtists.isEmpty {
+                section(title: L(.home_artists)) {
+                    ArtistScrollRow(artists: data.topArtists) { artist in
+                        path.append(HomeRoute.artist(artist))
+                    }
                 }
             }
-        }
-
-        if !data.discover.isEmpty {
-            section(title: L(.home_discover)) {
-                HorizontalMediaRow(items: data.discover.map(MediaItem.init(album:))) { mediaItem in
-                    if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+        case .moreLike:
+            ForEach(data.moreLike) { item in
+                section(title: L(.home_more_like, item.artistName)) {
+                    HorizontalMediaRow(items: item.albums.map(MediaItem.init(album:))) { mediaItem in
+                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+                    }
                 }
             }
-        }
-
-        if !data.newReleases.isEmpty {
-            let items = data.newReleases.map(MediaItem.init(album:))
-            section(title: L(.home_recently_added), seeAll: { path.append(HomeRoute.mediaGrid(title: L(.home_recently_added), items: items)) }) {
-                HorizontalMediaRow(items: items) { mediaItem in
-                    if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+        case .discover:
+            if !data.discover.isEmpty {
+                section(title: L(.home_discover)) {
+                    HorizontalMediaRow(items: data.discover.map(MediaItem.init(album:))) { mediaItem in
+                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+                    }
+                }
+            }
+        case .recentlyAdded:
+            if !data.newReleases.isEmpty {
+                let items = data.newReleases.map(MediaItem.init(album:))
+                section(title: L(.home_recently_added), seeAll: { path.append(HomeRoute.mediaGrid(title: L(.home_recently_added), items: items)) }) {
+                    HorizontalMediaRow(items: items) { mediaItem in
+                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+                    }
                 }
             }
         }

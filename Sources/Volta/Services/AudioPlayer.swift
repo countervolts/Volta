@@ -371,6 +371,9 @@ final class AudioPlayer: ObservableObject {
 
     init() {
         activePlayer = primaryPlayer
+        // Start route-aware EQ profile handling with the playback stack, not
+        // only after the Equalizer settings screen has been opened.
+        _ = EqualizerProfileStore.shared
         // Disable AVQueuePlayer's boundary wait; blend warmup has its own gate.
         primaryPlayer.automaticallyWaitsToMinimizeStalling = false
         secondaryPlayer.automaticallyWaitsToMinimizeStalling = false
@@ -782,7 +785,7 @@ final class AudioPlayer: ObservableObject {
     }
 
     func setVisualizerActive(_ active: Bool) {
-        AudioVisualizerEngine.shared.setActive(active && !RuntimeCompatibility.usesPassiveVisualizer)
+        AudioVisualizerEngine.shared.setActive(active)
         if let item = player.currentItem {
             applyEqualizer(to: item)
         }

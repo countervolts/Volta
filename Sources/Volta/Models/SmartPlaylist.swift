@@ -1,5 +1,11 @@
 import Foundation
 
+struct SmartPlaylistEvaluationContext: Sendable {
+    let lovedIDs: Set<String>
+    let dislikedIDs: Set<String>
+    let downloadedIDs: Set<String>
+}
+
 enum SmartMatchMode: String, CaseIterable, Codable, Identifiable, Sendable {
     case all = "All Rules"
     case any = "Any Rule"
@@ -72,9 +78,11 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
     var onlyHiResLossless = false
     var onlyDownloaded = false
     var neverPlayedOnly = false
-    var taste: SmartTasteFilter = .notDisliked
+    var taste: SmartTasteFilter = .any
     var sort: SmartSortMode = .random
-    var limit: Int = 50
+    /// Zero means every matching song. Limits are opt-in so a newly created
+    /// Loved playlist immediately contains the user's complete loved library.
+    var limit: Int = 0
 
     var coverArt: String? { nil }
 
@@ -101,11 +109,12 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
         return parts.isEmpty ? L(.smart_mix) : parts.prefix(3).joined(separator: " · ")
     }
 
-    @MainActor
-    func resolve(from songs: [Song]) -> [Song] {
-        let tasteStore = TasteStore.shared
+    nonisolated func resolve(
+        from songs: [Song],
+        context: SmartPlaylistEvaluationContext
+    ) -> [Song] {
         var matches = songs.filter { song in
-            let rules = activeRules(for: song, tasteStore: tasteStore)
+            let rules = activeRules(for: song, context: context)
             guard !rules.isEmpty else { return true }
             switch matchMode {
             case .all: return rules.allSatisfy { $0 }
@@ -134,11 +143,14 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
             matches.shuffle(using: &rng)
         }
 
-        return Array(matches.prefix(max(1, limit)))
+        guard limit > 0 else { return matches }
+        return Array(matches.prefix(limit))
     }
 
-    @MainActor
-    private func activeRules(for song: Song, tasteStore: TasteStore) -> [Bool] {
+    nonisolated private func activeRules(
+        for song: Song,
+        context: SmartPlaylistEvaluationContext
+    ) -> [Bool] {
         var rules: [Bool] = []
         if !searchText.isEmpty {
             let haystack = [song.title, song.artist, song.album, song.genre].compactMap { $0 }.joined(separator: " ")
@@ -163,18 +175,18 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
         if let minPlayCount { rules.append((song.playCount ?? 0) >= minPlayCount) }
         if onlyLossless { rules.append(song.isLossless) }
         if onlyHiResLossless { rules.append(song.isHiResLossless) }
-        if onlyDownloaded { rules.append(DownloadService.shared.state(for: song) == .downloaded) }
+        if onlyDownloaded { rules.append(context.downloadedIDs.contains(song.id)) }
         if neverPlayedOnly { rules.append((song.playCount ?? 0) == 0) }
 
         switch taste {
         case .any:
             break
         case .loved:
-            rules.append(tasteStore.state(for: song.id) == .loved)
+            rules.append(context.lovedIDs.contains(song.id))
         case .notDisliked:
-            rules.append(tasteStore.state(for: song.id) != .disliked)
+            rules.append(!context.dislikedIDs.contains(song.id))
         case .disliked:
-            rules.append(tasteStore.state(for: song.id) == .disliked)
+            rules.append(context.dislikedIDs.contains(song.id))
         }
 
         return rules
@@ -207,9 +219,9 @@ struct SmartPlaylist: Identifiable, Hashable, Codable, Sendable {
         onlyHiResLossless = (try? c.decode(Bool.self, forKey: .onlyHiResLossless)) ?? false
         onlyDownloaded = (try? c.decode(Bool.self, forKey: .onlyDownloaded)) ?? false
         neverPlayedOnly = (try? c.decode(Bool.self, forKey: .neverPlayedOnly)) ?? false
-        taste = (try? c.decode(SmartTasteFilter.self, forKey: .taste)) ?? .notDisliked
+        taste = (try? c.decode(SmartTasteFilter.self, forKey: .taste)) ?? .any
         sort = (try? c.decode(SmartSortMode.self, forKey: .sort)) ?? .random
-        limit = (try? c.decode(Int.self, forKey: .limit)) ?? 50
+        limit = max(0, (try? c.decode(Int.self, forKey: .limit)) ?? 0)
     }
 
     func encode(to encoder: Encoder) throws {

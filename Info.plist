@@ -26,10 +26,21 @@
 	<string>Volta</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.ayo.music</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>volta</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleShortVersionString</key>
-	<string>1.3.2</string>
+	<string>1.4.0</string>
 	<key>CFBundleVersion</key>
-	<string>12</string>
+	<string>13</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>INIntentsSupported</key>
@@ -79,6 +90,8 @@
 	<string>Volta scans nearby AirPods broadcasts to identify the active output model.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Volta scans your local network to find compatible music servers.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Volta uses your Wi-Fi network name to apply SSID-restricted server login.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSBonjourServices</key>

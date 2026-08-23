@@ -8,6 +8,7 @@ struct VoltaApp: App {
 
     init() {
         VoltaShortcuts.updateAppShortcutParameters()
+        WidgetSnapshotManager.refreshListening()
     }
 
     var body: some Scene {

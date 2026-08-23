@@ -99,6 +99,29 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case home_discovery_station_subtitle
     case home_heavy_rotation
     case home_heavy_rotation_subtitle
+    case home_customize
+    case home_sections
+    case home_sections_footer
+    case home_reset_layout
+    case home_more_like_this
+    case home_layout_visible              // "%d of %d" = visible sections / total
+    case home_mixes
+    case home_mixes_footer
+    case home_mix_customize
+    case home_mix_sources
+    case home_mix_sources_footer
+    case home_mix_sources_enabled         // "%d of %d" = enabled sources / total
+    case home_mix_genres
+    case home_mix_artists
+    case home_mix_genres_detail
+    case home_mix_artists_detail
+    case home_mix_genre_count
+    case home_mix_artist_count
+    case home_mix_length
+    case home_mix_length_short
+    case home_mix_length_standard
+    case home_mix_length_long
+    case home_mix_reset
 
     // Media metadata / sheets
     case media_title
@@ -147,6 +170,7 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case appearance_explicit_badge
     case appearance_live_artwork
     case appearance_stylized_cover
+    case appearance_stylized_album_cover
     case appearance_song_artwork_lists
     case appearance_long_track_titles
     case track_titles_truncate
@@ -226,6 +250,88 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case notif_listening_stats_cleared
     case notif_restart_to_apply
 
+    // Stats sharing
+    case stats_share_title
+    case stats_share_export_data
+    case stats_share_recap
+    case stats_share_rhythm
+    case stats_share_library_dna
+    case stats_share_include_names
+    case stats_share_local_only
+    case stats_share_scanning_library
+    case stats_share_need_listening
+    case stats_share_listening_time
+    case stats_share_streak
+    case stats_share_unique_songs
+    case stats_share_unique_albums
+    case stats_share_sessions
+    case stats_share_average_plays_per_day
+    case stats_share_average_listening_per_day
+    case stats_share_average_track_length
+    case stats_share_longest_session
+    case stats_share_longest_streak
+    case stats_share_top_genre
+    case stats_share_best_month
+    case stats_share_top_artist
+    case stats_share_private_recap
+    case stats_share_names_hidden
+    case stats_share_last_52_weeks
+    case stats_share_rhythm_subtitle
+    case stats_share_active_days
+    case stats_share_active_weeks
+    case stats_share_albums
+    case stats_share_collection_time
+    case stats_share_library_size
+    case stats_share_release_spectrum
+    case stats_share_metadata
+    case stats_share_customize
+    case stats_share_template
+    case stats_share_format
+    case stats_share_square
+    case stats_share_portrait
+    case stats_share_story
+    case stats_share_widget_size
+    case stats_share_layout
+    case stats_share_compact
+    case stats_share_standard
+    case stats_share_expanded
+    case stats_share_widget_light
+    case stats_share_widget_dark
+    case stats_share_widget_default
+    case stats_share_app_accent
+    case stats_share_custom_color
+    case stats_share_background_color
+    case stats_share_text_color
+    case stats_share_orange
+    case stats_share_indigo
+    case stats_share_teal
+    case stats_share_blue
+    case stats_share_green
+    case stats_share_pink
+    case stats_share_font
+    case stats_share_font_widget
+    case stats_share_font_rounded
+    case stats_share_font_mono
+    case stats_share_font_sans
+    case stats_share_lead_metric
+    case stats_share_data_one
+    case stats_share_data_two
+    case stats_share_data_three
+    case stats_share_visible_data
+    case stats_share_show_header
+    case stats_share_show_footer
+    case stats_share_show_server_address
+    case stats_share_map_span
+    case stats_share_map_measure
+    case stats_share_12_weeks
+    case stats_share_26_weeks
+    case stats_share_by_plays
+    case stats_share_by_time
+    case stats_share_listening
+    case stats_share_hi_res
+    case stats_share_lossless_share
+    case stats_share_reset
+
     // Busy Settings labels
     case settings_autoplay
     case settings_infinite_play
@@ -235,6 +341,17 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case settings_artwork_zoom
     case settings_resume_interruption
     case settings_equalizer
+    case equalizer_autoeq_imports_title
+    case equalizer_manage_autoeq_profiles
+    case equalizer_autoeq_manual_paste_hint
+    case equalizer_autoeq_paste_ten_band
+    case equalizer_autoeq_manual_paste_success_title
+    case equalizer_autoeq_manual_paste_success_message
+    case equalizer_profile_apply
+    case equalizer_profile_assign_current_device
+    case equalizer_profile_delete
+    case equalizer_device_saved_assignments
+    case equalizer_device_remove
     case settings_volume_normalization
     case settings_mono_audio
     case settings_spatial_widener
@@ -242,10 +359,25 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case settings_cellular_quality
     case settings_download_quality
     case settings_transcoding_format
-    case settings_download_mode
     case settings_download_speed_limit
     case settings_download_storage_cap
     case settings_auto_evict
+    case download_manager_title
+    case download_manager_open
+    case download_manager_open_detail
+    case download_manager_concurrent
+    case download_manager_active
+    case download_manager_downloaded
+    case download_manager_no_transfers
+    case download_manager_no_downloads
+    case download_manager_queued
+    case download_manager_waiting
+    case download_manager_downloading
+    case download_manager_total
+    case download_manager_remaining
+    case download_manager_eta
+    case download_manager_tracks_size
+    case download_manager_transfer_count
 
     // Browse screens (Search / Artist / Album / Queue / Lyrics)
     case search_placeholder
@@ -1320,6 +1452,29 @@ enum Strings {
             nl: "Nummers waar je op terugkomt", ru: "Песни, к которым вы возвращаетесь", pl: "Utwory, do których wracasz", tr: "Tekrar tekrar dinlediğin şarkılar", sv: "Låtar du återvänder till", nb: "Låter du stadig vender tilbake til",
             da: "Sange du vender tilbage til", fi: "Kappaleet, joihin palaat", zh: "你反复回听的歌曲", ja: "何度も戻ってくる曲", ko: "계속 다시 듣는 곡"
         ),
+        .home_customize: en("Customize Home"),
+        .home_sections: en("Home Sections"),
+        .home_sections_footer: en("Choose what appears on Home, then drag sections into the order you want."),
+        .home_reset_layout: en("Reset Home Layout"),
+        .home_more_like_this: en("More Like This"),
+        .home_layout_visible: en("%d of %d visible"),
+        .home_mixes: en("Daily Mixes"),
+        .home_mixes_footer: en("Choose the kinds of mixes that appear in Picks for You, and tune their size and variety."),
+        .home_mix_customize: en("Customize Mixes"),
+        .home_mix_sources: en("Mix Sources"),
+        .home_mix_sources_footer: en("Turn off any mix family you do not want in Picks for You. Genre and artist mixes are built from your library."),
+        .home_mix_sources_enabled: en("%d of %d enabled"),
+        .home_mix_genres: en("Genre Mixes"),
+        .home_mix_artists: en("Artist Mixes"),
+        .home_mix_genres_detail: en("A daily mix from genres in your library"),
+        .home_mix_artists_detail: en("A daily mix based on artists in your library"),
+        .home_mix_genre_count: en("Genre mixes each day"),
+        .home_mix_artist_count: en("Artist mixes each day"),
+        .home_mix_length: en("Mix length"),
+        .home_mix_length_short: en("Short (15–25 songs)"),
+        .home_mix_length_standard: en("Standard (20–50 songs)"),
+        .home_mix_length_long: en("Long (40–70 songs)"),
+        .home_mix_reset: en("Reset Mixes"),
 
         // Media metadata / sheets
         .media_title: tr(en: "Title", es: "Título", fr: "Titre", de: "Titel", pt: "Título", it: "Titolo", nl: "Titel", ru: "Название", pl: "Tytuł", tr: "Başlık", sv: "Titel", nb: "Tittel", da: "Titel", fi: "Nimi", zh: "标题", ja: "タイトル", ko: "제목"),
@@ -1394,7 +1549,7 @@ enum Strings {
             .danish: "Lyd", .finnish: "Ääni", .chinese: "音频", .japanese: "オーディオ", .korean: "오디오",
         ],
         .settings_section_streaming: [
-            .english: "Streaming & Downloads", .spanish: "Streaming y descargas", .french: "Streaming et téléchargements",
+            .english: "Streaming", .spanish: "Streaming y descargas", .french: "Streaming et téléchargements",
             .german: "Streaming & Downloads", .portuguese: "Streaming e transferências", .italian: "Streaming e download",
             .dutch: "Streamen en downloads", .russian: "Потоки и загрузки", .polish: "Strumieniowanie i pobieranie",
             .turkish: "Yayın ve indirmeler", .swedish: "Strömning och nedladdningar", .norwegian: "Strømming og nedlastinger",
@@ -1485,6 +1640,7 @@ enum Strings {
             .danish: "Stiliseret afspilleromslag", .finnish: "Tyylitelty soittimen kansi", .chinese: "风格化播放器封面",
             .japanese: "スタイル付きプレーヤーカバー", .korean: "스타일 플레이어 커버",
         ],
+        .appearance_stylized_album_cover: en("Stylized Album Cover"),
         .appearance_song_artwork_lists: [
             .english: "Song Artwork in Lists", .spanish: "Carátulas en las listas", .french: "Pochettes dans les listes",
             .german: "Song-Cover in Listen", .portuguese: "Capas nas listas", .italian: "Copertine negli elenchi",
@@ -2044,6 +2200,408 @@ enum Strings {
             .japanese: "全体に適用するには Volta を再起動してください", .korean: "전체에 적용하려면 Volta를 다시 시작하세요",
         ],
 
+        // Stats sharing
+        .stats_share_title: tr(
+            en: "Share Stats", es: "Compartir estadísticas", fr: "Partager les stats", de: "Statistiken teilen", pt: "Partilhar estatísticas", it: "Condividi statistiche",
+            nl: "Statistieken delen", ru: "Поделиться статистикой", pl: "Udostępnij statystyki", tr: "İstatistikleri paylaş", sv: "Dela statistik", nb: "Del statistikk",
+            da: "Del statistik", fi: "Jaa tilastot", zh: "分享统计", ja: "統計を共有", ko: "통계 공유"
+        ),
+        .stats_share_export_data: tr(
+            en: "Export Data", es: "Exportar datos", fr: "Exporter les données", de: "Daten exportieren", pt: "Exportar dados", it: "Esporta dati",
+            nl: "Gegevens exporteren", ru: "Экспорт данных", pl: "Eksportuj dane", tr: "Verileri dışa aktar", sv: "Exportera data", nb: "Eksporter data",
+            da: "Eksporter data", fi: "Vie tiedot", zh: "导出数据", ja: "データを書き出す", ko: "데이터 내보내기"
+        ),
+        .stats_share_recap: tr(
+            en: "Listening Recap", es: "Resumen de escucha", fr: "Récapitulatif d'écoute", de: "Hör-Rückblick", pt: "Resumo de audição", it: "Riepilogo ascolti",
+            nl: "Luisteroverzicht", ru: "Итоги прослушивания", pl: "Podsumowanie słuchania", tr: "Dinleme özeti", sv: "Lyssningssammanfattning", nb: "Lytteoppsummering",
+            da: "Lytteoversigt", fi: "Kuunteluyhteenveto", zh: "收听回顾", ja: "再生まとめ", ko: "청취 요약"
+        ),
+        .stats_share_rhythm: tr(
+            en: "Listening Rhythm", es: "Ritmo de escucha", fr: "Rythme d'écoute", de: "Hörrhythmus", pt: "Ritmo de audição", it: "Ritmo di ascolto",
+            nl: "Luisterritme", ru: "Ритм прослушивания", pl: "Rytm słuchania", tr: "Dinleme ritmi", sv: "Lyssningsrytm", nb: "Lytterytme",
+            da: "Lytterytme", fi: "Kuuntelurytmi", zh: "收听节奏", ja: "再生リズム", ko: "청취 리듬"
+        ),
+        .stats_share_library_dna: tr(
+            en: "Library DNA", es: "ADN de la biblioteca", fr: "ADN de la bibliothèque", de: "Bibliotheks-DNA", pt: "DNA da biblioteca", it: "DNA della libreria",
+            nl: "Bibliotheek-DNA", ru: "ДНК библиотеки", pl: "DNA biblioteki", tr: "Kitaplık DNA'sı", sv: "Biblioteks-DNA", nb: "Bibliotek-DNA",
+            da: "Biblioteks-DNA", fi: "Kirjaston DNA", zh: "资料库 DNA", ja: "ライブラリ DNA", ko: "라이브러리 DNA"
+        ),
+        .stats_share_include_names: tr(
+            en: "Include song and artist names", es: "Incluir nombres de canciones y artistas", fr: "Inclure les noms des titres et artistes", de: "Song- und Künstlernamen einbeziehen", pt: "Incluir nomes de músicas e artistas", it: "Includi nomi di brani e artisti",
+            nl: "Nummers en artiesten opnemen", ru: "Включать названия треков и исполнителей", pl: "Uwzględnij nazwy utworów i wykonawców", tr: "Şarkı ve sanatçı adlarını ekle", sv: "Inkludera låt- och artistnamn", nb: "Inkluder låt- og artistnavn",
+            da: "Medtag sang- og kunstnernavne", fi: "Sisällytä kappale- ja artistinimet", zh: "包含歌曲和艺人名称", ja: "曲名とアーティスト名を含める", ko: "곡 및 아티스트 이름 포함"
+        ),
+        .stats_share_local_only: tr(
+            en: "Created locally on this device", es: "Creado localmente en este dispositivo", fr: "Créé localement sur cet appareil", de: "Lokal auf diesem Gerät erstellt", pt: "Criado localmente neste dispositivo", it: "Creato localmente su questo dispositivo",
+            nl: "Lokaal op dit apparaat gemaakt", ru: "Создано локально на этом устройстве", pl: "Utworzono lokalnie na tym urządzeniu", tr: "Bu aygıtta yerel olarak oluşturuldu", sv: "Skapat lokalt på den här enheten", nb: "Opprettet lokalt på denne enheten",
+            da: "Oprettet lokalt på denne enhed", fi: "Luotu paikallisesti tällä laitteella", zh: "仅在此设备上本地创建", ja: "このデバイス上でローカルに作成", ko: "이 기기에서 로컬로 생성됨"
+        ),
+        .stats_share_scanning_library: tr(
+            en: "Scanning library…", es: "Analizando biblioteca…", fr: "Analyse de la bibliothèque…", de: "Bibliothek wird gescannt…", pt: "A analisar a biblioteca…", it: "Analisi della libreria…",
+            nl: "Bibliotheek wordt gescand…", ru: "Сканирование библиотеки…", pl: "Skanowanie biblioteki…", tr: "Kitaplık taranıyor…", sv: "Skannar biblioteket…", nb: "Skanner biblioteket…",
+            da: "Scanner biblioteket…", fi: "Kirjastoa tutkitaan…", zh: "正在扫描资料库…", ja: "ライブラリをスキャン中…", ko: "라이브러리 스캔 중…"
+        ),
+        .stats_share_need_listening: tr(
+            en: "Listen to a little more to create a recap", es: "Escucha un poco más para crear un resumen", fr: "Écoutez encore un peu pour créer un récapitulatif", de: "Höre noch etwas mehr, um einen Rückblick zu erstellen", pt: "Ouça mais um pouco para criar um resumo", it: "Ascolta ancora un po' per creare un riepilogo",
+            nl: "Luister nog wat meer om een overzicht te maken", ru: "Послушайте ещё немного, чтобы создать итоги", pl: "Posłuchaj trochę więcej, aby utworzyć podsumowanie", tr: "Özet oluşturmak için biraz daha dinle", sv: "Lyssna lite mer för att skapa en sammanfattning", nb: "Lytt litt mer for å lage en oppsummering",
+            da: "Lyt lidt mere for at oprette en oversigt", fi: "Kuuntele hieman lisää luodaksesi yhteenvedon", zh: "再听一些内容即可创建回顾", ja: "もう少し聴くとまとめを作成できます", ko: "요약을 만들려면 조금 더 들어보세요"
+        ),
+        .stats_share_listening_time: tr(
+            en: "Listening Time", es: "Tiempo de escucha", fr: "Temps d'écoute", de: "Hörzeit", pt: "Tempo de audição", it: "Tempo di ascolto",
+            nl: "Luistertijd", ru: "Время прослушивания", pl: "Czas słuchania", tr: "Dinleme süresi", sv: "Lyssningstid", nb: "Lyttetid",
+            da: "Lyttetid", fi: "Kuunteluaika", zh: "收听时长", ja: "再生時間", ko: "청취 시간"
+        ),
+        .stats_share_streak: tr(
+            en: "Streak", es: "Racha", fr: "Série", de: "Serie", pt: "Sequência", it: "Serie",
+            nl: "Reeks", ru: "Серия", pl: "Seria", tr: "Seri", sv: "Sviter", nb: "Rekke",
+            da: "Stime", fi: "Putki", zh: "连续天数", ja: "連続記録", ko: "연속 기록"
+        ),
+        .stats_share_unique_songs: tr(
+            en: "Unique Songs", es: "Canciones únicas", fr: "Morceaux uniques", de: "Einzigartige Titel", pt: "Faixas únicas", it: "Brani unici",
+            nl: "Unieke nummers", ru: "Уникальные треки", pl: "Unikalne utwory", tr: "Benzersiz parçalar", sv: "Unika låtar", nb: "Unike sanger",
+            da: "Unikke sange", fi: "Yksilölliset kappaleet", zh: "独特歌曲", ja: "ユニークな曲", ko: "고유한 곡"
+        ),
+        .stats_share_unique_albums: tr(
+            en: "Unique Albums", es: "Álbumes únicos", fr: "Albums uniques", de: "Einzigartige Alben", pt: "Álbuns únicos", it: "Album unici",
+            nl: "Unieke albums", ru: "Уникальные альбомы", pl: "Unikalne albumy", tr: "Benzersiz albümler", sv: "Unika album", nb: "Unike album",
+            da: "Unikke album", fi: "Yksilölliset albumit", zh: "独特专辑", ja: "ユニークなアルバム", ko: "고유한 앨범"
+        ),
+        .stats_share_sessions: tr(
+            en: "Sessions", es: "Sesiones", fr: "Sessions", de: "Sitzungen", pt: "Sessões", it: "Sessioni",
+            nl: "Sessies", ru: "Сеансы", pl: "Sesje", tr: "Oturumlar", sv: "Sessioner", nb: "Økter",
+            da: "Sessioner", fi: "Istunnot", zh: "会话", ja: "セッション", ko: "세션"
+        ),
+        .stats_share_average_plays_per_day: tr(
+            en: "Avg. Plays / Day", es: "Reproducciones medias/día", fr: "Lectures moy./jour", de: "Wiedergaben/Tag", pt: "Reproduções médias/dia", it: "Riproduzioni medie/giorno",
+            nl: "Gem. afspelingen/dag", ru: "Ср. воспроизведений/день", pl: "Śr. odtworzeń/dzień", tr: "Ort. çalma/gün", sv: "Snittspelningar/dag", nb: "Gj.sn. avspillinger/dag",
+            da: "Gns. afspilninger/dag", fi: "Keskim. toistoa/päivä", zh: "平均每日播放", ja: "1日平均再生", ko: "일일 평균 재생"
+        ),
+        .stats_share_average_listening_per_day: tr(
+            en: "Avg. Listening / Day", es: "Escucha media/día", fr: "Écoute moy./jour", de: "Ø Hörzeit/Tag", pt: "Escuta média/dia", it: "Ascolto medio/giorno",
+            nl: "Gem. luistertijd/dag", ru: "Ср. прослушивание/день", pl: "Śr. słuchania/dzień", tr: "Ort. dinleme/gün", sv: "Snittlyssning/dag", nb: "Gj.sn. lytting/dag",
+            da: "Gns. lytning/dag", fi: "Keskimääräinen kuuntelu/päivä", zh: "平均每日收听", ja: "1日平均再生時間", ko: "일일 평균 청취"
+        ),
+        .stats_share_average_track_length: tr(
+            en: "Avg. Track Length", es: "Duración media de canción", fr: "Durée moyenne des morceaux", de: "Ø Titellänge", pt: "Duração média da faixa", it: "Durata media brano",
+            nl: "Gem. nummerlengte", ru: "Ср. длительность трека", pl: "Śr. długość utworu", tr: "Ort. parça süresi", sv: "Genomsnittlig låtlängd", nb: "Gj.sn. sanglengde",
+            da: "Gns. sanglængde", fi: "Keskimääräinen kappalepituus", zh: "平均歌曲时长", ja: "平均曲長", ko: "평균 곡 길이"
+        ),
+        .stats_share_longest_session: tr(
+            en: "Longest Session", es: "Sesión más larga", fr: "Session la plus longue", de: "Längste Sitzung", pt: "Sessão mais longa", it: "Sessione più lunga",
+            nl: "Langste sessie", ru: "Самый долгий сеанс", pl: "Najdłuższa sesja", tr: "En uzun oturum", sv: "Längsta sessionen", nb: "Lengste økt",
+            da: "Længste session", fi: "Pisin istunto", zh: "最长会话", ja: "最長セッション", ko: "가장 긴 세션"
+        ),
+        .stats_share_longest_streak: tr(
+            en: "Longest Streak", es: "Racha más larga", fr: "Plus longue série", de: "Längste Serie", pt: "Maior sequência", it: "Serie più lunga",
+            nl: "Langste reeks", ru: "Самая длинная серия", pl: "Najdłuższa seria", tr: "En uzun seri", sv: "Längsta svit", nb: "Lengste rekke",
+            da: "Længste stime", fi: "Pisin putki", zh: "最长连续", ja: "最長連続記録", ko: "최장 연속 기록"
+        ),
+        .stats_share_top_genre: tr(
+            en: "Top Genre", es: "Género principal", fr: "Genre principal", de: "Top-Genre", pt: "Género principal", it: "Genere principale",
+            nl: "Topgenre", ru: "Главный жанр", pl: "Najpopularniejszy gatunek", tr: "En çok dinlenen tür", sv: "Toppgenre", nb: "Toppgenre",
+            da: "Topgenre", fi: "Suosikkigenre", zh: "最常听流派", ja: "トップジャンル", ko: "최다 재생 장르"
+        ),
+        .stats_share_best_month: tr(
+            en: "Best Month", es: "Mejor mes", fr: "Meilleur mois", de: "Bester Monat", pt: "Melhor mês", it: "Miglior mese",
+            nl: "Beste maand", ru: "Лучший месяц", pl: "Najlepszy miesiąc", tr: "En iyi ay", sv: "Bästa månaden", nb: "Beste måned",
+            da: "Bedste måned", fi: "Paras kuukausi", zh: "最佳月份", ja: "ベスト月", ko: "최고의 달"
+        ),
+        .stats_share_top_artist: tr(
+            en: "Top Artist", es: "Artista principal", fr: "Artiste principal", de: "Top-Künstler", pt: "Artista principal", it: "Artista principale",
+            nl: "Topartiest", ru: "Главный исполнитель", pl: "Najczęstszy wykonawca", tr: "En çok dinlenen sanatçı", sv: "Mest spelade artist", nb: "Mest spilte artist",
+            da: "Mest spillede kunstner", fi: "Kuunnelluin artisti", zh: "最常听艺人", ja: "トップアーティスト", ko: "최다 재생 아티스트"
+        ),
+        .stats_share_private_recap: tr(
+            en: "Private Recap", es: "Resumen privado", fr: "Récapitulatif privé", de: "Privater Rückblick", pt: "Resumo privado", it: "Riepilogo privato",
+            nl: "Privéoverzicht", ru: "Приватные итоги", pl: "Prywatne podsumowanie", tr: "Özel özet", sv: "Privat sammanfattning", nb: "Privat oppsummering",
+            da: "Privat oversigt", fi: "Yksityinen yhteenveto", zh: "私密回顾", ja: "プライベートまとめ", ko: "비공개 요약"
+        ),
+        .stats_share_names_hidden: tr(
+            en: "Names hidden", es: "Nombres ocultos", fr: "Noms masqués", de: "Namen ausgeblendet", pt: "Nomes ocultos", it: "Nomi nascosti",
+            nl: "Namen verborgen", ru: "Имена скрыты", pl: "Nazwy ukryte", tr: "Adlar gizli", sv: "Namn dolda", nb: "Navn skjult",
+            da: "Navne skjult", fi: "Nimet piilotettu", zh: "名称已隐藏", ja: "名前は非表示", ko: "이름 숨김"
+        ),
+        .stats_share_last_52_weeks: tr(
+            en: "Last 52 Weeks", es: "Últimas 52 semanas", fr: "52 dernières semaines", de: "Letzte 52 Wochen", pt: "Últimas 52 semanas", it: "Ultime 52 settimane",
+            nl: "Afgelopen 52 weken", ru: "Последние 52 недели", pl: "Ostatnie 52 tygodnie", tr: "Son 52 hafta", sv: "Senaste 52 veckorna", nb: "Siste 52 uker",
+            da: "Seneste 52 uger", fi: "Viimeiset 52 viikkoa", zh: "过去 52 周", ja: "直近52週間", ko: "지난 52주"
+        ),
+        .stats_share_rhythm_subtitle: tr(
+            en: "One square is one day of listening.", es: "Cada cuadrado es un día de escucha.", fr: "Chaque carré représente un jour d'écoute.", de: "Jedes Feld steht für einen Hörtag.", pt: "Cada quadrado representa um dia de audição.", it: "Ogni quadrato rappresenta un giorno di ascolto.",
+            nl: "Elk vakje is één luisterdag.", ru: "Каждый квадрат — один день прослушивания.", pl: "Każdy kwadrat to jeden dzień słuchania.", tr: "Her kare bir dinleme günüdür.", sv: "Varje ruta är en lyssningsdag.", nb: "Hver rute er én lyttedag.",
+            da: "Hver firkant er én lyttedag.", fi: "Jokainen ruutu on yksi kuuntelupäivä.", zh: "每个方格代表一天的收听。", ja: "1つのマスが1日の再生を表します。", ko: "한 칸은 하루의 청취를 나타냅니다."
+        ),
+        .stats_share_active_days: tr(
+            en: "Active Days", es: "Días activos", fr: "Jours actifs", de: "Aktive Tage", pt: "Dias ativos", it: "Giorni attivi",
+            nl: "Actieve dagen", ru: "Активные дни", pl: "Aktywne dni", tr: "Aktif günler", sv: "Aktiva dagar", nb: "Aktive dager",
+            da: "Aktive dage", fi: "Aktiiviset päivät", zh: "活跃天数", ja: "アクティブ日数", ko: "활동 일수"
+        ),
+        .stats_share_active_weeks: tr(
+            en: "Active Weeks", es: "Semanas activas", fr: "Semaines actives", de: "Aktive Wochen", pt: "Semanas ativas", it: "Settimane attive",
+            nl: "Actieve weken", ru: "Активные недели", pl: "Aktywne tygodnie", tr: "Etkin haftalar", sv: "Aktiva veckor", nb: "Aktive uker",
+            da: "Aktive uger", fi: "Aktiiviset viikot", zh: "活跃周数", ja: "アクティブな週", ko: "활성 주"
+        ),
+        .stats_share_albums: tr(
+            en: "Albums", es: "Álbumes", fr: "Albums", de: "Alben", pt: "Álbuns", it: "Album",
+            nl: "Albums", ru: "Альбомы", pl: "Albumy", tr: "Albümler", sv: "Album", nb: "Album",
+            da: "Album", fi: "Albumit", zh: "专辑", ja: "アルバム", ko: "앨범"
+        ),
+        .stats_share_collection_time: tr(
+            en: "Collection Time", es: "Duración de la colección", fr: "Durée de la collection", de: "Sammlungszeit", pt: "Duração da coleção", it: "Durata della raccolta",
+            nl: "Collectieduur", ru: "Длительность коллекции", pl: "Czas kolekcji", tr: "Koleksiyon süresi", sv: "Samlingstid", nb: "Samlingstid",
+            da: "Samlingstid", fi: "Kokoelman kesto", zh: "收藏时长", ja: "コレクション時間", ko: "컬렉션 시간"
+        ),
+        .stats_share_library_size: tr(
+            en: "Library Size", es: "Tamaño de la biblioteca", fr: "Taille de la bibliothèque", de: "Bibliotheksgröße", pt: "Tamanho da biblioteca", it: "Dimensione libreria",
+            nl: "Bibliotheekgrootte", ru: "Размер библиотеки", pl: "Rozmiar biblioteki", tr: "Kitaplık boyutu", sv: "Biblioteksstorlek", nb: "Bibliotekstørrelse",
+            da: "Biblioteksstørrelse", fi: "Kirjaston koko", zh: "资料库大小", ja: "ライブラリサイズ", ko: "라이브러리 크기"
+        ),
+        .stats_share_release_spectrum: tr(
+            en: "Release Spectrum", es: "Espectro de lanzamientos", fr: "Spectre des sorties", de: "Veröffentlichungsspektrum", pt: "Espetro de lançamentos", it: "Spettro delle uscite",
+            nl: "Uitgavespectrum", ru: "Спектр релизов", pl: "Rozkład wydań", tr: "Yayın spektrumu", sv: "Utgivningsspektrum", nb: "Utgivelsesspekter",
+            da: "Udgivelsesspektrum", fi: "Julkaisuspektri", zh: "发行年代分布", ja: "リリース分布", ko: "발매 분포"
+        ),
+        .stats_share_metadata: tr(
+            en: "Metadata", es: "Metadatos", fr: "Métadonnées", de: "Metadaten", pt: "Metadados", it: "Metadati",
+            nl: "Metagegevens", ru: "Метаданные", pl: "Metadane", tr: "Meta veriler", sv: "Metadata", nb: "Metadata",
+            da: "Metadata", fi: "Metatiedot", zh: "元数据", ja: "メタデータ", ko: "메타데이터"
+        ),
+        .stats_share_customize: tr(
+            en: "Customize", es: "Personalizar", fr: "Personnaliser", de: "Anpassen", pt: "Personalizar", it: "Personalizza",
+            nl: "Aanpassen", ru: "Настроить", pl: "Dostosuj", tr: "Özelleştir", sv: "Anpassa", nb: "Tilpass",
+            da: "Tilpas", fi: "Mukauta", zh: "自定义", ja: "カスタマイズ", ko: "사용자화"
+        ),
+        .stats_share_template: tr(
+            en: "Template", es: "Plantilla", fr: "Modèle", de: "Vorlage", pt: "Modelo", it: "Modello",
+            nl: "Sjabloon", ru: "Шаблон", pl: "Szablon", tr: "Şablon", sv: "Mall", nb: "Mal",
+            da: "Skabelon", fi: "Malli", zh: "模板", ja: "テンプレート", ko: "템플릿"
+        ),
+        .stats_share_format: tr(
+            en: "Format", es: "Formato", fr: "Format", de: "Format", pt: "Formato", it: "Formato",
+            nl: "Indeling", ru: "Формат", pl: "Format", tr: "Biçim", sv: "Format", nb: "Format",
+            da: "Format", fi: "Muoto", zh: "格式", ja: "形式", ko: "형식"
+        ),
+        .stats_share_square: tr(
+            en: "Square", es: "Cuadrado", fr: "Carré", de: "Quadratisch", pt: "Quadrado", it: "Quadrato",
+            nl: "Vierkant", ru: "Квадрат", pl: "Kwadrat", tr: "Kare", sv: "Kvadrat", nb: "Kvadrat",
+            da: "Kvadrat", fi: "Neliö", zh: "方形", ja: "正方形", ko: "정사각형"
+        ),
+        .stats_share_portrait: tr(
+            en: "Portrait", es: "Retrato", fr: "Portrait", de: "Hochformat", pt: "Retrato", it: "Ritratto",
+            nl: "Portret", ru: "Портрет", pl: "Pionowy", tr: "Dikey", sv: "Porträtt", nb: "Portrett",
+            da: "Portræt", fi: "Pysty", zh: "竖版", ja: "縦長", ko: "세로"
+        ),
+        .stats_share_story: tr(
+            en: "Story", es: "Historia", fr: "Story", de: "Story", pt: "Story", it: "Storia",
+            nl: "Verhaal", ru: "История", pl: "Relacja", tr: "Hikâye", sv: "Berättelse", nb: "Fortelling",
+            da: "Fortælling", fi: "Tarina", zh: "快拍", ja: "ストーリー", ko: "스토리"
+        ),
+        .stats_share_widget_size: tr(
+            en: "Layout", es: "Diseño", fr: "Disposition", de: "Layout", pt: "Layout", it: "Layout",
+            nl: "Indeling", ru: "Макет", pl: "Układ", tr: "Düzen", sv: "Layout", nb: "Oppsett",
+            da: "Layout", fi: "Asettelu", zh: "布局", ja: "レイアウト", ko: "레이아웃"
+        ),
+        .stats_share_layout: tr(
+            en: "Layout", es: "Diseño", fr: "Disposition", de: "Layout", pt: "Layout", it: "Layout",
+            nl: "Indeling", ru: "Макет", pl: "Układ", tr: "Düzen", sv: "Layout", nb: "Oppsett",
+            da: "Layout", fi: "Asettelu", zh: "布局", ja: "レイアウト", ko: "레이아웃"
+        ),
+        .stats_share_compact: tr(
+            en: "Compact", es: "Compacto", fr: "Compact", de: "Kompakt", pt: "Compacto", it: "Compatto",
+            nl: "Compact", ru: "Компактный", pl: "Kompaktowy", tr: "Kompakt", sv: "Kompakt", nb: "Kompakt",
+            da: "Kompakt", fi: "Tiivis", zh: "紧凑", ja: "コンパクト", ko: "컴팩트"
+        ),
+        .stats_share_standard: tr(
+            en: "Standard", es: "Estándar", fr: "Standard", de: "Standard", pt: "Padrão", it: "Standard",
+            nl: "Standaard", ru: "Стандартный", pl: "Standardowy", tr: "Standart", sv: "Standard", nb: "Standard",
+            da: "Standard", fi: "Normaali", zh: "标准", ja: "標準", ko: "표준"
+        ),
+        .stats_share_expanded: tr(
+            en: "Expanded", es: "Ampliado", fr: "Étendu", de: "Erweitert", pt: "Expandido", it: "Esteso",
+            nl: "Uitgebreid", ru: "Расширенный", pl: "Rozszerzony", tr: "Genişletilmiş", sv: "Utökad", nb: "Utvidet",
+            da: "Udvidet", fi: "Laajennettu", zh: "扩展", ja: "拡張", ko: "확장"
+        ),
+        .stats_share_widget_light: tr(
+            en: "Light", es: "Claro", fr: "Clair", de: "Hell", pt: "Claro", it: "Chiaro",
+            nl: "Licht", ru: "Светлая", pl: "Jasny", tr: "Açık", sv: "Ljus", nb: "Lys",
+            da: "Lys", fi: "Vaalea", zh: "浅色", ja: "ライト", ko: "라이트"
+        ),
+        .stats_share_widget_dark: tr(
+            en: "Dark", es: "Oscuro", fr: "Sombre", de: "Dunkel", pt: "Escuro", it: "Scuro",
+            nl: "Donker", ru: "Тёмная", pl: "Ciemny", tr: "Koyu", sv: "Mörk", nb: "Mørk",
+            da: "Mørk", fi: "Tumma", zh: "深色", ja: "ダーク", ko: "다크"
+        ),
+        .stats_share_widget_default: tr(
+            en: "Widget Default", es: "Predeterminado del widget", fr: "Par défaut du widget", de: "Widget-Standard", pt: "Predefinição do widget", it: "Predefinito del widget",
+            nl: "Widgetstandaard", ru: "По умолчанию для виджета", pl: "Domyślny widżet", tr: "Varsayılan araç takımı", sv: "Widgetstandard", nb: "Widgetstandard",
+            da: "Widgetstandard", fi: "Vimpaimen oletus", zh: "小组件默认", ja: "ウィジェットのデフォルト", ko: "위젯 기본값"
+        ),
+        .stats_share_app_accent: tr(
+            en: "App Accent", es: "Acento de la app", fr: "Accent de l’app", de: "App-Akzent", pt: "Destaque do app", it: "Accento app",
+            nl: "App-accent", ru: "Акцент приложения", pl: "Akcent aplikacji", tr: "Uygulama vurgusu", sv: "Appaccent", nb: "Appaksent",
+            da: "Appaccent", fi: "Sovelluksen korostus", zh: "应用强调色", ja: "アプリアクセント", ko: "앱 강조색"
+        ),
+        .stats_share_custom_color: tr(
+            en: "Custom Color", es: "Color personalizado", fr: "Couleur personnalisée", de: "Eigene Farbe", pt: "Cor personalizada", it: "Colore personalizzato",
+            nl: "Aangepaste kleur", ru: "Свой цвет", pl: "Własny kolor", tr: "Özel renk", sv: "Egen färg", nb: "Egendefinert farge",
+            da: "Brugerdefineret farve", fi: "Mukautettu väri", zh: "自定义颜色", ja: "カスタムカラー", ko: "사용자 색상"
+        ),
+        .stats_share_background_color: tr(
+            en: "Background Color", es: "Color de fondo", fr: "Couleur d’arrière-plan", de: "Hintergrundfarbe", pt: "Cor de fundo", it: "Colore di sfondo",
+            nl: "Achtergrondkleur", ru: "Цвет фона", pl: "Kolor tła", tr: "Arka plan rengi", sv: "Bakgrundsfärg", nb: "Bakgrunnsfarge",
+            da: "Baggrundsfarve", fi: "Taustaväri", zh: "背景颜色", ja: "背景色", ko: "배경 색상"
+        ),
+        .stats_share_text_color: tr(
+            en: "Text Color", es: "Color del texto", fr: "Couleur du texte", de: "Textfarbe", pt: "Cor do texto", it: "Colore del testo",
+            nl: "Tekstkleur", ru: "Цвет текста", pl: "Kolor tekstu", tr: "Metin rengi", sv: "Textfärg", nb: "Tekstfarge",
+            da: "Tekstfarve", fi: "Tekstin väri", zh: "文本颜色", ja: "文字色", ko: "텍스트 색상"
+        ),
+        .stats_share_orange: tr(
+            en: "Orange", es: "Naranja", fr: "Orange", de: "Orange", pt: "Laranja", it: "Arancione",
+            nl: "Oranje", ru: "Оранжевый", pl: "Pomarańczowy", tr: "Turuncu", sv: "Orange", nb: "Oransje",
+            da: "Orange", fi: "Oranssi", zh: "橙色", ja: "オレンジ", ko: "주황"
+        ),
+        .stats_share_indigo: tr(
+            en: "Indigo", es: "Índigo", fr: "Indigo", de: "Indigo", pt: "Índigo", it: "Indaco",
+            nl: "Indigo", ru: "Индиго", pl: "Indygo", tr: "İndigo", sv: "Indigo", nb: "Indigo",
+            da: "Indigo", fi: "Indigo", zh: "靛蓝", ja: "インディゴ", ko: "인디고"
+        ),
+        .stats_share_teal: tr(
+            en: "Teal", es: "Verde azulado", fr: "Sarcelle", de: "Petrol", pt: "Verde-azulado", it: "Verde acqua",
+            nl: "Groenblauw", ru: "Бирюзовый", pl: "Morski", tr: "Turkuaz", sv: "Blågrön", nb: "Blågrønn",
+            da: "Blågrøn", fi: "Sinivihreä", zh: "蓝绿", ja: "ティール", ko: "청록"
+        ),
+        .stats_share_blue: tr(
+            en: "Blue", es: "Azul", fr: "Bleu", de: "Blau", pt: "Azul", it: "Blu",
+            nl: "Blauw", ru: "Синий", pl: "Niebieski", tr: "Mavi", sv: "Blå", nb: "Blå",
+            da: "Blå", fi: "Sininen", zh: "蓝色", ja: "ブルー", ko: "파랑"
+        ),
+        .stats_share_green: tr(
+            en: "Green", es: "Verde", fr: "Vert", de: "Grün", pt: "Verde", it: "Verde",
+            nl: "Groen", ru: "Зелёный", pl: "Zielony", tr: "Yeşil", sv: "Grön", nb: "Grønn",
+            da: "Grøn", fi: "Vihreä", zh: "绿色", ja: "グリーン", ko: "초록"
+        ),
+        .stats_share_pink: tr(
+            en: "Pink", es: "Rosa", fr: "Rose", de: "Pink", pt: "Rosa", it: "Rosa",
+            nl: "Roze", ru: "Розовый", pl: "Różowy", tr: "Pembe", sv: "Rosa", nb: "Rosa",
+            da: "Pink", fi: "Vaaleanpunainen", zh: "粉色", ja: "ピンク", ko: "핑크"
+        ),
+        .stats_share_font: tr(
+            en: "Font", es: "Fuente", fr: "Police", de: "Schriftart", pt: "Fonte", it: "Carattere",
+            nl: "Lettertype", ru: "Шрифт", pl: "Czcionka", tr: "Yazı tipi", sv: "Typsnitt", nb: "Skrifttype",
+            da: "Skrifttype", fi: "Kirjasin", zh: "字体", ja: "フォント", ko: "글꼴"
+        ),
+        .stats_share_font_widget: tr(
+            en: "Widget Serif", es: "Serif de widget", fr: "Sérif du widget", de: "Widget-Serif", pt: "Serifa do widget", it: "Graziato widget",
+            nl: "Widget-serif", ru: "Виджет с засечками", pl: "Szeryfowy widżet", tr: "Widget serif", sv: "Widgetserif", nb: "Widgetserif",
+            da: "Widgetserif", fi: "Vimpaimen päätteellinen", zh: "小组件衬线", ja: "ウィジェット明朝", ko: "위젯 세리프"
+        ),
+        .stats_share_font_rounded: tr(
+            en: "Rounded", es: "Redondeada", fr: "Arrondie", de: "Abgerundet", pt: "Arredondada", it: "Arrotondato",
+            nl: "Afgerond", ru: "Скруглённый", pl: "Zaokrąglony", tr: "Yuvarlatılmış", sv: "Avrundad", nb: "Avrundet",
+            da: "Afrundet", fi: "Pyöristetty", zh: "圆角", ja: "丸ゴシック", ko: "둥근"
+        ),
+        .stats_share_font_mono: tr(
+            en: "Monospaced", es: "Monoespaciada", fr: "Monospace", de: "Nichtproportional", pt: "Monoespaçada", it: "Monospaziato",
+            nl: "Monospace", ru: "Моноширинный", pl: "Monospace", tr: "Eş aralıklı", sv: "Monospace", nb: "Monospace",
+            da: "Monospace", fi: "Tasalevyinen", zh: "等宽", ja: "等幅", ko: "고정폭"
+        ),
+        .stats_share_font_sans: tr(
+            en: "Sans Serif", es: "Sans serif", fr: "Sans sérif", de: "Sans Serif", pt: "Sem serifa", it: "Sans serif",
+            nl: "Sans-serif", ru: "Без засечек", pl: "Bezszeryfowy", tr: "Sans serif", sv: "Sans serif", nb: "Sans serif",
+            da: "Sans serif", fi: "Pääteviivaton", zh: "无衬线", ja: "ゴシック", ko: "산세리프"
+        ),
+        .stats_share_lead_metric: tr(
+            en: "Lead Metric", es: "Métrica principal", fr: "Mesure principale", de: "Hauptmetrik", pt: "Métrica principal", it: "Metrica principale",
+            nl: "Hoofdwaarde", ru: "Главный показатель", pl: "Główna metryka", tr: "Ana metrik", sv: "Huvudvärde", nb: "Hovedmåling",
+            da: "Hovedmåling", fi: "Päämittari", zh: "主要指标", ja: "主指標", ko: "주요 지표"
+        ),
+        .stats_share_data_one: tr(
+            en: "Data One", es: "Dato uno", fr: "Donnée un", de: "Daten eins", pt: "Dado um", it: "Dato uno",
+            nl: "Gegeven één", ru: "Данные один", pl: "Dane jeden", tr: "Veri bir", sv: "Data ett", nb: "Data én",
+            da: "Data ét", fi: "Tieto yksi", zh: "数据一", ja: "データ 1", ko: "데이터 1"
+        ),
+        .stats_share_data_two: tr(
+            en: "Data Two", es: "Dato dos", fr: "Donnée deux", de: "Daten zwei", pt: "Dado dois", it: "Dato due",
+            nl: "Gegeven twee", ru: "Данные два", pl: "Dane dwa", tr: "Veri iki", sv: "Data två", nb: "Data to",
+            da: "Data to", fi: "Tieto kaksi", zh: "数据二", ja: "データ 2", ko: "데이터 2"
+        ),
+        .stats_share_data_three: tr(
+            en: "Data Three", es: "Dato tres", fr: "Donnée trois", de: "Daten drei", pt: "Dado três", it: "Dato tre",
+            nl: "Gegeven drie", ru: "Данные три", pl: "Dane trzy", tr: "Veri üç", sv: "Data tre", nb: "Data tre",
+            da: "Data tre", fi: "Tieto kolme", zh: "数据三", ja: "データ 3", ko: "데이터 3"
+        ),
+        .stats_share_visible_data: tr(
+            en: "Visible Data", es: "Datos visibles", fr: "Données visibles", de: "Sichtbare Daten", pt: "Dados visíveis", it: "Dati visibili",
+            nl: "Zichtbare gegevens", ru: "Видимые данные", pl: "Widoczne dane", tr: "Görünür veriler", sv: "Synliga data", nb: "Synlige data",
+            da: "Synlige data", fi: "Näkyvät tiedot", zh: "显示数据", ja: "表示するデータ", ko: "표시할 데이터"
+        ),
+        .stats_share_show_header: tr(
+            en: "Show Header", es: "Mostrar encabezado", fr: "Afficher l’en-tête", de: "Kopfzeile zeigen", pt: "Mostrar cabeçalho", it: "Mostra intestazione",
+            nl: "Kop tonen", ru: "Показывать заголовок", pl: "Pokaż nagłówek", tr: "Başlığı göster", sv: "Visa rubrik", nb: "Vis overskrift",
+            da: "Vis overskrift", fi: "Näytä otsikko", zh: "显示标题", ja: "ヘッダーを表示", ko: "헤더 표시"
+        ),
+        .stats_share_show_footer: tr(
+            en: "Show Footer", es: "Mostrar pie", fr: "Afficher le pied de page", de: "Fußzeile zeigen", pt: "Mostrar rodapé", it: "Mostra piè di pagina",
+            nl: "Voettekst tonen", ru: "Показывать нижний колонтитул", pl: "Pokaż stopkę", tr: "Alt bilgiyi göster", sv: "Visa sidfot", nb: "Vis bunntekst",
+            da: "Vis sidefod", fi: "Näytä alatunniste", zh: "显示页脚", ja: "フッターを表示", ko: "바닥글 표시"
+        ),
+        .stats_share_show_server_address: tr(
+            en: "Show Server Address", es: "Mostrar dirección del servidor", fr: "Afficher l’adresse du serveur", de: "Serveradresse anzeigen", pt: "Mostrar endereço do servidor", it: "Mostra indirizzo del server",
+            nl: "Serveradres tonen", ru: "Показывать адрес сервера", pl: "Pokaż adres serwera", tr: "Sunucu adresini göster", sv: "Visa serveradress", nb: "Vis serveradresse",
+            da: "Vis serveradresse", fi: "Näytä palvelinosoite", zh: "显示服务器地址", ja: "サーバーアドレスを表示", ko: "서버 주소 표시"
+        ),
+        .stats_share_map_span: tr(
+            en: "Map Span", es: "Rango del mapa", fr: "Période de la carte", de: "Kartenzeitraum", pt: "Período do mapa", it: "Intervallo della mappa",
+            nl: "Kaartperiode", ru: "Период карты", pl: "Zakres mapy", tr: "Harita aralığı", sv: "Kartintervall", nb: "Kartperiode",
+            da: "Kortperiode", fi: "Kartan jakso", zh: "图谱范围", ja: "マップの期間", ko: "맵 기간"
+        ),
+        .stats_share_map_measure: tr(
+            en: "Map Intensity", es: "Intensidad del mapa", fr: "Intensité de la carte", de: "Kartenintensität", pt: "Intensidade do mapa", it: "Intensità della mappa",
+            nl: "Kaartintensiteit", ru: "Интенсивность карты", pl: "Intensywność mapy", tr: "Harita yoğunluğu", sv: "Kartintensitet", nb: "Kartintensitet",
+            da: "Kortintensitet", fi: "Kartan voimakkuus", zh: "图谱强度", ja: "マップの濃度", ko: "맵 강도"
+        ),
+        .stats_share_12_weeks: tr(
+            en: "Last 12 Weeks", es: "Últimas 12 semanas", fr: "12 dernières semaines", de: "Letzte 12 Wochen", pt: "Últimas 12 semanas", it: "Ultime 12 settimane",
+            nl: "Afgelopen 12 weken", ru: "Последние 12 недель", pl: "Ostatnie 12 tygodni", tr: "Son 12 hafta", sv: "Senaste 12 veckorna", nb: "Siste 12 uker",
+            da: "Seneste 12 uger", fi: "Viimeiset 12 viikkoa", zh: "过去 12 周", ja: "直近12週間", ko: "지난 12주"
+        ),
+        .stats_share_26_weeks: tr(
+            en: "Last 26 Weeks", es: "Últimas 26 semanas", fr: "26 dernières semaines", de: "Letzte 26 Wochen", pt: "Últimas 26 semanas", it: "Ultime 26 settimane",
+            nl: "Afgelopen 26 weken", ru: "Последние 26 недель", pl: "Ostatnie 26 tygodni", tr: "Son 26 hafta", sv: "Senaste 26 veckorna", nb: "Siste 26 uker",
+            da: "Seneste 26 uger", fi: "Viimeiset 26 viikkoa", zh: "过去 26 周", ja: "直近26週間", ko: "지난 26주"
+        ),
+        .stats_share_by_plays: tr(
+            en: "By Plays", es: "Por reproducciones", fr: "Par écoutes", de: "Nach Wiedergaben", pt: "Por reproduções", it: "Per riproduzioni",
+            nl: "Op afspelen", ru: "По воспроизведениям", pl: "Według odtworzeń", tr: "Çalma sayısına göre", sv: "Efter spelningar", nb: "Etter avspillinger",
+            da: "Efter afspilninger", fi: "Toistojen mukaan", zh: "按播放次数", ja: "再生回数別", ko: "재생 횟수별"
+        ),
+        .stats_share_by_time: tr(
+            en: "By Listening Time", es: "Por tiempo de escucha", fr: "Par temps d’écoute", de: "Nach Hörzeit", pt: "Por tempo de audição", it: "Per tempo di ascolto",
+            nl: "Op luistertijd", ru: "По времени прослушивания", pl: "Według czasu słuchania", tr: "Dinleme süresine göre", sv: "Efter lyssningstid", nb: "Etter lyttetid",
+            da: "Efter lyttetid", fi: "Kuunteluajan mukaan", zh: "按收听时长", ja: "再生時間別", ko: "청취 시간별"
+        ),
+        .stats_share_listening: tr(
+            en: "Listening", es: "Escucha", fr: "Écoute", de: "Hören", pt: "Audição", it: "Ascolto",
+            nl: "Luisteren", ru: "Прослушивание", pl: "Słuchanie", tr: "Dinleme", sv: "Lyssning", nb: "Lytting",
+            da: "Lytning", fi: "Kuuntelu", zh: "收听", ja: "再生", ko: "청취"
+        ),
+        .stats_share_hi_res: tr(
+            en: "Hi-Res", es: "Alta resolución", fr: "Haute résolution", de: "Hochauflösend", pt: "Alta resolução", it: "Alta risoluzione",
+            nl: "Hoge resolutie", ru: "Высокое разрешение", pl: "Wysoka rozdzielczość", tr: "Yüksek çözünürlük", sv: "Högupplöst", nb: "Høy oppløsning",
+            da: "Høj opløsning", fi: "Korkea resoluutio", zh: "高解析度", ja: "ハイレゾ", ko: "고해상도"
+        ),
+        .stats_share_lossless_share: tr(
+            en: "Lossless Share", es: "Proporción sin pérdida", fr: "Part sans perte", de: "Lossless-Anteil", pt: "Parte sem perdas", it: "Quota lossless",
+            nl: "Lossless-aandeel", ru: "Доля без потерь", pl: "Udział bezstratny", tr: "Kayıpsız oran", sv: "Förlustfri andel", nb: "Tapsfri andel",
+            da: "Tabsfri andel", fi: "Häviötön osuus", zh: "无损占比", ja: "ロスレス比率", ko: "무손실 비율"
+        ),
+        .stats_share_reset: tr(
+            en: "Reset", es: "Restablecer", fr: "Réinitialiser", de: "Zurücksetzen", pt: "Repor", it: "Reimposta",
+            nl: "Herstel", ru: "Сбросить", pl: "Resetuj", tr: "Sıfırla", sv: "Återställ", nb: "Tilbakestill",
+            da: "Nulstil", fi: "Nollaa", zh: "重置", ja: "リセット", ko: "재설정"
+        ),
+
         // Settings rows
         .settings_autoplay: [
             .english: "Autoplay", .spanish: "Reproducción automática", .french: "Lecture automatique",
@@ -2109,6 +2667,94 @@ enum Strings {
             .danish: "Equalizer", .finnish: "Taajuuskorjain", .chinese: "均衡器",
             .japanese: "イコライザ", .korean: "이퀄라이저",
         ],
+        .equalizer_autoeq_imports_title: [
+            .english: "Add AutoEQ Profile", .spanish: "Añadir perfil de AutoEQ", .french: "Ajouter un profil AutoEQ",
+            .german: "AutoEQ-Profil hinzufügen", .portuguese: "Adicionar perfil do AutoEQ", .italian: "Aggiungi profilo AutoEQ",
+            .dutch: "AutoEQ-profiel toevoegen", .russian: "Добавить профиль AutoEQ", .polish: "Dodaj profil AutoEQ",
+            .turkish: "AutoEQ profili ekle", .swedish: "Lägg till AutoEQ-profil", .norwegian: "Legg til AutoEQ-profil",
+            .danish: "Tilføj AutoEQ-profil", .finnish: "Lisää AutoEQ-profiili", .chinese: "添加 AutoEQ 配置文件",
+            .japanese: "AutoEQプロファイルを追加", .korean: "AutoEQ 프로필 추가",
+        ],
+        .equalizer_manage_autoeq_profiles: [
+            .english: "Manage AutoEQ Profiles", .spanish: "Gestionar perfiles de AutoEQ", .french: "Gérer les profils AutoEQ",
+            .german: "AutoEQ-Profile verwalten", .portuguese: "Gerir perfis do AutoEQ", .italian: "Gestisci profili AutoEQ",
+            .dutch: "AutoEQ-profielen beheren", .russian: "Управление профилями AutoEQ", .polish: "Zarządzaj profilami AutoEQ",
+            .turkish: "AutoEQ profillerini yönet", .swedish: "Hantera AutoEQ-profiler", .norwegian: "Administrer AutoEQ-profiler",
+            .danish: "Administrer AutoEQ-profiler", .finnish: "Hallitse AutoEQ-profiileja", .chinese: "管理 AutoEQ 配置文件",
+            .japanese: "AutoEQプロファイルを管理", .korean: "AutoEQ 프로필 관리",
+        ],
+        .equalizer_autoeq_manual_paste_hint: [
+            .english: "Copy AutoEQ's ten-band table and Preamp, then paste it here.", .spanish: "Copia la tabla de diez bandas y el preamplificador de AutoEQ, y pégalos aquí.", .french: "Copiez le tableau à dix bandes et le préampli d'AutoEQ, puis collez-les ici.",
+            .german: "Kopiere die AutoEQ-Tabelle mit zehn Bändern und Vorverstärkung und füge sie hier ein.", .portuguese: "Copie a tabela de dez bandas e o pré-amplificador do AutoEQ e cole-os aqui.", .italian: "Copia la tabella AutoEQ a dieci bande e il preamplificatore, quindi incollali qui.",
+            .dutch: "Kopieer de AutoEQ-tienbandstabel en voorversterking en plak ze hier.", .russian: "Скопируйте десятиполосную таблицу AutoEQ и предусиление, затем вставьте их сюда.", .polish: "Skopiuj dziesięciopasmową tabelę AutoEQ i przedwzmacniacz, a następnie wklej je tutaj.",
+            .turkish: "AutoEQ'nin on bantlı tablosunu ve ön kazancını kopyalayıp buraya yapıştırın.", .swedish: "Kopiera AutoEQ:s tiobandstabell och förförstärkning och klistra in dem här.", .norwegian: "Kopier AutoEQs ti-båndstabell og forforsterkning og lim dem inn her.",
+            .danish: "Kopiér AutoEQs tibåndstabel og forstærkning, og indsæt dem her.", .finnish: "Kopioi AutoEQ:n kymmenkaistainen taulukko ja esivahvistus ja liitä ne tähän.", .chinese: "复制 AutoEQ 的十频段表和前级增益，然后粘贴到这里。",
+            .japanese: "AutoEQの10バンド表とプリアンプをコピーして、ここにペーストしてください。", .korean: "AutoEQ의 10밴드 표와 프리앰프를 복사해 여기에 붙여넣으세요.",
+        ],
+        .equalizer_autoeq_paste_ten_band: [
+            .english: "Paste 10-Band AutoEQ", .spanish: "Pegar AutoEQ de 10 bandas", .french: "Coller AutoEQ à 10 bandes",
+            .german: "10-Band-AutoEQ einfügen", .portuguese: "Colar AutoEQ de 10 bandas", .italian: "Incolla AutoEQ a 10 bande",
+            .dutch: "10-bands AutoEQ plakken", .russian: "Вставить 10-полосный AutoEQ", .polish: "Wklej 10-pasmowy AutoEQ",
+            .turkish: "10 bantlı AutoEQ'yu yapıştır", .swedish: "Klistra in 10-bands AutoEQ", .norwegian: "Lim inn 10-bånds AutoEQ",
+            .danish: "Indsæt 10-bånds AutoEQ", .finnish: "Liitä 10-kaistainen AutoEQ", .chinese: "粘贴 10 频段 AutoEQ",
+            .japanese: "10バンドAutoEQをペースト", .korean: "10밴드 AutoEQ 붙여넣기",
+        ],
+        .equalizer_autoeq_manual_paste_success_title: [
+            .english: "10-Band AutoEQ Added", .spanish: "AutoEQ de 10 bandas añadido", .french: "AutoEQ à 10 bandes ajouté",
+            .german: "10-Band-AutoEQ hinzugefügt", .portuguese: "AutoEQ de 10 bandas adicionado", .italian: "AutoEQ a 10 bande aggiunto",
+            .dutch: "10-bands AutoEQ toegevoegd", .russian: "10-полосный AutoEQ добавлен", .polish: "Dodano 10-pasmowy AutoEQ",
+            .turkish: "10 bantlı AutoEQ eklendi", .swedish: "10-bands AutoEQ tillagt", .norwegian: "10-bånds AutoEQ lagt til",
+            .danish: "10-bånds AutoEQ tilføjet", .finnish: "10-kaistainen AutoEQ lisätty", .chinese: "已添加 10 频段 AutoEQ",
+            .japanese: "10バンドAutoEQを追加しました", .korean: "10밴드 AutoEQ가 추가되었습니다",
+        ],
+        .equalizer_autoeq_manual_paste_success_message: [
+            .english: "%1$@ is ready and applied. Preamp: %2$@ dB.", .spanish: "%1$@ está listo y aplicado. Preamplificador: %2$@ dB.", .french: "%1$@ est prêt et appliqué. Préampli : %2$@ dB.",
+            .german: "%1$@ ist bereit und angewendet. Vorverstärkung: %2$@ dB.", .portuguese: "%1$@ está pronto e aplicado. Pré-amplificação: %2$@ dB.", .italian: "%1$@ è pronto e applicato. Preamplificatore: %2$@ dB.",
+            .dutch: "%1$@ is klaar en toegepast. Voorversterking: %2$@ dB.", .russian: "%1$@ готов и применён. Предусиление: %2$@ дБ.", .polish: "%1$@ jest gotowy i zastosowany. Przedwzmacniacz: %2$@ dB.",
+            .turkish: "%1$@ hazır ve uygulandı. Ön kazanç: %2$@ dB.", .swedish: "%1$@ är klar och tillämpad. Förförstärkning: %2$@ dB.", .norwegian: "%1$@ er klar og brukt. Forforsterkning: %2$@ dB.",
+            .danish: "%1$@ er klar og anvendt. Forforstærkning: %2$@ dB.", .finnish: "%1$@ on valmis ja käytössä. Esivahvistus: %2$@ dB.", .chinese: "%1$@ 已准备并应用。前级增益：%2$@ dB。",
+            .japanese: "%1$@を適用しました。プリアンプ：%2$@ dB。", .korean: "%1$@가 준비되어 적용되었습니다. 프리앰프: %2$@ dB.",
+        ],
+        .equalizer_profile_apply: [
+            .english: "Apply Profile", .spanish: "Aplicar perfil", .french: "Appliquer le profil",
+            .german: "Profil anwenden", .portuguese: "Aplicar perfil", .italian: "Applica profilo",
+            .dutch: "Profiel toepassen", .russian: "Применить профиль", .polish: "Zastosuj profil",
+            .turkish: "Profili uygula", .swedish: "Använd profil", .norwegian: "Bruk profil",
+            .danish: "Anvend profil", .finnish: "Käytä profiilia", .chinese: "应用配置文件",
+            .japanese: "プロファイルを適用", .korean: "프로필 적용",
+        ],
+        .equalizer_profile_assign_current_device: [
+            .english: "Use for Current Audio Device", .spanish: "Usar para el dispositivo de audio actual", .french: "Utiliser pour l'appareil audio actuel",
+            .german: "Für aktuelles Audiogerät verwenden", .portuguese: "Usar para o dispositivo de áudio atual", .italian: "Usa per il dispositivo audio attuale",
+            .dutch: "Gebruiken voor huidig audioapparaat", .russian: "Использовать для текущего аудиоустройства", .polish: "Użyj dla bieżącego urządzenia audio",
+            .turkish: "Geçerli ses aygıtı için kullan", .swedish: "Använd för aktuell ljudenhet", .norwegian: "Bruk for gjeldende lydenhet",
+            .danish: "Brug til den aktuelle lydenhed", .finnish: "Käytä nykyiselle äänilaitteelle", .chinese: "用于当前音频设备",
+            .japanese: "現在のオーディオデバイスに使用", .korean: "현재 오디오 기기에 사용",
+        ],
+        .equalizer_profile_delete: [
+            .english: "Delete Profile", .spanish: "Eliminar perfil", .french: "Supprimer le profil",
+            .german: "Profil löschen", .portuguese: "Eliminar perfil", .italian: "Elimina profilo",
+            .dutch: "Profiel verwijderen", .russian: "Удалить профиль", .polish: "Usuń profil",
+            .turkish: "Profili sil", .swedish: "Radera profil", .norwegian: "Slett profil",
+            .danish: "Slet profil", .finnish: "Poista profiili", .chinese: "删除配置文件",
+            .japanese: "プロファイルを削除", .korean: "프로필 삭제",
+        ],
+        .equalizer_device_saved_assignments: [
+            .english: "Saved Audio Devices", .spanish: "Dispositivos de audio guardados", .french: "Appareils audio enregistrés",
+            .german: "Gespeicherte Audiogeräte", .portuguese: "Dispositivos de áudio guardados", .italian: "Dispositivi audio salvati",
+            .dutch: "Opgeslagen audioapparaten", .russian: "Сохранённые аудиоустройства", .polish: "Zapisane urządzenia audio",
+            .turkish: "Kaydedilen ses aygıtları", .swedish: "Sparade ljudenheter", .norwegian: "Lagrede lydenheter",
+            .danish: "Gemte lydenheder", .finnish: "Tallennetut äänilaitteet", .chinese: "已保存的音频设备",
+            .japanese: "保存済みのオーディオデバイス", .korean: "저장된 오디오 기기",
+        ],
+        .equalizer_device_remove: [
+            .english: "Remove %1$@", .spanish: "Eliminar %1$@", .french: "Supprimer %1$@",
+            .german: "%1$@ entfernen", .portuguese: "Remover %1$@", .italian: "Rimuovi %1$@",
+            .dutch: "%1$@ verwijderen", .russian: "Удалить %1$@", .polish: "Usuń %1$@",
+            .turkish: "%1$@ kaldır", .swedish: "Ta bort %1$@", .norwegian: "Fjern %1$@",
+            .danish: "Fjern %1$@", .finnish: "Poista %1$@", .chinese: "移除 %1$@",
+            .japanese: "%1$@を削除", .korean: "%1$@ 제거",
+        ],
         .settings_volume_normalization: [
             .english: "Volume Normalization", .spanish: "Normalización de volumen", .french: "Normalisation du volume",
             .german: "Lautstärke-Normalisierung", .portuguese: "Normalização de volume", .italian: "Normalizzazione del volume",
@@ -2150,12 +2796,12 @@ enum Strings {
             .japanese: "モバイル通信時の音質", .korean: "셀룰러 음질",
         ],
         .settings_download_quality: [
-            .english: "Download Quality", .spanish: "Calidad de descarga", .french: "Qualité de téléchargement",
-            .german: "Download-Qualität", .portuguese: "Qualidade de transferência", .italian: "Qualità di download",
-            .dutch: "Downloadkwaliteit", .russian: "Качество загрузки", .polish: "Jakość pobierania",
-            .turkish: "İndirme kalitesi", .swedish: "Nedladdningskvalitet", .norwegian: "Nedlastingskvalitet",
-            .danish: "Downloadkvalitet", .finnish: "Latauksen laatu", .chinese: "下载音质",
-            .japanese: "ダウンロードの音質", .korean: "다운로드 음질",
+            .english: "Download Quality (Albums/Songs)", .spanish: "Calidad de descarga (Álbumes/Canciones)", .french: "Qualité de téléchargement (Albums/Chansons)",
+            .german: "Download-Qualität (Alben/Songs)", .portuguese: "Qualidade de transferência (Álbuns/Músicas)", .italian: "Qualità di download (Album/Canzoni)",
+            .dutch: "Downloadkwaliteit (Albums/Nummers)", .russian: "Качество загрузки (Альбомы/Песни)", .polish: "Jakość pobierania (Albumy/Utwory)",
+            .turkish: "İndirme kalitesi (Albümler/Şarkılar)", .swedish: "Nedladdningskvalitet (Album/Låtar)", .norwegian: "Nedlastingskvalitet (Album/Sanger)",
+            .danish: "Downloadkvalitet (Album/Sange)", .finnish: "Latauksen laatu (Albumit/Kappaleet)", .chinese: "下载音质（专辑/歌曲）",
+            .japanese: "ダウンロードの音質（アルバム/曲）", .korean: "다운로드 음질 (앨범/노래)",
         ],
         .settings_transcoding_format: [
             .english: "Transcoding Format", .spanish: "Formato de transcodificación", .french: "Format de transcodage",
@@ -2164,14 +2810,6 @@ enum Strings {
             .turkish: "Yeniden kodlama biçimi", .swedish: "Omkodningsformat", .norwegian: "Transkodingsformat",
             .danish: "Transkodningsformat", .finnish: "Transkoodausmuoto", .chinese: "转码格式",
             .japanese: "トランスコード形式", .korean: "트랜스코딩 형식",
-        ],
-        .settings_download_mode: [
-            .english: "Download Mode", .spanish: "Modo de descarga", .french: "Mode de téléchargement",
-            .german: "Download-Modus", .portuguese: "Modo de transferência", .italian: "Modalità di download",
-            .dutch: "Downloadmodus", .russian: "Режим загрузки", .polish: "Tryb pobierania",
-            .turkish: "İndirme modu", .swedish: "Nedladdningsläge", .norwegian: "Nedlastingsmodus",
-            .danish: "Downloadtilstand", .finnish: "Lataustila", .chinese: "下载模式",
-            .japanese: "ダウンロードモード", .korean: "다운로드 모드",
         ],
         .settings_download_speed_limit: [
             .english: "Download Speed Limit", .spanish: "Límite de velocidad de descarga", .french: "Limite de vitesse de téléchargement",
@@ -2197,6 +2835,22 @@ enum Strings {
             .danish: "Fjern ældste automatisk", .finnish: "Poista vanhimmat automaattisesti", .chinese: "自动清除最旧的",
             .japanese: "古いものを自動削除", .korean: "오래된 항목 자동 삭제",
         ],
+        .download_manager_title: en("Download Manager"),
+        .download_manager_open: en("Manage Downloads"),
+        .download_manager_open_detail: en("Active transfers, saved tracks, and download limits"),
+        .download_manager_concurrent: en("Concurrent Downloads"),
+        .download_manager_active: en("Transferring"),
+        .download_manager_downloaded: en("On This Device"),
+        .download_manager_no_transfers: en("Nothing is downloading or waiting."),
+        .download_manager_no_downloads: en("Downloaded songs will appear here."),
+        .download_manager_queued: en("Queued"),
+        .download_manager_waiting: en("Waiting for network"),
+        .download_manager_downloading: en("Downloading"),
+        .download_manager_total: en("Total"),
+        .download_manager_remaining: en("remaining"),
+        .download_manager_eta: en("ETA %@"),
+        .download_manager_tracks_size: en("%d tracks · %@"),
+        .download_manager_transfer_count: en("%d transfers"),
 
         // MARK: Browse screens (Search / Artist / Album / Queue / Lyrics)
         .search_placeholder: tr(
@@ -3004,7 +3658,6 @@ enum Strings {
             nl: "Er bestaat al een map met de naam “%@”.", ru: "Папка с именем «%@» уже существует.", pl: "Folder o nazwie „%@” już istnieje.", tr: "“%@” adlı bir klasör zaten var.", sv: "En mapp med namnet ”%@” finns redan.", nb: "En mappe med navnet «%@» finnes allerede.",
             da: "En mappe med navnet “%@” findes allerede.", fi: "Kansio nimeltä ”%@” on jo olemassa.", zh: "已存在名为“%@”的文件夹。", ja: "「%@」という名前のフォルダは既に存在します。", ko: "“%@”(이)라는 폴더가 이미 있습니다."
         ),
-
         // MARK: Playlist detail / edit
         .playlist_edit_title: tr(
             en: "Edit Playlist", es: "Editar lista", fr: "Modifier la playlist", de: "Playlist bearbeiten", pt: "Editar lista", it: "Modifica playlist",

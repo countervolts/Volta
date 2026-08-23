@@ -13,6 +13,7 @@ struct StatsView: View {
     @StateObject private var libraryVM = LibraryStatsViewModel()
     @State private var tab: StatsTab = .listening
     @State private var path = NavigationPath()
+    @State private var showShareSheet = false
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
@@ -36,24 +37,50 @@ struct StatsView: View {
             .navigationBarTitleDisplayMode(.large)
             .accountToolbar(path: $path)
             .toolbar {
-                if tab == .listening {
-                    ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
                         Button {
-                            exportStats()
+                            showShareSheet = true
                         } label: {
-                            Image(systemName: "square.and.arrow.up")
+                            Label(L(.stats_share_title), systemImage: "square.and.arrow.up")
                         }
-                        .tint(Theme.accent)
+
+                        if tab == .listening {
+                            Button {
+                                exportStats()
+                            } label: {
+                                Label(L(.stats_share_export_data), systemImage: "arrow.down.doc")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
                     }
+                    .tint(Theme.accent)
                 }
             }
         }
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
+        .sheet(isPresented: $showShareSheet) {
+            StatsShareSheet(
+                listening: vm,
+                library: libraryVM,
+                initialTemplate: tab == .library ? .library : .rhythm
+            )
+            .environmentObject(appState)
+        }
         .onChangeCompat(of: vm.period) { _, _ in vm.offset = 0; vm.recompute() }
         .onChangeCompat(of: vm.offset) { _, _ in vm.recompute() }
         .task { vm.recompute() }
-        .onAppear { vm.recompute() }
+        .onAppear {
+            applyWidgetDestinationIfNeeded()
+            vm.recompute()
+        }
+        .onChangeCompat(of: appState.requestedWidgetStatsDestination) { _, destination in
+            guard let destination else { return }
+            tab = destination == .library ? .library : .listening
+            _ = appState.consumeWidgetStatsDestination()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .playEventRecorded)) { _ in
             vm.recompute()
         }
@@ -87,6 +114,11 @@ struct StatsView: View {
             AppLogger.shared.log("Stats export failed: \(error.localizedDescription)", category: .library, level: .error)
             VoltaNotificationCenter.shared.post(L(.notif_stats_export_failed), tone: .error)
         }
+    }
+
+    private func applyWidgetDestinationIfNeeded() {
+        guard let destination = appState.consumeWidgetStatsDestination() else { return }
+        tab = destination == .library ? .library : .listening
     }
 
     private var periodSelector: some View {

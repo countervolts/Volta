@@ -112,7 +112,7 @@ struct AutoMixSettingsView: View {
                 .listRowBackground(Theme.secondaryBackground)
 
                 Section {
-                    NavigationLink(value: SettingsRoute.autoMixPreview) {
+                    SettingsDetailNavigationLink(.autoMixPreview) {
                         Label("Preview AutoMix", systemImage: "waveform.badge.magnifyingglass")
                     }
                 } footer: {

@@ -80,7 +80,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .playback: return "Playback"
         case .scrobbling: return "Scrobbling"
         case .audio: return "Audio"
-        case .streaming: return "Streaming & Downloads"
+        case .streaming: return "Streaming"
         case .appearance: return "Appearance"
         case .library: return "Library"
         case .server: return "Server"
@@ -124,11 +124,11 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .playback: return "Autoplay, transitions, lyrics, pairings"
         case .scrobbling: return "Last.fm and ListenBrainz"
         case .audio: return "Equalizer, normalization, spatial"
-        case .streaming: return "Quality, downloads, limits"
+        case .streaming: return "Quality and transcoding"
         case .appearance: return "Theme, language, artwork"
         case .library: return "Saved filters and views"
         case .server: return "Connection, health, logout"
-        case .storage: return "Caches, lyrics, local files"
+        case .storage: return "Downloads, caches, local files"
         case .backups: return "Settings and playlists"
         case .performance: return "Speed, battery, image loading"
         case .developer: return "Tools and experiments"
@@ -145,15 +145,15 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .audio:
             return [["volume normalization", "replaygain", "replay gain", "normalize", "loudness"], ["equalizer", "eq", "bands", "graphic"], ["mono audio", "mono", "accessibility", "downmix"], ["spatial widener", "spatial", "3d", "stereo", "widener", "spatialize"]]
         case .streaming:
-            return [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["download quality", "download", "bitrate"], ["transcode", "transcoding", "codec", "file type", "rules", "format", "mp3", "aac", "opus", "flac", "alac"], ["download mode", "multithreaded", "threads", "single", "parallel"], ["download speed limit", "speed", "limit", "throttle"], ["storage cap", "cap", "max size", "storage"], ["auto-evict", "auto evict", "evict"]]
+            return [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["transcode", "transcoding", "codec", "file type", "rules", "format", "mp3", "aac", "opus", "flac", "alac"]]
         case .appearance:
-            return [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]
+            return [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["stylized album cover", "stylised album cover", "album cover", "album style", "full bleed", "edge to edge", "cover style"], ["player controls", "player customization", "customise player", "customize player", "quick actions", "shuffle", "repeat", "queue"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]
         case .library:
             return [["custom sorting", "saved sorts", "saved views", "smart filters", "library views", "albums", "songs", "sort", "group", "filters"], ["rating", "ratings", "stars", "favorite", "favourite", "love"]]
         case .server:
             return [["connected to", "server url", "cellular url", "data", "wifi", "username", "edit connection", "test connection", "log out", "logout", "sign out"], ["server health & speed test", "speed test", "server health", "latency", "connection"]]
         case .storage:
-            return [["downloaded tracks", "download missing songs", "download all missing", "download all music", "playback cache", "enhanced caching", "prefetch", "artwork cache", "local artwork library", "cover", "artist pictures", "lyrics cache", "local lyrics", "save lyrics", "app data", "total", "clear downloads", "clear playback cache", "clear artwork", "delete local artwork", "clear lyrics", "cache", "storage"], ["download local artwork library", "cover", "covers", "album artwork", "artist pictures", "local images"]]
+            return [["download manager", "active downloads", "queued downloads", "downloaded songs", "downloaded albums", "downloaded lyrics", "downloaded artwork", "downloaded artist pictures", "concurrent downloads", "download speed", "download quality", "storage cap", "auto evict", "playback cache", "artwork cache", "app data", "clear playback cache", "clear artwork", "cache", "storage"]]
         case .backups:
             return [["settings backup", "settings", "backup", "restore", "export", "import"], ["playlist backup", "playlist", "deleted", "restore", "auto", "json"]]
         case .performance:
@@ -166,9 +166,61 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-struct SettingsView: View {
-    let focusedCategory: SettingsCategory?
+/// A category detail is deliberately not another `SettingsView`.
+///
+/// `SettingsView` owns the category picker. Pushing another instance of it from
+/// that picker creates a self-referential SwiftUI navigation graph (the child
+/// also contains category links back to `SettingsView`). On iOS 26/27 that can
+/// make NavigationRequestObserver repeatedly walk the graph until the main
+/// thread exhausts its stack. Keep the detail as a small, one-way host for the
+/// already-built section instead.
+private struct SettingsCategoryPage<SectionContent: View>: View {
+    let category: SettingsCategory
+    @Binding private var searchText: String
+    let miniPlayerBottomInset: CGFloat
+    private let sectionContent: () -> SectionContent
 
+    init(
+        category: SettingsCategory,
+        searchText: Binding<String>,
+        miniPlayerBottomInset: CGFloat,
+        @ViewBuilder sectionContent: @escaping () -> SectionContent
+    ) {
+        self.category = category
+        _searchText = searchText
+        self.miniPlayerBottomInset = miniPlayerBottomInset
+        self.sectionContent = sectionContent
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.background.ignoresSafeArea()
+            List {
+                sectionContent()
+            }
+            .modifier(SettingsMiniPlayerBottomInset(height: miniPlayerBottomInset))
+            .labelStyle(AccentIconLabelStyle())
+            .searchable(
+                text: $searchText,
+                placement: .navigationBarDrawer(displayMode: .automatic),
+                prompt: L(.settings_search)
+            )
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+        }
+        .navigationTitle(category.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                GlassBackButton()
+            }
+        }
+        .preferredColorScheme(Theme.colorScheme)
+    }
+}
+
+struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
     @Environment(\.openURL) var openURL
@@ -199,7 +251,6 @@ struct SettingsView: View {
     @AppStorage(StreamingPreferences.transcodingModeKey) var transcodingMode = TranscodingSettingsMode.simple.rawValue
     @AppStorage(StreamingPreferences.transcodingCellularOnlyKey) var transcodingCellularOnly = false
     @AppStorage(StreamingPreferences.transcodeFileTypeRulesKey) var transcodeFileTypeRules = ""
-    @AppStorage("downloadThreadingMode") var downloadThreadingMode = "multi"
     @AppStorage("downloadSpeedLimitKBps") var downloadSpeedLimitKBps = 0
     @AppStorage("downloadCapMB")       var downloadCapMB       = 0
     @AppStorage("autoEvictDownloads")  var autoEvictDownloads  = false
@@ -207,6 +258,7 @@ struct SettingsView: View {
     @AppStorage("artworkAnimation")    var artworkAnimation    = true
     @AppStorage("liveArtwork")         var liveArtwork         = true
     @AppStorage("stylizedPlayerCover") var stylizedPlayerCover = false
+    @AppStorage("stylizedAlbumCover")  var stylizedAlbumCover  = false
     @AppStorage("themeMode")           var themeMode           = "dark"
     @AppStorage("showLosslessBadge")   var showLosslessBadge   = true
     @AppStorage("showExplicitBadge")   var showExplicitBadge   = true
@@ -282,15 +334,18 @@ struct SettingsView: View {
     @State var didScheduleInitialRefresh = false
     @State var loggedPlayEventCount: Int?
     @StateObject var lyricsDownloader = LyricsBulkDownloader.shared
+    @StateObject var networkMonitor = NetworkMonitor.shared
     @StateObject var hiddenAlbums = HiddenAlbumStore.shared
     @StateObject var downloadService = DownloadService.shared
     @State var playlistBackupStatus: String?
     @State var isRefreshingPlaylistBackups = false
     @State var restoringPlaylistBackupID: String?
+    @State var allowedWiFiLoginSSIDs = WiFiSSIDPolicy.allowedSSIDs
+    @State var isReadingCurrentSSID = false
+    @State var wifiSSIDStatus: String?
 
-    init(focusedCategory: SettingsCategory? = nil) {
+    init() {
         StreamingPreferences.migrateTranscodingSettingsIfNeeded()
-        self.focusedCategory = focusedCategory
     }
 
     var audio: AudioPlayer { appState.audioPlayer }
@@ -329,7 +384,7 @@ struct SettingsView: View {
         switch section {
         case "Playback":              return L(.settings_section_playback)
         case "Audio":                 return L(.settings_section_audio)
-        case "Streaming & Downloads": return L(.settings_section_streaming)
+        case "Streaming":             return L(.settings_section_streaming)
         case "Performance":           return L(.settings_section_performance)
         case "Appearance":            return L(.settings_section_appearance)
         case "Notifications":         return L(.settings_section_notifications)
@@ -390,10 +445,8 @@ struct SettingsView: View {
         ToolbarItem(placement: .topBarLeading) {
             GlassBackButton()
         }
-        if focusedCategory == nil {
-            ToolbarItem(placement: .topBarTrailing) {
-                settingsModeMenu
-            }
+        ToolbarItem(placement: .topBarTrailing) {
+            settingsModeMenu
         }
     }
 
@@ -456,15 +509,11 @@ struct SettingsView: View {
         ZStack {
             Theme.background.ignoresSafeArea()
             List {
-                if let focusedCategory {
-                    settingsSection(for: focusedCategory)
-                } else {
-                    switch viewMode {
-                    case .list:
-                        settingsSections
-                    case .categories:
-                        settingsCategoryRows
-                    }
+                switch viewMode {
+                case .list:
+                    settingsSections
+                case .categories:
+                    settingsCategoryRows
                 }
             }
             .modifier(SettingsMiniPlayerBottomInset(height: miniPlayerBottomInset))
@@ -476,7 +525,7 @@ struct SettingsView: View {
     }
 
     private var settingsTitle: String {
-        focusedCategory?.title ?? L(.settings_title)
+        L(.settings_title)
     }
 
     private var settingsModeMenu: some View {
@@ -518,7 +567,15 @@ struct SettingsView: View {
     private var settingsCategoryRows: some View {
         Section {
             ForEach(visibleSettingsCategories) { category in
-                NavigationLink(value: SettingsRoute.category(category)) {
+                NavigationLink {
+                    SettingsCategoryPage(
+                        category: category,
+                        searchText: $settingsSearch,
+                        miniPlayerBottomInset: miniPlayerBottomInset
+                    ) {
+                        settingsSection(for: category)
+                    }
+                } label: {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(category.title)

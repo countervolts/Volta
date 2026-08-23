@@ -77,6 +77,7 @@ final class StatsStore {
             guard let self else { return }
             self.realEvents.append(event)
             self.saveReal()
+            WidgetSnapshotManager.updateListening(using: self.fakeEnabled ? self.fakeEvents : self.realEvents)
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .playEventRecorded, object: nil)
             }
@@ -99,6 +100,7 @@ final class StatsStore {
                 self.fakeEvents = []
                 try? FileManager.default.removeItem(at: self.fakeFileURL)
             }
+            WidgetSnapshotManager.updateListening(using: self.fakeEnabled ? self.fakeEvents : self.realEvents)
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .playEventRecorded, object: nil)
             }
@@ -126,6 +128,7 @@ final class StatsStore {
                 realEvents.removeAll()
                 saveReal()
             }
+            WidgetSnapshotManager.updateListening(using: fakeEnabled ? fakeEvents : realEvents)
         }
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .playEventRecorded, object: nil)

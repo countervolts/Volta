@@ -18,6 +18,7 @@ struct AlbumDetailView: View {
     @State private var animatedCover: UIImage?
     @AppStorage("albumTrackTitleDisplayMode") private var albumTrackTitleDisplayMode = AlbumTrackTitleDisplayMode.truncate.rawValue
     @AppStorage("showExplicitBadge") private var showExplicitBadge = true
+    @AppStorage("stylizedAlbumCover") private var stylizedAlbumCover = false
 
     // when opened from an artist profile, the animated header gets the same
     // pull-to-zoom (stretchy) behaviour the artist profile header has
@@ -178,6 +179,8 @@ struct AlbumDetailView: View {
             VStack(spacing: 0) {
                 if let animated = animatedCover {
                     animatedHeader(animated)
+                } else if usesStylizedStaticHeader {
+                    stylizedStaticHeader
                 } else {
                     artworkSection
                     infoSection
@@ -192,11 +195,22 @@ struct AlbumDetailView: View {
         }
         .scrollIndicators(.hidden)
         .coordinateSpace(name: Self.scrollSpace)
-        // Full-bleed animated header.
-        .ignoresSafeArea(.container, edges: animatedCover != nil ? .top : [])
+        // Full-bleed animated and opt-in stylized static headers.
+        .ignoresSafeArea(.container, edges: usesImmersivePhoneHeader ? .top : [])
     }
 
     private static let scrollSpace = "albumScroll"
+
+    private var usesStylizedStaticHeader: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone
+            && sizeClass == .compact
+            && stylizedAlbumCover
+            && animatedCover == nil
+    }
+
+    private var usesImmersivePhoneHeader: Bool {
+        animatedCover != nil || usesStylizedStaticHeader
+    }
 
     // Taller animated header with the normal album controls over it.
     private func animatedHeader(_ animated: UIImage) -> some View {
@@ -214,6 +228,46 @@ struct AlbumDetailView: View {
                     ],
                     startPoint: .top, endPoint: .bottom
                 )
+                VStack(spacing: 0) {
+                    infoSection
+                    actionRow
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height + stretch)
+            .clipped()
+            .offset(y: -stretch)
+        }
+        .aspectRatio(1 / 1.35, contentMode: .fit)
+    }
+
+    // Static artwork can opt into the same immersive composition as live artwork.
+    // Keep this phone-only so the iPad detail panel retains its current card layout.
+    private var stylizedStaticHeader: some View {
+        GeometryReader { geo in
+            let stretch = fromArtist ? max(0, geo.frame(in: .named(Self.scrollSpace)).minY) : 0
+            ZStack(alignment: .bottom) {
+                ArtworkView(
+                    coverArtID: vm.album.coverArt,
+                    size: 1000,
+                    cornerRadius: 0,
+                    onImageLoaded: { image in
+                        vm.setDominantColor(ColorExtractor.dominantColor(from: image))
+                    }
+                )
+                .frame(width: geo.size.width, height: geo.size.height + stretch)
+                .clipped()
+
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.38),
+                        .init(color: bg.opacity(0.55), location: 0.62),
+                        .init(color: bg.opacity(0.9), location: 0.82),
+                        .init(color: bg, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
                 VStack(spacing: 0) {
                     infoSection
                     actionRow

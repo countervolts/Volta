@@ -64,16 +64,16 @@ extension SettingsView {
     @ViewBuilder
     var appearanceSection: some View {
         let s = "Appearance"
-        if sectionVisible(s, [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]) {
+        if sectionVisible(s, [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["stylized album cover", "stylised album cover", "album cover", "album style", "full bleed", "edge to edge", "cover style"], ["player controls", "player customization", "customise player", "customize player", "quick actions", "shuffle", "repeat", "queue"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]) {
             Section {
                 if rowVisible(s, ["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"]) {
-                    NavigationLink(value: SettingsRoute.language) {
+                    SettingsDetailNavigationLink(.language) {
                         Label(L(.settings_language), systemImage: "globe")
                     }
                 }
 
                 if rowVisible(s, ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"]) {
-                    NavigationLink(value: SettingsRoute.hiddenAlbums) {
+                    SettingsDetailNavigationLink(.hiddenAlbums) {
                         LabeledContent {
                             Text(hiddenAlbums.hiddenAlbumIDs.isEmpty ? L(.hidden_albums_none) : "\(hiddenAlbums.hiddenAlbumIDs.count)")
                                 .foregroundStyle(Theme.secondaryText)
@@ -131,6 +131,22 @@ extension SettingsView {
                         Label(L(.appearance_stylized_cover), systemImage: "rectangle.portrait.arrowtriangle.2.outward")
                     }
                     .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["stylized album cover", "stylised album cover", "album cover", "album style", "full bleed", "edge to edge", "cover style"]) {
+                    Toggle(isOn: $stylizedAlbumCover) {
+                        Label(L(.appearance_stylized_album_cover), systemImage: "rectangle.portrait.arrowtriangle.2.outward")
+                    }
+                    .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["player controls", "player customization", "customise player", "customize player", "quick actions", "shuffle", "repeat", "queue"]) {
+                    NavigationLink {
+                        PlayerCustomizationSettingsView()
+                    } label: {
+                        Label("Player Controls", systemImage: "slider.horizontal.3")
+                    }
+                    .foregroundStyle(Theme.primaryText)
                 }
 
                 if rowVisible(s, ["song artwork in lists", "artwork", "thumbnail", "cover", "track"]) {

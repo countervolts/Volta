@@ -56,7 +56,14 @@ struct ArtistDetailView: View {
 
                 if showsYonkagorFish {
                     YonkagorFishOverlay()
-                        .ignoresSafeArea()
+                        // Keep the Canvas out of the status-bar area. On this profile,
+                        // extending the animated layer into that area makes iOS apply an
+                        // unwanted glass blur over the top of the header.
+                        .frame(
+                            width: width,
+                            height: max(0, proxy.size.height - proxy.safeAreaInsets.top)
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }

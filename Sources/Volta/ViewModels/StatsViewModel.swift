@@ -50,6 +50,34 @@ struct MonthBucket: Identifiable {
     let minutes: Double
 }
 
+// One day in the 52-week listening map used by the local share recap.
+struct ListeningRhythmDay: Identifiable, Hashable {
+    let date: Date
+    let plays: Int
+    let seconds: Int
+    let isFuture: Bool
+
+    var id: Date { date }
+}
+
+struct ListeningShareSnapshot: Hashable {
+    let periodLabel: String
+    let totalPlays: Int
+    let totalSeconds: Int
+    let uniqueSongs: Int
+    let uniqueAlbums: Int
+    let uniqueArtists: Int
+    let sessions: Int
+    let activeDays: Int
+    let streak: Int
+    let longestStreak: Int
+    let longestSession: Int
+    let topGenre: String
+    let bestMonth: String
+    let topArtist: String?
+    let rhythm: [ListeningRhythmDay]
+}
+
 @MainActor
 final class StatsViewModel: ObservableObject {
     @Published var period: StatsPeriod = .allTime
@@ -85,17 +113,39 @@ final class StatsViewModel: ObservableObject {
     @Published private(set) var genreData: [GenreBucket] = []
     @Published private(set) var dailyData: [DateBucket] = []
     @Published private(set) var monthlyData: [MonthBucket] = []
+    @Published private(set) var listeningRhythm: [ListeningRhythmDay] = []
 
     @Published private(set) var periodLabel: String = ""
 
     private let store = StatsStore.shared
     private let cal = Calendar.current
 
+    var shareSnapshot: ListeningShareSnapshot {
+        ListeningShareSnapshot(
+            periodLabel: periodLabel,
+            totalPlays: totalPlays,
+            totalSeconds: totalSeconds,
+            uniqueSongs: uniqueSongs,
+            uniqueAlbums: uniqueAlbums,
+            uniqueArtists: uniqueArtists,
+            sessions: sessions,
+            activeDays: activeDays,
+            streak: streak,
+            longestStreak: longestStreak,
+            longestSession: longestSession,
+            topGenre: topGenre,
+            bestMonth: bestMonth,
+            topArtist: topArtists.first?.title,
+            rhythm: listeningRhythm
+        )
+    }
+
     // MARK: - Recompute
 
     func recompute() {
         let (start, end) = dateRange()
         let events = store.events(from: start, to: end)
+        let allEvents = store.allEvents()
         periodLabel = makePeriodLabel(start: start, end: end)
         if period == .allTime, let earliest = events.min(by: { $0.timestamp < $1.timestamp }) {
             periodDays = max(1, cal.dateComponents([.day], from: cal.startOfDay(for: earliest.timestamp), to: end).day ?? 1)
@@ -126,11 +176,12 @@ final class StatsViewModel: ObservableObject {
         dailyData = dailyBuckets(events: events, start: start, end: end)
         monthlyData = monthlyBuckets(events: events)
 
-        streak = currentStreak()
-        longestStreak = longestStreakCalc()
+        streak = currentStreak(events: allEvents)
+        longestStreak = longestStreakCalc(events: allEvents)
         activeDays = Set(events.map { cal.startOfDay(for: $0.timestamp) }).count
         sessions = estimateSessions(events: events)
         longestSession = longestSessionSeconds(events: events)
+        listeningRhythm = makeListeningRhythm(events: allEvents)
 
         let bestMonthData = monthlyData.max(by: { $0.count < $1.count })
         bestMonth = bestMonthData?.label ?? "-"
@@ -306,9 +357,8 @@ final class StatsViewModel: ObservableObject {
 
     // MARK: - Streaks
 
-    private func currentStreak() -> Int {
-        let all = store.allEvents()
-        let days = Set(all.map { cal.startOfDay(for: $0.timestamp) }).sorted(by: >)
+    private func currentStreak(events: [PlayEvent]) -> Int {
+        let days = Set(events.map { cal.startOfDay(for: $0.timestamp) }).sorted(by: >)
         guard !days.isEmpty else { return 0 }
         var streak = 0
         var cursor = cal.startOfDay(for: Date())
@@ -323,9 +373,8 @@ final class StatsViewModel: ObservableObject {
         return streak
     }
 
-    private func longestStreakCalc() -> Int {
-        let all = store.allEvents()
-        let days = Set(all.map { cal.startOfDay(for: $0.timestamp) }).sorted()
+    private func longestStreakCalc(events: [PlayEvent]) -> Int {
+        let days = Set(events.map { cal.startOfDay(for: $0.timestamp) }).sorted()
         guard !days.isEmpty else { return 0 }
         var best = 1, current = 1
         for i in 1..<days.count {
@@ -363,5 +412,37 @@ final class StatsViewModel: ObservableObject {
             }
         }
         return max(best, current)
+    }
+
+    // MARK: - Sharing rhythm
+
+    // Mirrors a GitHub-style contribution map: Sunday-to-Saturday columns over
+    // the last 52 weeks. Future days in the current week stay visibly empty.
+    private func makeListeningRhythm(events: [PlayEvent]) -> [ListeningRhythmDay] {
+        var rhythmCalendar = cal
+        rhythmCalendar.firstWeekday = 1 // Sunday
+
+        let today = rhythmCalendar.startOfDay(for: Date())
+        let weekday = rhythmCalendar.component(.weekday, from: today)
+        let currentWeekStart = rhythmCalendar.date(byAdding: .day, value: -(weekday - 1), to: today) ?? today
+        let firstWeekStart = rhythmCalendar.date(byAdding: .weekOfYear, value: -51, to: currentWeekStart) ?? currentWeekStart
+        let finalDay = rhythmCalendar.date(byAdding: .day, value: 363, to: firstWeekStart) ?? today
+
+        var playsByDay: [Date: Int] = [:]
+        var secondsByDay: [Date: Int] = [:]
+        for event in events {
+            let day = rhythmCalendar.startOfDay(for: event.timestamp)
+            guard day >= firstWeekStart && day <= finalDay else { continue }
+            playsByDay[day, default: 0] += 1
+            secondsByDay[day, default: 0] += event.duration
+        }
+
+        return (0..<364).compactMap { offset in
+            guard let date = rhythmCalendar.date(byAdding: .day, value: offset, to: firstWeekStart) else { return nil }
+            let isFuture = date > today
+            let plays = isFuture ? 0 : playsByDay[date, default: 0]
+            let seconds = isFuture ? 0 : secondsByDay[date, default: 0]
+            return ListeningRhythmDay(date: date, plays: plays, seconds: seconds, isFuture: isFuture)
+        }
     }
 }

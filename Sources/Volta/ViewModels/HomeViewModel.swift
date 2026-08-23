@@ -96,6 +96,16 @@ final class HomeViewModel: ObservableObject {
         saveSnapshot(serverID: serverID)
     }
 
+    /// Refresh only the daily mixes after their Home customization changes.
+    /// The rest of Home stays in place instead of briefly reloading every row.
+    func refreshMixes(appState: AppState) async {
+        guard let client = appState.client, !isLoading else { return }
+        mixes = await loadMixes(client: client)
+        if let loadedServerID {
+            saveSnapshot(serverID: loadedServerID)
+        }
+    }
+
     // MARK: - Disk snapshot (instant launch content)
 
     private struct HomeSnapshot: Codable {
@@ -150,6 +160,7 @@ final class HomeViewModel: ObservableObject {
 
     private func loadMixes(client: any MusicService) async -> [MusicMix] {
         var rng = SeededRNG(seed: SeededRNG.daySeed())
+        let preferences = HomeSectionPreferencesStore.shared.mixPreferences
 
         // Sample enough library to find common genres and active artists.
         let rawSample = (try? await client.allAlbums(size: 300)) ?? []
@@ -159,61 +170,76 @@ final class HomeViewModel: ObservableObject {
 
         var mixes: [MusicMix] = []
 
-        if let discovery = await loadDiscoveryStation(client: client, rng: &rng) {
+        if preferences.isEnabled(.discovery),
+           let discovery = await loadDiscoveryStation(client: client, preferences: preferences, rng: &rng) {
             mixes.append(discovery)
         }
-        if let heavy = await loadHeavyRotation(client: client, rng: &rng) {
+        if preferences.isEnabled(.heavyRotation),
+           let heavy = await loadHeavyRotation(client: client, preferences: preferences, rng: &rng) {
             mixes.append(heavy)
         }
 
-        // Up to two genre mixes.
+        // Genre mix count is chosen in Home customization.
         let genreCounts = Dictionary(grouping: sample.compactMap { $0.genre }, by: { $0 }).mapValues(\.count)
         let topGenres = genreCounts.sorted { $0.value > $1.value }.map(\.key)
-        for genre in topGenres.shuffled(using: &rng).prefix(2) {
-            let pool = HiddenAlbumStore.shared.visibleSongs((try? await client.songsByGenre(genre, count: 200)) ?? [])
-            if let mix = makeMix(id: "genre-\(genre)", title: "\(genre) Mix", subtitle: "Daily \(genre.lowercased()) mix", from: pool, rng: &rng) {
-                mixes.append(mix)
+        if preferences.isEnabled(.genres) {
+            for genre in topGenres.shuffled(using: &rng).prefix(preferences.genreMixCount) {
+                let pool = HiddenAlbumStore.shared.visibleSongs((try? await client.songsByGenre(genre, count: 200)) ?? [])
+                if let mix = makeMix(id: "genre-\(genre)", title: "\(genre) Mix", subtitle: "Daily \(genre.lowercased()) mix", from: pool, preferences: preferences, rng: &rng) {
+                    mixes.append(mix)
+                }
             }
         }
 
-        // Up to two artist mixes.
+        // Artist mix count is chosen in Home customization.
         let artistCounts = Dictionary(grouping: sample.compactMap { a -> (String, String)? in
             guard let id = a.artistId, let name = a.artist else { return nil }
             return (id, name)
         }, by: { $0.0 })
         let topArtistIDs = artistCounts.sorted { $0.value.count > $1.value.count }.map { ($0.key, $0.value.first!.1) }
-        for (artistID, artistName) in topArtistIDs.shuffled(using: &rng).prefix(2) {
-            var pool = HiddenAlbumStore.shared.visibleSongs((try? await client.topSongs(artistName: artistName, count: 50)) ?? [])
-            if pool.count < 10, let artist = try? await client.artist(id: artistID) {
-                // Fallback: gather tracks from the artist's albums.
-                HiddenAlbumStore.shared.register(artists: [artist])
-                let albums = HiddenAlbumStore.shared.visibleAlbums(artist.album ?? []).prefix(6)
-                for album in albums {
-                    if let full = try? await client.album(id: album.id) {
-                        pool.append(contentsOf: HiddenAlbumStore.shared.visibleSongs(full.song ?? []))
+        if preferences.isEnabled(.artists) {
+            for (artistID, artistName) in topArtistIDs.shuffled(using: &rng).prefix(preferences.artistMixCount) {
+                var pool = HiddenAlbumStore.shared.visibleSongs((try? await client.topSongs(artistName: artistName, count: 50)) ?? [])
+                if pool.count < 10, let artist = try? await client.artist(id: artistID) {
+                    // Fallback: gather tracks from the artist's albums.
+                    HiddenAlbumStore.shared.register(artists: [artist])
+                    let albums = HiddenAlbumStore.shared.visibleAlbums(artist.album ?? []).prefix(6)
+                    for album in albums {
+                        if let full = try? await client.album(id: album.id) {
+                            pool.append(contentsOf: HiddenAlbumStore.shared.visibleSongs(full.song ?? []))
+                        }
                     }
                 }
-            }
-            if let mix = makeMix(id: "artist-\(artistID)", title: "\(artistName) Mix", subtitle: "Based on \(artistName)", from: pool, rng: &rng) {
-                mixes.append(mix)
+                if let mix = makeMix(id: "artist-\(artistID)", title: "\(artistName) Mix", subtitle: "Based on \(artistName)", from: pool, preferences: preferences, rng: &rng) {
+                    mixes.append(mix)
+                }
             }
         }
 
         return mixes.shuffled(using: &rng)
     }
 
-    private func loadDiscoveryStation(client: any MusicService, rng: inout SeededRNG) async -> MusicMix? {
+    private func loadDiscoveryStation(
+        client: any MusicService,
+        preferences: HomeMixPreferences,
+        rng: inout SeededRNG
+    ) async -> MusicMix? {
         let pool = HiddenAlbumStore.shared.visibleSongs((try? await client.randomSongs(size: 120)) ?? [])
         return makeMix(
             id: "station-discovery-\(SeededRNG.daySeed())",
             title: "Discovery Station",
             subtitle: "Fresh picks for today",
             from: pool,
+            preferences: preferences,
             rng: &rng
         )
     }
 
-    private func loadHeavyRotation(client: any MusicService, rng: inout SeededRNG) async -> MusicMix? {
+    private func loadHeavyRotation(
+        client: any MusicService,
+        preferences: HomeMixPreferences,
+        rng: inout SeededRNG
+    ) async -> MusicMix? {
         let rawAlbums = (try? await client.frequentAlbums(size: 12)) ?? []
         HiddenAlbumStore.shared.register(albums: rawAlbums)
         let albums = HiddenAlbumStore.shared.visibleAlbums(rawAlbums)
@@ -228,17 +254,25 @@ final class HomeViewModel: ObservableObject {
             title: "Heavy Rotation",
             subtitle: "Songs you keep coming back to",
             from: pool,
+            preferences: preferences,
             rng: &rng
         )
     }
 
-    // Build a 20-50 song mix when the pool is deep enough.
-    private func makeMix(id: String, title: String, subtitle: String, from pool: [Song], rng: inout SeededRNG) -> MusicMix? {
+    // Build a user-sized mix when the pool is deep enough.
+    private func makeMix(
+        id: String,
+        title: String,
+        subtitle: String,
+        from pool: [Song],
+        preferences: HomeMixPreferences,
+        rng: inout SeededRNG
+    ) -> MusicMix? {
         // Dedupe by song id.
         var seen = Set<String>()
         let unique = pool.filter { seen.insert($0.id).inserted }
         guard unique.count >= 10 else { return nil }
-        let target = min(unique.count, Int.random(in: 20...50, using: &rng))
+        let target = preferences.length.songCount(available: unique.count, rng: &rng)
         let songs = Array(unique.shuffled(using: &rng).prefix(target))
         let cover = songs.first(where: { $0.coverArt != nil })?.coverArt
         return MusicMix(id: id, title: title, subtitle: subtitle, coverArt: cover, songs: songs)

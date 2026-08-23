@@ -36,6 +36,7 @@ struct NowPlayingScreen: View {
     @State private var showLosslessInfo = false
     @State private var showAudioSignalPath = false
     @State private var showVisualizer = false
+    @State private var showEqualizer = false
     // Shared scrub state for bar and time labels.
     @State private var scrubbing = false
     @State private var scrubTime: TimeInterval = 0
@@ -49,6 +50,7 @@ struct NowPlayingScreen: View {
     @State private var isFetchingArtist = false
     @State private var isFetchingAlbum = false
     @StateObject private var tasteStore = TasteStore.shared
+    @StateObject private var playerControls = PlayerControlPreferences.shared
     @State private var showQueueHistory = false
     @State private var queueScrollRequest = 0
     @State private var queueAnchorOffset: CGFloat = 0
@@ -213,8 +215,12 @@ struct NowPlayingScreen: View {
         .sheet(isPresented: $showAudioSignalPath) {
             AudioSignalPathSheet(song: audio.currentSong, isTranscoding: audio.currentPlaybackUsesTranscode)
         }
+        .sheet(isPresented: $showEqualizer) {
+            NavigationStack { EqualizerView() }
+                .preferredColorScheme(Theme.colorScheme)
+        }
         .fullScreenCover(isPresented: $showVisualizer) {
-            AudioVisualizerScreen(audio: audio)
+            AudioReactiveVisualizerScreen(audio: audio)
         }
         .confirmationDialog(
             audio.currentSong?.artist ?? "",
@@ -2146,54 +2152,96 @@ struct NowPlayingScreen: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 16)
 
-            // Equal thirds: lyrics, AirPlay, queue.
+            // The quick-action strip is intentionally data driven: users can
+            // reorder it or replace any of the defaults in Player Controls.
             HStack(spacing: 0) {
-                Button {
-                    selectPlayerTab(activeTab == .lyrics ? .nowPlaying : .lyrics)
-                } label: {
-                    Image(systemName: activeTab == .lyrics ? Symbols.lyrics : Symbols.lyricsInactive)
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(activeTab == .lyrics ? Theme.accent : .white.opacity(0.6))
+                ForEach(playerControls.visibleActions) { action in
+                    playerQuickAction(action)
                         .frame(width: 44, height: 44)
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
-
-                OutputRouteButton()
-                    .frame(width: 44, height: 44)
-                    .frame(maxWidth: .infinity)
-
-                Button {
-                    showVisualizer = true
-                } label: {
-                    Image(systemName: Symbols.visualizer)
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
-
-                sleepTimerMenu
-
-                Button {
-                    if activeTab == .queue, showQueueHistory {
-                        queueScrollRequest += 1
-                    } else {
-                        selectPlayerTab(activeTab == .queue ? .nowPlaying : .queue)
-                    }
-                } label: {
-                    Image(systemName: Symbols.queue)
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(activeTab == .queue ? Theme.accent : .white.opacity(0.6))
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.plain)
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
         }
+    }
+
+    @ViewBuilder
+    private func playerQuickAction(_ action: PlayerQuickAction) -> some View {
+        switch action {
+        case .lyrics:
+            Button {
+                selectPlayerTab(activeTab == .lyrics ? .nowPlaying : .lyrics)
+            } label: {
+                quickActionIcon(
+                    activeTab == .lyrics ? Symbols.lyrics : Symbols.lyricsInactive,
+                    active: activeTab == .lyrics
+                )
+            }
+            .accessibilityLabel("Lyrics")
+
+        case .output:
+            OutputRouteButton()
+
+        case .visualizer:
+            Button { showVisualizer = true } label: {
+                quickActionIcon(Symbols.visualizer)
+            }
+            .accessibilityLabel("Visualizer")
+
+        case .sleepTimer:
+            sleepTimerMenu
+
+        case .queue:
+            Button {
+                if activeTab == .queue, showQueueHistory {
+                    queueScrollRequest += 1
+                } else {
+                    selectPlayerTab(activeTab == .queue ? .nowPlaying : .queue)
+                }
+            } label: {
+                quickActionIcon(Symbols.queue, active: activeTab == .queue)
+            }
+            .accessibilityLabel("Queue")
+
+        case .shuffle:
+            Button { audio.toggleShuffle() } label: {
+                quickActionIcon(Symbols.shuffle, active: audio.isShuffle)
+            }
+            .accessibilityLabel("Shuffle")
+
+        case .repeatMode:
+            Button { audio.cycleRepeat() } label: {
+                quickActionIcon(audio.repeatMode == .one ? Symbols.repeatOne : Symbols.repeatAll, active: audio.repeatMode != .off)
+            }
+            .accessibilityLabel("Repeat")
+
+        case .autoplay:
+            Button { audio.cycleAutoplay() } label: {
+                quickActionIcon("infinity", active: audio.autoplayMode != .off)
+            }
+            .accessibilityLabel("Autoplay")
+
+        case .transition:
+            Button { audio.cycleTransitionMode() } label: {
+                quickActionIcon("arrow.left.arrow.right", active: audio.transitionMode != .off)
+            }
+            .accessibilityLabel("Track transitions")
+
+        case .equalizer:
+            Button { showEqualizer = true } label: {
+                quickActionIcon("slider.vertical.3", active: EqualizerEngine.shared.isEnabled)
+            }
+            .accessibilityLabel("Equalizer")
+        }
+    }
+
+    private func quickActionIcon(_ symbol: String, active: Bool = false) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 20, weight: .medium))
+            .foregroundStyle(active ? Theme.accent : .white.opacity(0.6))
+            .frame(width: 44, height: 44)
     }
 
     // MARK: - Skip animations

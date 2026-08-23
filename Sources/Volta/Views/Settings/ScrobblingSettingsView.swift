@@ -6,7 +6,7 @@ extension SettingsView {
         let s = "Scrobbling"
         if sectionVisible(s, [["last.fm", "lastfm", "koito", "maloja", "listenbrainz", "third party", "external scrobbling", "stats"]]) {
             Section {
-                NavigationLink(value: SettingsRoute.scrobbling) {
+                SettingsDetailNavigationLink(.scrobbling) {
                     HStack {
                         Label("Third-Party Scrobbling", systemImage: "antenna.radiowaves.left.and.right")
                         Spacer()

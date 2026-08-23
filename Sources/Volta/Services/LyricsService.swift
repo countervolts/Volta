@@ -11,6 +11,19 @@ struct LyricSearchHit: Identifiable, Sendable, Hashable {
     let snippet: String
 }
 
+struct DownloadedLyricsItem: Identifiable, Sendable, Hashable {
+    /// The hashed on-disk storage key. It is deliberately not a user-controlled
+    /// path and is the only identifier accepted by the deletion API.
+    let id: String
+    let songID: String?
+    let title: String
+    let artist: String?
+    let source: String
+    let format: String
+    let bytes: Int64
+    let savedAt: Date?
+}
+
 enum LyricsDownloadSource: String, CaseIterable, Identifiable, Sendable {
     case server
     case lrclib
@@ -148,6 +161,95 @@ actor LyricsService {
 
     func localLyricsCount() -> Int {
         storedSongKeys().count
+    }
+
+    func downloadedLyricsItems() -> [DownloadedLyricsItem] {
+        let files = directoryContents()
+        var filesByName = Dictionary(uniqueKeysWithValues: files.map { ($0.lastPathComponent, $0) })
+        var items: [DownloadedLyricsItem] = []
+        var seenKeys = Set<String>()
+
+        for metadataFile in files where metadataFile.lastPathComponent.hasSuffix(".metadata.json") {
+            guard let data = try? Data(contentsOf: metadataFile),
+                  let metadata = try? JSONDecoder().decode(StoredLyricsMetadata.self, from: data)
+            else { continue }
+            let key = metadataFile.lastPathComponent.replacingOccurrences(of: ".metadata.json", with: "")
+            guard seenKeys.insert(key).inserted else { continue }
+            let rawFile = filesByName.removeValue(forKey: metadata.fileName)
+            let bytes = Self.fileSize(at: metadataFile) + (rawFile.map { Self.fileSize(at: $0) } ?? 0)
+            items.append(DownloadedLyricsItem(
+                id: key,
+                songID: metadata.songID,
+                title: metadata.title,
+                artist: metadata.artist,
+                source: metadata.source,
+                format: metadata.format.rawValue.uppercased(),
+                bytes: bytes,
+                savedAt: metadata.savedAt
+            ))
+        }
+
+        for file in files where Self.isLegacyJSON(file) {
+            let key = file.deletingPathExtension().lastPathComponent
+            guard seenKeys.insert(key).inserted,
+                  let data = try? Data(contentsOf: file),
+                  let stored = try? JSONDecoder().decode(LegacyStoredLyrics.self, from: data)
+            else { continue }
+            items.append(DownloadedLyricsItem(
+                id: key,
+                songID: stored.songID,
+                title: stored.title,
+                artist: stored.artist,
+                source: stored.source,
+                format: "JSON",
+                bytes: Self.fileSize(at: file),
+                savedAt: stored.savedAt
+            ))
+        }
+
+        for file in files where LyricsFileFormat.allCases.contains(where: { $0.pathExtension == file.pathExtension.lowercased() }) {
+            let key = file.deletingPathExtension().lastPathComponent
+            guard seenKeys.insert(key).inserted else { continue }
+            let values = try? file.resourceValues(forKeys: [.contentModificationDateKey])
+            items.append(DownloadedLyricsItem(
+                id: key,
+                songID: nil,
+                title: file.deletingPathExtension().lastPathComponent,
+                artist: nil,
+                source: "Local",
+                format: file.pathExtension.uppercased(),
+                bytes: Self.fileSize(at: file),
+                savedAt: values?.contentModificationDate
+            ))
+        }
+
+        return items.sorted {
+            $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
+    }
+
+    func removeLocalLyrics(storageKey: String) {
+        guard !storageKey.isEmpty,
+              storageKey == URL(fileURLWithPath: storageKey).lastPathComponent
+        else { return }
+
+        let metadataFile = metadataURL(forKey: storageKey)
+        var songID: String?
+        if let data = try? Data(contentsOf: metadataFile),
+           let metadata = try? JSONDecoder().decode(StoredLyricsMetadata.self, from: data) {
+            songID = metadata.songID
+        } else if let data = try? Data(contentsOf: legacyURL(forKey: storageKey)),
+                  let legacy = try? JSONDecoder().decode(LegacyStoredLyrics.self, from: data) {
+            songID = legacy.songID
+        }
+
+        for format in LyricsFileFormat.allCases {
+            try? FileManager.default.removeItem(at: rawURL(forKey: storageKey, format: format))
+        }
+        try? FileManager.default.removeItem(at: metadataFile)
+        try? FileManager.default.removeItem(at: legacyURL(forKey: storageKey))
+        if let songID { cache.removeValue(forKey: songID) }
+        AppLogger.shared.log("Local lyric removed; storageKey=\(storageKey)", category: .lyrics)
     }
 
     func hasLocalLyrics(for songID: String) -> Bool {
@@ -577,6 +679,10 @@ actor LyricsService {
         return enumerator.compactMap { $0 as? URL }
             .compactMap { try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize }
             .reduce(0, +)
+    }
+
+    private nonisolated static func fileSize(at url: URL) -> Int64 {
+        Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
     }
 
     // MARK: - LRCLIB

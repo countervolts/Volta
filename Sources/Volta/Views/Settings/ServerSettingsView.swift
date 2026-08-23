@@ -24,7 +24,7 @@ extension SettingsView {
                 LabeledContent("Username", value: server.username)
                     .foregroundStyle(Theme.primaryText)
 
-                NavigationLink(value: SettingsRoute.editConnection) {
+                SettingsDetailNavigationLink(.editConnection) {
                     Label("Edit Connection", systemImage: Symbols.edit)
                 }
                 .foregroundStyle(Theme.primaryText)
@@ -60,7 +60,7 @@ extension SettingsView {
             .foregroundStyle(Theme.primaryText)
 
             if rowVisible(s, ["server health & speed test", "speed test", "server health", "latency", "connection"]) {
-                NavigationLink(value: SettingsRoute.serverInfo) {
+                SettingsDetailNavigationLink(.serverInfo) {
                     Label("Server Health & Speed Test", systemImage: "speedometer")
                 }
                 .foregroundStyle(Theme.primaryText)
@@ -73,7 +73,85 @@ extension SettingsView {
             }
         }
         .listRowBackground(Theme.secondaryBackground)
+
+        Section {
+            if let currentSSID = networkMonitor.currentSSID {
+                LabeledContent("Current Wi-Fi", value: currentSSID)
+                    .foregroundStyle(Theme.primaryText)
+            }
+
+            Button {
+                addCurrentWiFiSSID()
+            } label: {
+                HStack {
+                    Label("Only Wi-Fi Login on This SSID", systemImage: "wifi.badge.checkmark")
+                    Spacer()
+                    if isReadingCurrentSSID {
+                        ProgressView().controlSize(.small).tint(Theme.accent)
+                    }
+                }
+            }
+            .foregroundStyle(Theme.primaryText)
+            .disabled(
+                isReadingCurrentSSID
+                    || networkMonitor.currentSSID.map(allowedWiFiLoginSSIDs.contains) == true
+            )
+
+            if allowedWiFiLoginSSIDs.isEmpty {
+                Text("Automatic Wi-Fi login is currently allowed on every network.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            } else {
+                ForEach(allowedWiFiLoginSSIDs, id: \.self) { ssid in
+                    HStack {
+                        Label(ssid, systemImage: "wifi")
+                        Spacer()
+                        Button(role: .destructive) {
+                            removeWiFiSSID(ssid)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Remove \(ssid)")
+                    }
+                }
+            }
+
+            if let wifiSSIDStatus {
+                Text(wifiSSIDStatus)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        } header: {
+            Text("Wi-Fi Login Networks")
+        } footer: {
+            Text("When this list has entries, Volta only connects to your server over Wi-Fi on an approved SSID. Cellular login is unchanged. Reading the SSID requires Location permission.")
         }
+        .listRowBackground(Theme.secondaryBackground)
+        }
+    }
+
+    private func addCurrentWiFiSSID() {
+        isReadingCurrentSSID = true
+        wifiSSIDStatus = nil
+        Task {
+            defer { isReadingCurrentSSID = false }
+            guard let ssid = await networkMonitor.requestCurrentSSIDAccess() else {
+                wifiSSIDStatus = "Wi-Fi name unavailable. Make sure Wi-Fi and Location access are enabled."
+                return
+            }
+            WiFiSSIDPolicy.add(ssid)
+            allowedWiFiLoginSSIDs = WiFiSSIDPolicy.allowedSSIDs
+            wifiSSIDStatus = "Added \(ssid)."
+            appState.refreshWiFiLoginPolicy()
+        }
+    }
+
+    private func removeWiFiSSID(_ ssid: String) {
+        WiFiSSIDPolicy.remove(ssid)
+        allowedWiFiLoginSSIDs = WiFiSSIDPolicy.allowedSSIDs
+        wifiSSIDStatus = "Removed \(ssid)."
+        appState.refreshWiFiLoginPolicy()
     }
 }
 

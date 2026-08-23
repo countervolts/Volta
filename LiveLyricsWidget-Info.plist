@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<string>com.ayo.music.LiveLyricsWidget</string>
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>VoltaLiveLyricsWidget</string>
 	<key>CFBundleDisplayName</key>
 	<string>Volta Live Lyrics</string>
 	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
+	<string>VoltaLiveLyricsWidget</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.3.2</string>
+	<string>1.4.0</string>
 	<key>CFBundleVersion</key>
-	<string>12</string>
+	<string>13</string>
 	<key>MinimumOSVersion</key>
 	<string>16.1</string>
 	<key>NSExtension</key>

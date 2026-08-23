@@ -1,12 +1,33 @@
 import Foundation
 import Combine
 
+enum CompanionLyricsPhase: String, Sendable {
+    case queued
+    case downloading
+    case saved
+    case unavailable
+}
+
+struct CompanionLyricsTransfer: Identifiable, Sendable, Equatable {
+    let id: String
+    let song: Song
+    var phase: CompanionLyricsPhase
+    let source: LyricsDownloadSource
+}
+
+private struct QueuedCompanionLyrics {
+    let song: Song
+    let client: any MusicService
+    let source: LyricsDownloadSource
+}
+
 // Downloads lyrics for the whole library with bounded concurrency (~12 in flight)
 // and publishes progress for a settings UI. Songs that already have lyrics on
 // device resolve from disk and don't hit the network.
 @MainActor
 final class LyricsBulkDownloader: ObservableObject {
     static let shared = LyricsBulkDownloader()
+    static let downloadWithSongsKey = "downloadLyricsWithSongs"
 
     @Published private(set) var isRunning = false
     @Published private(set) var total = 0
@@ -14,9 +35,16 @@ final class LyricsBulkDownloader: ObservableObject {
     @Published private(set) var found = 0
     @Published private(set) var skipped = 0
     @Published private(set) var statusText = "Idle"
+    @Published private(set) var companionTransfers: [CompanionLyricsTransfer] = []
+    @Published private(set) var revision = 0
 
     private var task: Task<Void, Never>?
+    private var companionQueue: [QueuedCompanionLyrics] = []
+    private var companionTasks: [String: Task<Void, Never>] = [:]
+    private var companionItems: [String: CompanionLyricsTransfer] = [:]
+    private var companionOrder: [String] = []
     private static let maxConcurrent = 12
+    private static let maxCompanionConcurrent = 4
 
     var fraction: Double {
         guard total > 0 else { return 0 }
@@ -38,6 +66,90 @@ final class LyricsBulkDownloader: ObservableObject {
 
     func cancel() {
         task?.cancel()
+    }
+
+    func enqueueCompanionLyrics(
+        for song: Song,
+        client: any MusicService,
+        source: LyricsDownloadSource
+    ) {
+        guard !DemoServers.isDemo(client.config.baseURL),
+              companionItems[song.id] == nil else { return }
+        companionItems[song.id] = CompanionLyricsTransfer(
+            id: song.id,
+            song: song,
+            phase: .queued,
+            source: source
+        )
+        companionOrder.append(song.id)
+        companionQueue.append(QueuedCompanionLyrics(song: song, client: client, source: source))
+        publishCompanionTransfers()
+        pumpCompanionLyrics()
+    }
+
+    func cancelCompanionLyrics(for songID: String) {
+        companionQueue.removeAll { $0.song.id == songID }
+        companionTasks.removeValue(forKey: songID)?.cancel()
+        companionItems.removeValue(forKey: songID)
+        companionOrder.removeAll { $0 == songID }
+        publishCompanionTransfers()
+        pumpCompanionLyrics()
+    }
+
+    private func pumpCompanionLyrics() {
+        while companionTasks.count < Self.maxCompanionConcurrent, !companionQueue.isEmpty {
+            let request = companionQueue.removeFirst()
+            let songID = request.song.id
+            guard var transfer = companionItems[songID] else { continue }
+            transfer.phase = .downloading
+            companionItems[songID] = transfer
+            publishCompanionTransfers()
+
+            companionTasks[songID] = Task { @MainActor [weak self] in
+                let alreadySaved = await LyricsService.shared.hasLocalLyrics(for: songID)
+                let saved: Bool
+                if alreadySaved {
+                    saved = true
+                } else {
+                    let lines = await LyricsService.shared.lyrics(
+                        for: request.song,
+                        client: request.client,
+                        forceSave: true,
+                        downloadSource: request.source
+                    )
+                    saved = !lines.isEmpty
+                }
+                guard !Task.isCancelled else { return }
+                self?.finishCompanionLyrics(songID: songID, saved: saved)
+            }
+        }
+    }
+
+    private func finishCompanionLyrics(songID: String, saved: Bool) {
+        companionTasks.removeValue(forKey: songID)
+        guard var transfer = companionItems[songID] else {
+            pumpCompanionLyrics()
+            return
+        }
+        transfer.phase = saved ? .saved : .unavailable
+        companionItems[songID] = transfer
+        revision &+= 1
+        publishCompanionTransfers()
+        pumpCompanionLyrics()
+
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self,
+                  let phase = self.companionItems[songID]?.phase,
+                  phase == .saved || phase == .unavailable else { return }
+            self.companionItems.removeValue(forKey: songID)
+            self.companionOrder.removeAll { $0 == songID }
+            self.publishCompanionTransfers()
+        }
+    }
+
+    private func publishCompanionTransfers() {
+        companionTransfers = companionOrder.compactMap { companionItems[$0] }
     }
 
     private func run(client: any MusicService, source: LyricsDownloadSource) async {
@@ -88,6 +200,7 @@ final class LyricsBulkDownloader: ObservableObject {
     private func finish(cancelled: Bool) {
         isRunning = false
         task = nil
+        revision &+= 1
         let skippedNote = skipped > 0 ? " · \(skipped) already had lyrics" : ""
         statusText = cancelled
             ? "Stopped · added \(found)\(skippedNote)"

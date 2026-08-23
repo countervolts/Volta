@@ -178,6 +178,7 @@ final class LibraryStatsViewModel: ObservableObject {
                 self.stats = result.data
                 self.isOfflineData = result.offline
                 self.phase = .ready
+                WidgetSnapshotManager.updateLibrary(with: result.data)
                 if self.shouldShareLibrary(key: key) {
                     self.syncGlobalStats(uploading: result.data)
                 }

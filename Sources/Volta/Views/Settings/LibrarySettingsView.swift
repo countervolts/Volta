@@ -6,10 +6,17 @@ extension SettingsView {
     @ViewBuilder
     var librarySection: some View {
         let s = "Library"
-        if sectionVisible(s, [["custom sorting", "saved sorts", "saved views", "smart filters", "library views", "albums", "songs", "sort", "group", "filters"], ["rating", "ratings", "stars", "favorite", "favourite", "love"]]) {
+        if sectionVisible(s, [["home", "home tab", "customize home", "sections", "section order"], ["custom sorting", "saved sorts", "saved views", "smart filters", "library views", "albums", "songs", "sort", "group", "filters"], ["rating", "ratings", "stars", "favorite", "favourite", "love"]]) {
             Section {
+                if rowVisible(s, ["home", "home tab", "customize home", "sections", "section order"]) {
+                    SettingsDetailNavigationLink(.homeCustomization) {
+                        Label(L(.home_customize), systemImage: "rectangle.3.group")
+                    }
+                    .foregroundStyle(Theme.primaryText)
+                }
+
                 if rowVisible(s, ["custom sorting", "saved sorts", "saved views", "smart filters", "library views", "albums", "songs", "sort", "group", "filters"]) {
-                    NavigationLink(value: SettingsRoute.savedLibrarySorts) {
+                    SettingsDetailNavigationLink(.savedLibrarySorts) {
                         Label(L(.library_views_title), systemImage: "line.3.horizontal.decrease.circle")
                     }
                     .foregroundStyle(Theme.primaryText)

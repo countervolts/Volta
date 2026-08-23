@@ -53,12 +53,14 @@ struct RootView: View {
                 appState.persistPlaybackSession()
             }
         }
+        .onOpenURL { appState.handleIncomingURL($0) }
     }
 
     private func updateReliabilityMonitoring(for phase: ScenePhase) {
         switch phase {
         case .active:
             CrashHangReporter.shared.beginForegroundMonitoring()
+            Task { await NetworkMonitor.shared.refreshCurrentSSID() }
         case .inactive:
             CrashHangReporter.shared.pauseForegroundMonitoring()
         case .background:

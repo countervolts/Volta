@@ -10,19 +10,90 @@ import WidgetKit
 struct VoltaLiveLyricsWidgetBundle: WidgetBundle {
     var body: some Widget {
         VoltaLiveLyricsWidget()
+        VoltaLibraryWidget()
+        VoltaListeningWidget()
     }
 }
 
 @available(iOS 16.1, *)
 private struct VoltaLiveLyricsWidget: Widget {
     var body: some WidgetConfiguration {
+        if #available(iOS 18.0, *) {
+            // CarPlay otherwise merges the one-line compact leading/trailing regions.
+            return activityConfiguration
+                .supplementalActivityFamilies([.small])
+        } else {
+            return activityConfiguration
+        }
+    }
+
+    private var activityConfiguration: ActivityConfiguration<LiveLyricsActivityAttributes> {
         ActivityConfiguration(for: LiveLyricsActivityAttributes.self) { context in
-            LiveLyricsLockScreenView(state: context.state)
+            LiveLyricsActivityView(state: context.state)
                 .activityBackgroundTint(Color.black.opacity(0.92))
                 .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             LiveLyricsDynamicIsland.make(state: context.state)
         }
+    }
+}
+
+@available(iOS 16.1, *)
+private struct LiveLyricsActivityView: View {
+    let state: LiveLyricsActivityAttributes.ContentState
+
+    @ViewBuilder
+    var body: some View {
+        if #available(iOS 18.0, *) {
+            LiveLyricsActivityFamilyView(state: state)
+        } else {
+            LiveLyricsLockScreenView(state: state)
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct LiveLyricsActivityFamilyView: View {
+    @Environment(\.activityFamily) private var activityFamily
+
+    let state: LiveLyricsActivityAttributes.ContentState
+
+    @ViewBuilder
+    var body: some View {
+        if activityFamily == .small {
+            LiveLyricsSmallActivityView(state: state)
+        } else {
+            LiveLyricsLockScreenView(state: state)
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct LiveLyricsSmallActivityView: View {
+    let state: LiveLyricsActivityAttributes.ContentState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(state.currentLine)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(3)
+                .minimumScaleFactor(0.72)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !state.nextLine.isEmpty {
+                Text(state.nextLine)
+                    .font(.subheadline)
+                    .foregroundStyle(.gray)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.72)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
     }
 }
 
