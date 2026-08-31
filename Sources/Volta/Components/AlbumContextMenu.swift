@@ -6,22 +6,15 @@ struct AlbumContextMenu: ViewModifier {
     var onAddToPlaylist: ((Song) -> Void)? = nil
 
     @EnvironmentObject private var appState: AppState
+    @StateObject private var pinnedLibrary = PinnedLibraryStore.shared
     @State private var showInformation = false
     @State private var showStats = false
+    @State private var showAddToPlaylist = false
+    @State private var albumSongsForPlaylist: [Song] = []
     private var audio: AudioPlayer { appState.audioPlayer }
 
     func body(content: Content) -> some View {
         content.contextMenu {
-            Button { play(shuffled: false) } label: { Label(L(.action_play), systemImage: Symbols.play) }
-            Button { play(shuffled: true) } label: { Label(L(.action_shuffle), systemImage: Symbols.shuffle) }
-            Section {
-                Button { queue(next: true) } label: {
-                    Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
-                }
-                Button { queue(next: false) } label: {
-                    Label(L(.action_add_to_queue), systemImage: "text.line.last.and.arrowtriangle.forward")
-                }
-            }
             Section {
                 Button { download() } label: { Label(L(.action_download), systemImage: Symbols.download) }
                 RatingMenuItem(
@@ -31,6 +24,32 @@ struct AlbumContextMenu: ViewModifier {
                     favoriteSymbol: Symbols.starEmpty,
                     favoriteAction: favorite
                 )
+                Button { share() } label: { Label(L(.action_share), systemImage: Symbols.share) }
+            }
+            Section {
+                Button { play(shuffled: false) } label: { Label(L(.action_play), systemImage: Symbols.play) }
+                Button { play(shuffled: true) } label: { Label(L(.action_shuffle), systemImage: Symbols.shuffle) }
+            }
+            Section {
+                Button { pinnedLibrary.toggle(album) } label: {
+                    Label(
+                        pinnedLibrary.isPinned(album) ? "Unpin Album" : "Pin Album",
+                        systemImage: pinnedLibrary.isPinned(album) ? "pin.slash" : "pin"
+                    )
+                }
+                Button { addAlbumToPlaylist() } label: {
+                    Label(L(.action_add_to_playlist), systemImage: Symbols.addToPlaylist)
+                }
+            }
+            Section {
+                Button { queue(next: true) } label: {
+                    Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
+                }
+                Button { queue(next: false) } label: {
+                    Label(L(.action_add_to_queue), systemImage: "text.line.last.and.arrowtriangle.forward")
+                }
+            }
+            Section {
                 Button { showInformation = true } label: { Label(L(.action_info), systemImage: Symbols.info) }
                 Button { showStats = true } label: { Label(L(.action_view_stats), systemImage: Symbols.stats) }
             }
@@ -57,6 +76,9 @@ struct AlbumContextMenu: ViewModifier {
         }
         .sheet(isPresented: $showInformation) {
             AlbumInformationSheet(album: album)
+        }
+        .sheet(isPresented: $showAddToPlaylist) {
+            AddSongsToPlaylistSheet(songs: albumSongsForPlaylist) { _, _ in }
         }
     }
 
@@ -107,6 +129,26 @@ struct AlbumContextMenu: ViewModifier {
             }
             if removed == 0 {
                 VoltaNotificationCenter.shared.post(L(.notif_no_downloads_to_remove), tone: .info)
+            }
+        }
+    }
+
+    private func addAlbumToPlaylist() {
+        Task {
+            let songs = await fetchSongs()
+            guard !songs.isEmpty else { return }
+            albumSongsForPlaylist = songs
+            showAddToPlaylist = true
+        }
+    }
+
+    private func share() {
+        Task {
+            if let client = appState.client,
+               let url = try? await client.createShare(id: album.id) {
+                ShareSheet.present([url])
+            } else {
+                ShareSheet.present(["\(album.name) — \(album.displayArtist)"])
             }
         }
     }
@@ -190,5 +232,104 @@ private struct ContextAlbumArtwork: View {
 extension View {
     func albumContextMenu(_ album: Album, onAddToPlaylist: ((Song) -> Void)? = nil) -> some View {
         modifier(AlbumContextMenu(album: album, onAddToPlaylist: onAddToPlaylist))
+    }
+
+    func playlistContextMenu(_ playlist: Playlist) -> some View {
+        modifier(PlaylistContextMenu(playlist: playlist))
+    }
+}
+
+private struct PlaylistContextMenu: ViewModifier {
+    let playlist: Playlist
+
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var pinnedLibrary = PinnedLibraryStore.shared
+    private var audio: AudioPlayer { appState.audioPlayer }
+
+    func body(content: Content) -> some View {
+        content.contextMenu {
+            Section {
+                Button { download() } label: { Label(L(.action_download), systemImage: Symbols.download) }
+                RatingMenuItem(
+                    itemID: playlist.id,
+                    kind: .playlist,
+                    favoriteLabel: L(.action_favorite),
+                    favoriteSymbol: Symbols.starEmpty,
+                    favoriteAction: favorite
+                )
+                Button { share() } label: { Label(L(.action_share), systemImage: Symbols.share) }
+            }
+            Section {
+                Button { play(shuffled: false) } label: { Label(L(.action_play), systemImage: Symbols.play) }
+                Button { play(shuffled: true) } label: { Label(L(.action_shuffle), systemImage: Symbols.shuffle) }
+            }
+            Section {
+                Button { pinnedLibrary.toggle(playlist) } label: {
+                    Label(
+                        pinnedLibrary.isPinned(playlist) ? "Unpin Playlist" : "Pin Playlist",
+                        systemImage: pinnedLibrary.isPinned(playlist) ? "pin.slash" : "pin"
+                    )
+                }
+                Button { queue(next: true) } label: {
+                    Label(L(.action_play_next), systemImage: "text.line.first.and.arrowtriangle.forward")
+                }
+            }
+        } preview: {
+            VStack(alignment: .leading, spacing: 10) {
+                PlaylistCover(playlist: playlist, size: 600, cornerRadius: 12)
+                    .frame(width: 240, height: 240)
+                Text(playlist.name)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+            .padding(16)
+            .background(Theme.secondaryBackground)
+        }
+    }
+
+    private func songs() async -> [Song] {
+        if let entries = playlist.entry, !entries.isEmpty { return entries }
+        return (try? await appState.client?.playlist(id: playlist.id))?.entry ?? []
+    }
+
+    private func play(shuffled: Bool) {
+        Task {
+            let tracks = await songs()
+            guard !tracks.isEmpty else { return }
+            audio.playQueue(shuffled ? tracks.shuffled() : tracks, startIndex: 0, source: playlist.name)
+        }
+    }
+
+    private func queue(next: Bool) {
+        Task {
+            let tracks = await songs()
+            for track in (next ? tracks.reversed() : tracks) {
+                if next { audio.playNext(track) } else { audio.addToQueue(track) }
+            }
+        }
+    }
+
+    private func download() {
+        Task {
+            for track in await songs() where DownloadService.shared.state(for: track) == .notDownloaded {
+                DownloadService.shared.download(song: track)
+            }
+        }
+    }
+
+    private func favorite() {
+        Task { try? await appState.client?.star(id: playlist.id) }
+    }
+
+    private func share() {
+        Task {
+            if let client = appState.client,
+               let url = try? await client.createShare(id: playlist.id) {
+                ShareSheet.present([url])
+            } else {
+                ShareSheet.present([playlist.name])
+            }
+        }
     }
 }

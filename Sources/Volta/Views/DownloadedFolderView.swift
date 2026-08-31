@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // Builds a virtual file tree out of downloaded songs. Each Song keeps the
 // server's original `path` (e.g. "Artist/Album/01 Track.flac"), so we can
@@ -47,6 +48,7 @@ enum DownloadedFolderTree {
 struct DownloadedFolderView: View {
     let prefix: [String]
     var filterText: String = ""
+    var alphabetItems: Binding<[AlphabetJumpItem]>? = nil
 
     @EnvironmentObject private var appState: AppState
     @AppStorage("showTrackArtwork") private var showTrackArtwork = true
@@ -91,6 +93,10 @@ struct DownloadedFolderView: View {
                     Divider().background(Theme.secondaryText.opacity(0.12)).padding(.leading, 64)
                 }
             }
+        }
+        .onAppear { publishAlphabetItems() }
+        .onChangeCompat(of: downloadService.downloadedRevision) { _, _ in
+            publishAlphabetItems()
         }
         .sheet(item: $addToPlaylistSong) { song in
             AddToPlaylistSheet(song: song, onAdded: { _ in })
@@ -180,6 +186,7 @@ struct DownloadedFolderView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .id(alphabetAnchor(kind: "directory", id: name))
     }
 
     private func songRow(_ song: Song, position: Int, in songs: [Song]) -> some View {
@@ -204,6 +211,7 @@ struct DownloadedFolderView: View {
             )
         }
         .padding(.horizontal, Theme.Layout.screenPadding)
+        .id(alphabetAnchor(kind: "song", id: song.id))
     }
 
     private func goToAlbum(_ song: Song) {
@@ -234,6 +242,34 @@ struct DownloadedFolderView: View {
         if !filterText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "No matches" }
         return prefix.isEmpty ? "Download songs to browse them by folder offline." : "Empty folder"
     }
+
+    private func publishAlphabetItems() {
+        let contents = filtered(node)
+        let namesAndTargets = contents.folders.map {
+            ($0, alphabetAnchor(kind: "directory", id: $0))
+        } + contents.songs.map {
+            ($0.title, alphabetAnchor(kind: "song", id: $0.id))
+        }
+        var seen = Set<String>()
+        alphabetItems?.wrappedValue = namesAndTargets.compactMap { pair in
+            let label = alphabetLabel(for: pair.0)
+            return seen.insert(label).inserted
+                ? AlphabetJumpItem(label: label, targetID: pair.1)
+                : nil
+        }
+        .sorted { $0.label < $1.label }
+    }
+
+    private func alphabetAnchor(kind: String, id: String) -> String {
+        "downloaded-folder-\(prefix.joined(separator: "/"))-\(kind)-\(id)"
+    }
+
+    private func alphabetLabel(for text: String) -> String {
+        let normalized = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        guard let first = normalized.first else { return "#" }
+        let label = String(first).uppercased()
+        return ("A"..."Z").contains(label) ? label : "#"
+    }
 }
 
 // MARK: - Pushed directory screen
@@ -243,16 +279,30 @@ struct DownloadedFolderView: View {
 struct DownloadedFolderScreen: View {
     let path: [String]
     let title: String
+    @State private var alphabetItems: [AlphabetJumpItem] = []
 
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            ScrollView {
-                DownloadedFolderView(prefix: path)
-                    .padding(.top, 8)
-                    .padding(.bottom, 100)
+            ScrollViewReader { scrollProxy in
+                ZStack(alignment: .trailing) {
+                    ScrollView {
+                        DownloadedFolderView(prefix: path, alphabetItems: $alphabetItems)
+                            .padding(.top, 8)
+                            .padding(.bottom, 100)
+                            .padding(.trailing, alphabetItems.count >= 3 ? 34 : 0)
+                    }
+                    .scrollIndicators(.hidden)
+
+                    if alphabetItems.count >= 3 {
+                        AlphabetJumpBar(items: alphabetItems) { item in
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            scrollProxy.scrollTo(item.targetID, anchor: .top)
+                        }
+                        .padding(.trailing, 4)
+                    }
+                }
             }
-            .scrollIndicators(.hidden)
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

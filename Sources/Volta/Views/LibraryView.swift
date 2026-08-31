@@ -1,14 +1,21 @@
 import SwiftUI
 import UIKit
 
-struct LibraryView: View {
+/// Original Library experience. Kept intact for people who choose Legacy in
+/// Library settings.
+struct LegacyLibraryView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = LibraryViewModel()
     @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
     @StateObject private var savedSortStore = SavedLibrarySortStore.shared
+    @StateObject private var downloads = DownloadService.shared
     @Binding var path: NavigationPath
     @Namespace private var heroNamespace
     @AppStorage("albumSortOrder") private var albumSortOrder = "alphabetical"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+#if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+#endif
 
     @State private var selectionMode = false
     @State private var selectedSongIDs: Set<String> = []
@@ -19,6 +26,31 @@ struct LibraryView: View {
 
     private var selectedSongs: [Song] {
         vm.filteredSongs.filter { selectedSongIDs.contains($0.id) }
+    }
+
+    private var albumGridColumnCount: Int {
+#if os(iOS)
+        verticalSizeClass == .compact ? 5 : 3
+#else
+        3
+#endif
+    }
+
+    private var albumGridColumns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
+            count: albumGridColumnCount
+        )
+    }
+
+    private var interactionAnimation: Animation {
+        reduceMotion || PerformanceMode.reduceAnimations
+            ? .linear(duration: 0.01)
+            : .spring(response: 0.32, dampingFraction: 0.84)
+    }
+
+    private var libraryContentKey: String {
+        "\(vm.source.rawValue)|\(vm.filter.rawValue)|\(vm.isLoading && !vm.hasLoaded)"
     }
 
     var body: some View {
@@ -34,6 +66,9 @@ struct LibraryView: View {
                                     filterPicker
                                     Divider().background(Theme.secondaryText.opacity(0.15))
                                     content
+                                        .id(libraryContentKey)
+                                        .transition(.opacity)
+                                        .animation(interactionAnimation, value: libraryContentKey)
                                 }
                                 .frame(minHeight: geo.size.height + 160, alignment: .top)
                                 .padding(.bottom, 80)
@@ -83,6 +118,9 @@ struct LibraryView: View {
             .onChangeCompat(of: hiddenAlbums.revision) { _, _ in
                 exitSelection()
             }
+            .onChangeCompat(of: downloads.downloadedRevision) { _, _ in
+                exitSelection()
+            }
             .onReceive(savedSortStore.$sorts) { sorts in
                 vm.reconcileActiveCustomSort(with: sorts)
             }
@@ -90,8 +128,12 @@ struct LibraryView: View {
         }
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
-        .task(id: appState.currentServer?.id) {
-            if let client = appState.client { await vm.load(client: client) }
+        .task(id: "\(appState.currentServer?.id ?? "none")|\(appState.isOfflineMode)") {
+            if appState.isOfflineMode || appState.client == nil {
+                vm.setSource(.downloaded)
+            } else if let client = appState.client {
+                await vm.load(client: client)
+            }
         }
     }
 
@@ -159,7 +201,7 @@ struct LibraryView: View {
                 HStack(spacing: 10) {
                     ForEach(LibraryFilter.allCases) { f in
                         Button {
-                            withAnimation(.easeOut(duration: 0.12)) {
+                            withAnimation(interactionAnimation) {
                                 vm.setFilter(f)
                             }
                         } label: {
@@ -376,9 +418,6 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var albumsGrid: some View {
-        let columns = [GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
-                       GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
-                       GridItem(.flexible(), spacing: Theme.Layout.gridSpacing)]
         let trailingPadding = alphabetContentTrailingPadding
         let groupedSections = albumGroupSections
         if !groupedSections.isEmpty {
@@ -392,7 +431,7 @@ struct LibraryView: View {
                                     albumGridItem(album)
                                         .frame(maxWidth: .infinity, alignment: .topLeading)
                                 }
-                                ForEach(row.items.count..<3, id: \.self) { _ in
+                                ForEach(row.items.count..<albumGridColumnCount, id: \.self) { _ in
                                     Color.clear
                                         .frame(maxWidth: .infinity)
                                         .accessibilityHidden(true)
@@ -414,7 +453,7 @@ struct LibraryView: View {
                             albumGridItem(album)
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
-                        ForEach(row.items.count..<3, id: \.self) { _ in
+                        ForEach(row.items.count..<albumGridColumnCount, id: \.self) { _ in
                             Color.clear
                                 .frame(maxWidth: .infinity)
                                 .accessibilityHidden(true)
@@ -428,7 +467,7 @@ struct LibraryView: View {
             .padding(.trailing, trailingPadding)
             .padding(.vertical, 12)
         } else {
-            LazyVGrid(columns: columns, spacing: Theme.Layout.gridSpacing) {
+            LazyVGrid(columns: albumGridColumns, spacing: Theme.Layout.gridSpacing) {
                 ForEach(vm.filteredAlbums) { album in
                     albumGridItem(album)
                 }
@@ -452,7 +491,7 @@ struct LibraryView: View {
             ForEach(vm.filteredArtists) { artist in
                 NavigationLink(value: LibraryRoute.artist(artist)) {
                     HStack(spacing: 14) {
-                        ArtworkView(coverArtID: artist.coverArt, size: 100, cornerRadius: 28)
+                        ArtworkView(coverArtID: artist.coverArt, artistID: artist.id, size: 100, cornerRadius: 28)
                             .frame(width: 56, height: 56)
                             .clipShape(Circle())
                             .heroSource(id: artist.id)
@@ -711,21 +750,21 @@ struct LibraryView: View {
 
     private func enterSelection(with song: Song) {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+        withAnimation(interactionAnimation) {
             selectionMode = true
             selectedSongIDs.insert(song.id)
         }
     }
 
     private func toggleSelection(_ song: Song) {
-        withAnimation(.easeInOut(duration: 0.15)) {
+        withAnimation(interactionAnimation) {
             if selectedSongIDs.contains(song.id) { selectedSongIDs.remove(song.id) }
             else { selectedSongIDs.insert(song.id) }
         }
     }
 
     private func toggleSelectAll() {
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(interactionAnimation) {
             if allSelected { selectedSongIDs.removeAll() }
             else { selectedSongIDs = Set(vm.filteredSongs.map(\.id)) }
         }
@@ -733,7 +772,7 @@ struct LibraryView: View {
 
     private func exitSelection() {
         guard selectionMode else { return }
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+        withAnimation(interactionAnimation) {
             selectionMode = false
             selectedSongIDs.removeAll()
         }
@@ -862,8 +901,8 @@ struct LibraryView: View {
         var anchoredLetters: Set<String> = []
 
         for section in albumAlphabetSections {
-            for offset in stride(from: 0, to: section.items.count, by: 3) {
-                let end = min(offset + 3, section.items.count)
+            for offset in stride(from: 0, to: section.items.count, by: albumGridColumnCount) {
+                let end = min(offset + albumGridColumnCount, section.items.count)
                 let items = Array(section.items[offset..<end])
                 guard let firstAlbumID = items.first?.id else { continue }
                 let anchorID: String?
@@ -896,8 +935,8 @@ struct LibraryView: View {
 
     private func albumGridRows(for albums: [Album], prefix: String) -> [AlbumGridRow] {
         var rows: [AlbumGridRow] = []
-        for offset in stride(from: 0, to: albums.count, by: 3) {
-            let end = min(offset + 3, albums.count)
+        for offset in stride(from: 0, to: albums.count, by: albumGridColumnCount) {
+            let end = min(offset + albumGridColumnCount, albums.count)
             let items = Array(albums[offset..<end])
             guard let firstAlbumID = items.first?.id else { continue }
             rows.append(AlbumGridRow(id: "\(prefix)-row-\(firstAlbumID)", items: items))
@@ -1028,7 +1067,7 @@ struct LibraryView: View {
     }
 }
 
-private struct AlphabetJumpItem: Identifiable {
+struct AlphabetJumpItem: Identifiable {
     let label: String
     let targetID: String
 
@@ -1062,14 +1101,14 @@ private struct SongListEntry: Identifiable {
     var id: String { anchorID ?? song.id }
 }
 
-private struct AlphabetJumpBar: View {
+struct AlphabetJumpBar: View {
     let items: [AlphabetJumpItem]
     var onSelect: (AlphabetJumpItem) -> Void
 
     @State private var activeID: String?
 
-    private let rowHeight: CGFloat = 13
-    private let verticalPadding: CGFloat = 8
+    private let rowHeight: CGFloat = 14
+    private let verticalPadding: CGFloat = 3
 
     var body: some View {
         GeometryReader { geometry in
@@ -1077,8 +1116,8 @@ private struct AlphabetJumpBar: View {
                 ForEach(items) { item in
                     Text(item.label)
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(activeID == item.id ? Theme.background : Theme.accent)
-                        .frame(width: 22, height: rowHeight)
+                        .foregroundStyle(activeID == item.id ? Theme.background : Theme.accent.opacity(0.95))
+                        .frame(width: 20, height: rowHeight)
                         .background(activeID == item.id ? Theme.accent : Color.clear, in: Circle())
                         .contentShape(Rectangle())
                         .accessibilityAddTraits(.isButton)
@@ -1090,10 +1129,6 @@ private struct AlphabetJumpBar: View {
                 }
             }
             .padding(.vertical, verticalPadding)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule().stroke(Theme.secondaryText.opacity(0.12), lineWidth: 0.5)
-            )
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
@@ -1104,7 +1139,7 @@ private struct AlphabetJumpBar: View {
                     }
             )
         }
-        .frame(width: 30, height: CGFloat(items.count) * rowHeight + verticalPadding * 2)
+        .frame(width: 24, height: CGFloat(items.count) * rowHeight + verticalPadding * 2)
     }
 
     private func select(_ item: AlphabetJumpItem) {
@@ -1133,7 +1168,7 @@ private struct AlphabetJumpBar: View {
     }
 }
 
-private struct NavigationBarRestorer: UIViewControllerRepresentable {
+struct NavigationBarRestorer: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> Controller {
         Controller()
     }

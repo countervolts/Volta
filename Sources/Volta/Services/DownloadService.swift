@@ -231,6 +231,7 @@ private struct PendingDownloadResume {
     let method: String
     let resumeData: Data?
     let token: UUID
+    let serverID: String?
 }
 
 private struct QueuedDownload {
@@ -239,6 +240,14 @@ private struct QueuedDownload {
     let client: any MusicService
     let notifyOnCompletion: Bool
     let belongsToBulkDownload: Bool
+    let serverID: String?
+}
+
+struct DownloadedArtworkSource: Sendable {
+    let url: URL
+    let serverID: String?
+    let groupID: String
+    let owner: String
 }
 
 private struct DownloadSpeedSample {
@@ -270,6 +279,7 @@ final class DownloadService: ObservableObject {
     private var mutedCompletionNotifications: Set<String> = []
     private var downloadTokens: [String: UUID] = [:]
     private var client: (any MusicService)?
+    private var currentServerID: String?
 
     private var pinnedCovers: Set<String> = []
     private var pinnedArtists: Set<String> = []
@@ -286,19 +296,29 @@ final class DownloadService: ObservableObject {
     private var lastBulkSnapshotAt = Date.distantPast
     private var manifestWriter = DownloadManifestWriter()
     private var manifestSaveSequence = 0
+    private var artworkAliasMigrationTask: Task<Void, Never>?
 
     private nonisolated static let progressThrottler = DownloadProgressThrottler()
     private nonisolated static let defaultMaxConcurrent = 2
 
     static let artworkSizes = [80, 100, 200, 300, 400, 600, 800]
+    private static let canonicalArtworkPixelSize = 1024
 
-    private let directory: URL
-    private let manifestURL: URL
+    private var directory: URL
+    private var manifestURL: URL
 
     init() {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        directory = docs.appendingPathComponent("volta-downloads", isDirectory: true)
+        directory = DownloadStorageLocation.current.musicDirectory()
         manifestURL = directory.appendingPathComponent("manifest.json")
+        // Versions before Files storage kept song bytes in Documents. Move that
+        // legacy private location into Application Support once, before Files
+        // sharing makes Documents user-visible.
+        if UserDefaults.standard.object(forKey: DownloadStorageLocation.preferenceKey) == nil,
+           DownloadStorageLocation.current == .privateStorage {
+            let legacy = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("volta-downloads", isDirectory: true)
+            try? DownloadStorageTransfer.transfer(from: legacy, to: directory, method: .move)
+        }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         loadManifest()
         NetworkMonitor.shared.onConnectionChange { [weak self] conn in
@@ -307,12 +327,39 @@ final class DownloadService: ObservableObject {
         }
     }
 
-    func updateClient(_ client: (any MusicService)?) {
+    func updateClient(_ client: (any MusicService)?, serverID: String? = nil) {
         self.client = client
+        if let serverID, !serverID.isEmpty {
+            currentServerID = serverID
+            UserDefaults.standard.set(serverID, forKey: "downloadArtworkServerID")
+        } else if currentServerID == nil {
+            currentServerID = UserDefaults.standard.string(forKey: "downloadArtworkServerID")
+        }
         // Once a server is reachable, fill in metadata for any downloads we
         // recovered from disk (or migrated from a legacy manifest) so they
         // reappear in the Downloaded / offline lists.
-        if client != nil { reconcileDownloadedMetadata() }
+        artworkAliasMigrationTask?.cancel()
+        artworkAliasMigrationTask = nil
+        if let client {
+            reconcileDownloadedMetadata()
+            migrateDownloadedArtworkAliases(using: client)
+        }
+    }
+
+    /// Called only by DownloadStorageManager after all transfer activity stops.
+    func migrateStorage(to location: DownloadStorageLocation, method: DownloadStorageTransferMethod) throws {
+        let destination = location.musicDirectory()
+        try DownloadStorageTransfer.transfer(from: directory, to: destination, method: method)
+        directory = destination
+        manifestURL = directory.appendingPathComponent("manifest.json")
+        for id in manifest.keys {
+            guard let oldPath = manifest[id]?.path else { continue }
+            manifest[id]?.path = directory.appendingPathComponent(URL(fileURLWithPath: oldPath).lastPathComponent).path
+        }
+        downloadedSongsCache = nil
+        downloadedRecentCache = nil
+        downloadedRevision += 1
+        saveManifest(to: manifestURL)
     }
 
     var concurrentDownloadLimit: Int {
@@ -388,6 +435,27 @@ final class DownloadService: ObservableObject {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    /// Finds one downloaded track that can supply an album's embedded cover
+    /// when no separately pinned cover image is available offline.
+    func localArtworkSource(forCoverArtID id: String?, serverID: String?) -> DownloadedArtworkSource? {
+        guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else { return nil }
+        let matching = manifest.values.filter { record in
+            guard let song = record.song else { return false }
+            return Self.coverArtID(for: song) == id
+        }
+        guard let record = matching.first(where: { $0.serverID == serverID })
+            ?? matching.first(where: { $0.serverID == nil }) else { return nil }
+        let url = URL(fileURLWithPath: record.path)
+        guard FileManager.default.fileExists(atPath: url.path), let song = record.song else { return nil }
+        let groupID = Self.artworkGroupID(for: song, serverID: record.serverID)
+        return DownloadedArtworkSource(
+            url: url,
+            serverID: record.serverID,
+            groupID: groupID,
+            owner: Self.coverArtworkOwner(groupID: groupID, serverID: record.serverID)
+        )
+    }
+
     func download(song: Song, notifyOnCompletion: Bool = true) {
         if pendingResumes[song.id] != nil {
             pumpDownloads()
@@ -406,7 +474,8 @@ final class DownloadService: ObservableObject {
             streamURL: streamURL,
             client: client,
             notifyOnCompletion: notifyOnCompletion,
-            belongsToBulkDownload: false
+            belongsToBulkDownload: false,
+            serverID: currentServerID
         )
     }
 
@@ -416,6 +485,7 @@ final class DownloadService: ObservableObject {
         client: any MusicService,
         notifyOnCompletion: Bool,
         belongsToBulkDownload: Bool,
+        serverID: String?,
         pumpImmediately: Bool = true
     ) {
         guard transferItems[song.id] == nil else { return }
@@ -424,7 +494,8 @@ final class DownloadService: ObservableObject {
             url: streamURL,
             client: client,
             notifyOnCompletion: notifyOnCompletion,
-            belongsToBulkDownload: belongsToBulkDownload
+            belongsToBulkDownload: belongsToBulkDownload,
+            serverID: serverID
         ))
         setState(.downloading(progress: 0), forID: song.id)
         transferItems[song.id] = DownloadTransfer(
@@ -459,7 +530,8 @@ final class DownloadService: ObservableObject {
                     manifestURL: pending.manifestURL,
                     method: pending.method,
                     resumeData: pending.resumeData,
-                    token: pending.token
+                    token: pending.token,
+                    serverID: pending.serverID
                 )
                 continue
             }
@@ -473,7 +545,8 @@ final class DownloadService: ObservableObject {
                 song: request.song,
                 streamURL: request.url,
                 client: request.client,
-                notifyOnCompletion: request.notifyOnCompletion
+                notifyOnCompletion: request.notifyOnCompletion,
+                serverID: request.serverID
             )
         }
         refreshBulkProgress(force: true)
@@ -488,7 +561,7 @@ final class DownloadService: ObservableObject {
         publishTransfers()
     }
 
-    private func startDownload(song: Song, streamURL: URL, client: any MusicService, notifyOnCompletion: Bool) {
+    private func startDownload(song: Song, streamURL: URL, client: any MusicService, notifyOnCompletion: Bool, serverID: String?) {
         guard runningDownloadIDs.contains(song.id) else { return }
 
         let songID = song.id
@@ -501,7 +574,7 @@ final class DownloadService: ObservableObject {
             mutedCompletionNotifications.insert(songID)
         }
         Task { await Self.progressThrottler.start(songID) }
-        prefetchArtwork(for: song)
+        prefetchArtwork(for: song, serverID: serverID)
         if UserDefaults.standard.bool(forKey: LyricsBulkDownloader.downloadWithSongsKey) {
             let sourceValue = UserDefaults.standard.string(forKey: "lyricsDownloadSource")
             let source = LyricsDownloadSource(rawValue: sourceValue ?? "") ?? .lrclib
@@ -535,7 +608,7 @@ final class DownloadService: ObservableObject {
                             }
                         }
                     }
-                    complete(songID, song: song, path: destURL.path, manifestURL: manifestURL, method: "multithreaded", token: token)
+                    complete(songID, song: song, path: destURL.path, manifestURL: manifestURL, method: "multithreaded", token: token, serverID: serverID)
                 } catch is CancellationError {
                     guard isCurrentDownload(songID, token: token) else { return }
                     AppLogger.shared.log("Download cancelled: \(title)", category: .downloads)
@@ -543,20 +616,20 @@ final class DownloadService: ObservableObject {
                 } catch {
                     guard isCurrentDownload(songID, token: token) else { return }
                     if DownloadService.isTransientNetworkError(error) {
-                        pauseForResume(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, method: "single thread", resumeData: nil, token: token)
+                        pauseForResume(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, method: "single thread", resumeData: nil, token: token, serverID: serverID)
                     } else {
                         AppLogger.shared.log("Segmented download failed: \(title) (\(error.localizedDescription)); falling back to single", category: .downloads, level: .warning)
-                        startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, token: token)
+                        startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, token: token, serverID: serverID)
                     }
                 }
             }
             segmentTasks[songID] = task
         } else if progressiveDownload {
             AppLogger.shared.log("Download starting: \(title) (\(Self.progressiveDownloadMethod), \(suffix))", category: .downloads)
-            startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, method: Self.progressiveDownloadMethod, token: token)
+            startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, method: Self.progressiveDownloadMethod, token: token, serverID: serverID)
         } else {
             AppLogger.shared.log("Download starting: \(title) (single thread\(total > 0 ? ", \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))" : ""))", category: .downloads)
-            startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, token: token)
+            startSingle(song: song, url: streamURL, dest: destURL, manifestURL: manifestURL, token: token, serverID: serverID)
         }
     }
 
@@ -595,7 +668,8 @@ final class DownloadService: ObservableObject {
     }
 
     func removeDownload(id: String) {
-        let song = manifest[id]?.song
+        let record = manifest[id]
+        let song = record?.song
         let title = song?.title ?? id
         AppLogger.shared.log("Download removed: \(title)", category: .downloads)
         VoltaNotificationCenter.shared.post(L(.notif_download_removed), tone: .info)
@@ -609,18 +683,18 @@ final class DownloadService: ObservableObject {
         setState(.notDownloaded, forID: id)
         downloadedRevision += 1
         saveManifest(to: manifestURL)
-        if let song { unpinOrphanedArtwork(after: song) }
+        if let song { unpinOrphanedArtwork(after: song, serverID: record?.serverID) }
     }
 
     func removeDownloads(ids: [String]) {
         let uniqueIDs = Array(Set(ids))
         guard !uniqueIDs.isEmpty else { return }
-        var removedSongs: [Song] = []
+        var removedSongs: [(song: Song, serverID: String?)] = []
         for id in uniqueIDs {
             let song = manifest[id]?.song
             if let song {
                 cancelDownload(for: song, notify: false, updateBulk: false)
-                removedSongs.append(song)
+                removedSongs.append((song, manifest[id]?.serverID))
             }
             if let record = manifest[id] {
                 try? FileManager.default.removeItem(atPath: record.path)
@@ -630,23 +704,37 @@ final class DownloadService: ObservableObject {
         }
         downloadedRevision += 1
         saveManifest(to: manifestURL)
-        for song in removedSongs { unpinOrphanedArtwork(after: song) }
+        for removed in removedSongs { unpinOrphanedArtwork(after: removed.song, serverID: removed.serverID) }
         AppLogger.shared.log("Downloaded tracks removed: count=\(uniqueIDs.count)", category: .downloads)
         VoltaNotificationCenter.shared.post(L(.notif_download_removed), tone: .info)
     }
 
-    private func unpinOrphanedArtwork(after song: Song) {
-        let remaining = downloadedSongs()
-        let artworkGroupID = Self.artworkGroupID(for: song)
-        if let cover = song.coverArt, !remaining.contains(where: { Self.artworkGroupID(for: $0) == artworkGroupID }) {
+    private func unpinOrphanedArtwork(after song: Song, serverID: String?) {
+        let remaining = manifest.values.filter { FileManager.default.fileExists(atPath: $0.path) }
+        let artworkGroupID = Self.artworkGroupID(for: song, serverID: serverID)
+        if let cover = Self.coverArtID(for: song), !remaining.contains(where: { record in
+            guard record.serverID == serverID, let remainingSong = record.song else { return false }
+            return Self.artworkGroupID(for: remainingSong, serverID: serverID) == artworkGroupID
+        }) {
             pinnedCovers.remove(artworkGroupID)
-            let urls = Self.artworkSizes.compactMap { client?.coverArtURL(id: cover, size: $0) }
-                + (client?.liveArtworkURLs(id: cover) ?? [])
-            DeveloperExperiments.launch(priority: .utility) { await ArtworkLoader.shared.unpin(urls) }
+            let owner = Self.coverArtworkOwner(groupID: artworkGroupID, serverID: serverID)
+            let lookupIDs = [
+                ArtworkLoader.coverArtLookupID(cover, serverID: serverID),
+                ArtworkLoader.liveArtworkLookupID(cover, serverID: serverID)
+            ]
+            DeveloperExperiments.launch(priority: .utility) {
+                await ArtworkLoader.shared.removeOwnership(lookupIDs: lookupIDs, owner: owner)
+            }
         }
-        if let artistId = song.artistId, !remaining.contains(where: { $0.artistId == artistId }) {
-            pinnedArtists.remove(artistId)
-            DeveloperExperiments.launch(priority: .utility) { await ArtworkLoader.shared.unpinArtist(id: artistId) }
+        if let artistId = song.primaryArtistID, !remaining.contains(where: { record in
+            record.serverID == serverID && record.song?.primaryArtistID == artistId
+        }) {
+            pinnedArtists.remove(ArtworkLoader.artistLookupID(artistId, serverID: serverID))
+            let owner = Self.artistArtworkOwner(artistID: artistId, serverID: serverID)
+            let lookupID = ArtworkLoader.artistLookupID(artistId, serverID: serverID)
+            DeveloperExperiments.launch(priority: .utility) {
+                await ArtworkLoader.shared.removeOwnership(lookupID: lookupID, owner: owner)
+            }
         }
     }
 
@@ -700,11 +788,11 @@ final class DownloadService: ObservableObject {
 
     // MARK: - Single-threaded transfer (also the multi fallback)
 
-    private func startSingle(song: Song, url: URL, dest: URL, manifestURL: URL, token: UUID) {
-        startSingle(song: song, url: url, dest: dest, manifestURL: manifestURL, resumeData: nil, token: token)
+    private func startSingle(song: Song, url: URL, dest: URL, manifestURL: URL, token: UUID, serverID: String?) {
+        startSingle(song: song, url: url, dest: dest, manifestURL: manifestURL, resumeData: nil, token: token, serverID: serverID)
     }
 
-    private func startSingle(song: Song, url: URL, dest: URL, manifestURL: URL, method: String = "single thread", resumeData: Data? = nil, token: UUID) {
+    private func startSingle(song: Song, url: URL, dest: URL, manifestURL: URL, method: String = "single thread", resumeData: Data? = nil, token: UUID, serverID: String?) {
         let songID = song.id
         let title = song.title
         let task: URLSessionDownloadTask
@@ -726,7 +814,7 @@ final class DownloadService: ObservableObject {
                 Task { @MainActor in
                     guard self.isCurrentDownload(songID, token: token) else { return }
                     if moved {
-                        self.complete(songID, song: song, path: dest.path, manifestURL: manifestURL, method: method, token: token)
+                        self.complete(songID, song: song, path: dest.path, manifestURL: manifestURL, method: method, token: token, serverID: serverID)
                     } else {
                         AppLogger.shared.log("Download failed to save file: \(title)", category: .downloads, level: .error)
                         self.fail(songID, removing: dest, token: token)
@@ -738,7 +826,7 @@ final class DownloadService: ObservableObject {
                     guard self.isCurrentDownload(songID, token: token) else { return }
                     let resumeData = DownloadService.resumeData(from: error)
                     if resumeData != nil || DownloadService.isTransientNetworkError(error) {
-                        self.pauseForResume(song: song, url: url, dest: dest, manifestURL: manifestURL, method: method, resumeData: resumeData, token: token)
+                        self.pauseForResume(song: song, url: url, dest: dest, manifestURL: manifestURL, method: method, resumeData: resumeData, token: token, serverID: serverID)
                     } else {
                         AppLogger.shared.log("Download failed: \(title): \(msg)", category: .downloads, level: .error)
                         self.fail(songID, removing: dest, token: token)
@@ -846,11 +934,11 @@ final class DownloadService: ObservableObject {
         (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
     }
 
-    private func pauseForResume(song: Song, url: URL, dest: URL, manifestURL: URL, resumeData: Data?, token: UUID) {
-        pauseForResume(song: song, url: url, dest: dest, manifestURL: manifestURL, method: "single thread", resumeData: resumeData, token: token)
+    private func pauseForResume(song: Song, url: URL, dest: URL, manifestURL: URL, resumeData: Data?, token: UUID, serverID: String?) {
+        pauseForResume(song: song, url: url, dest: dest, manifestURL: manifestURL, method: "single thread", resumeData: resumeData, token: token, serverID: serverID)
     }
 
-    private func pauseForResume(song: Song, url: URL, dest: URL, manifestURL: URL, method: String, resumeData: Data?, token: UUID) {
+    private func pauseForResume(song: Song, url: URL, dest: URL, manifestURL: URL, method: String, resumeData: Data?, token: UUID, serverID: String?) {
         let songID = song.id
         guard isCurrentDownload(songID, token: token) else { return }
         activeTasks.removeValue(forKey: songID)
@@ -864,7 +952,8 @@ final class DownloadService: ObservableObject {
             manifestURL: manifestURL,
             method: method,
             resumeData: resumeData,
-            token: token
+            token: token,
+            serverID: serverID
         )
         let progress: Double
         if case .downloading(let current) = state(forID: songID) {
@@ -1060,9 +1149,9 @@ final class DownloadService: ObservableObject {
         publishTransfers()
     }
 
-    private func complete(_ songID: String, song: Song, path: String, manifestURL: URL, method: String, token: UUID) {
+    private func complete(_ songID: String, song: Song, path: String, manifestURL: URL, method: String, token: UUID, serverID: String?) {
         guard isCurrentDownload(songID, token: token) else { return }
-        manifest[songID] = Record(path: path, song: song, lastPlayed: nil, downloadedAt: .now)
+        manifest[songID] = Record(path: path, song: song, lastPlayed: nil, downloadedAt: .now, serverID: serverID)
         setState(.downloaded, forID: songID)
         activeTasks.removeValue(forKey: songID)
         stopProgressPolling(songID)
@@ -1093,22 +1182,25 @@ final class DownloadService: ObservableObject {
         }
     }
 
-    private func prefetchArtwork(for song: Song) {
+    private func prefetchArtwork(for song: Song, serverID: String?) {
         guard let client else { return }
 
-        let artworkGroupID = Self.artworkGroupID(for: song)
-        if let cover = song.coverArt, pinnedCovers.insert(artworkGroupID).inserted {
-            // Save the original first so downloaded live covers work offline.
-            let originalURL = client.coverArtURL(id: cover)
-            let urls = ([originalURL].compactMap { $0 }) + Self.artworkSizes.compactMap { client.coverArtURL(id: cover, size: $0) }
+        let artworkGroupID = Self.artworkGroupID(for: song, serverID: serverID)
+        let coverOwner = Self.coverArtworkOwner(groupID: artworkGroupID, serverID: serverID)
+        if let cover = Self.coverArtID(for: song), pinnedCovers.insert(artworkGroupID).inserted {
+            // One durable source; view sizes downsample at decode time.
+            let canonicalURL = client.coverArtURL(id: cover, size: Self.canonicalArtworkPixelSize)
+                ?? client.coverArtURL(id: cover)
             let liveURLs = client.liveArtworkURLs(id: cover)
             DeveloperExperiments.launch(priority: .utility) {
-                for url in urls {
+                if let canonicalURL {
                     await ArtworkLoader.shared.persist(
-                        url,
+                        canonicalURL,
                         label: song.album ?? song.title,
                         kind: "Album Cover",
-                        groupID: artworkGroupID
+                        groupID: artworkGroupID,
+                        lookupID: ArtworkLoader.coverArtLookupID(cover, serverID: serverID),
+                        owner: coverOwner
                     )
                 }
                 // Backend live-artwork endpoints often include several static
@@ -1120,32 +1212,157 @@ final class DownloadService: ObservableObject {
                         label: song.album ?? song.title,
                         kind: "Animated",
                         groupID: artworkGroupID,
-                        requireAnimation: true
+                        requireAnimation: true,
+                        lookupID: ArtworkLoader.liveArtworkLookupID(cover, serverID: serverID),
+                        owner: coverOwner
                     ) { break }
                 }
             }
         }
 
-        if let artistId = song.artistId, pinnedArtists.insert(artistId).inserted {
+        if let artistId = song.primaryArtistID,
+           pinnedArtists.insert(ArtworkLoader.artistLookupID(artistId, serverID: serverID)).inserted {
+            let owner = Self.artistArtworkOwner(artistID: artistId, serverID: serverID)
             DeveloperExperiments.launch(priority: .utility) { [client] in
                 guard let info = try? await client.artistInfo(id: artistId),
                       let urlStr = info.bestImageUrl, let url = URL(string: urlStr) else { return }
                 await ArtworkLoader.shared.persistArtistImage(
                     id: artistId,
                     from: url,
-                    label: song.artist
+                    label: song.artist,
+                    serverID: serverID,
+                    owner: owner
                 )
             }
         }
     }
 
-    private nonisolated static func artworkGroupID(for song: Song) -> String {
+    private nonisolated static func artworkGroupID(for song: Song, serverID: String? = nil) -> String {
+        let scope = serverID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = (scope?.isEmpty == false) ? "server:\(scope!)|" : ""
         if let albumID = song.albumId?.trimmingCharacters(in: .whitespacesAndNewlines), !albumID.isEmpty {
-            return "album:\(albumID)"
+            return "\(prefix)album:\(albumID)"
         }
         let album = (song.album ?? song.title).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let artist = (song.albumArtist ?? song.artist ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return "album-label:\(artist)|\(album)"
+        return "\(prefix)album-label:\(artist)|\(album)"
+    }
+
+    private nonisolated static func coverArtworkOwner(groupID: String, serverID: String?) -> String {
+        "download-cover:\(serverID ?? "legacy"):\(groupID)"
+    }
+
+    private nonisolated static func artistArtworkOwner(artistID: String, serverID: String?) -> String {
+        "download-artist:\(serverID ?? "legacy"):\(artistID)"
+    }
+
+    nonisolated static func estimatedBulkBytes(_ songs: [Song]) -> Int {
+        let known = songs.compactMap { $0.size }.filter { $0 > 0 }.sorted()
+        let median = known.isEmpty ? 0 : known[known.count / 2]
+        return songs.reduce(0) { total, song in
+            let value: Int
+            if let size = song.size, size > 0 {
+                value = size
+            } else {
+                value = estimatedUnknownDownloadBytes(for: song, medianKnownBytes: median)
+            }
+            let result = total.addingReportingOverflow(value)
+            return result.overflow ? Int.max : result.partialValue
+        }
+    }
+
+    private nonisolated static func estimatedUnknownDownloadBytes(for song: Song, medianKnownBytes: Int) -> Int {
+        let duration = max(0, song.duration ?? 0)
+        let lossless = ["flac", "alac", "wav", "aiff", "aif"].contains((song.codec ?? song.suffix ?? "").lowercased())
+        let floorBitsPerSecond: Int64 = lossless ? 1_500_000 : 512_000
+        let durationProduct = floorBitsPerSecond.multipliedReportingOverflow(by: Int64(duration))
+        let durationEstimate: Int64 = duration > 0
+            ? (durationProduct.overflow ? Int64.max : durationProduct.partialValue / 8)
+            : (lossless ? 90_000_000 : 30_000_000)
+        let bitrateEstimate: Int64
+        if let bitRate = song.bitRate, bitRate > 0, duration > 0 {
+            let perSecond = Int64(bitRate).multipliedReportingOverflow(by: 1_000)
+            let product = perSecond.partialValue.multipliedReportingOverflow(by: Int64(duration))
+            bitrateEstimate = perSecond.overflow || product.overflow ? Int64.max : product.partialValue / 8
+        } else {
+            bitrateEstimate = 0
+        }
+        let estimate = max(Int64(medianKnownBytes), max(durationEstimate, bitrateEstimate))
+        return Int(clamping: estimate)
+    }
+
+    /// Subsonic-family servers sometimes omit a song-level coverArt field even
+    /// though the album ID itself is a valid image identity.
+    private nonisolated static func coverArtID(for song: Song) -> String? {
+        let cover = song.coverArt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cover, !cover.isEmpty { return cover }
+        let albumID = song.albumId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (albumID?.isEmpty == false) ? albumID : nil
+    }
+
+    private func migrateDownloadedArtworkAliases(using client: any MusicService) {
+        let records = manifest.values.filter {
+            $0.song != nil && FileManager.default.fileExists(atPath: $0.path)
+        }
+        guard !records.isEmpty else { return }
+        var seenCoverIDs = Set<String>()
+        let candidates = records.filter { record in
+            guard let song = record.song, let cover = Self.coverArtID(for: song) else { return false }
+            return seenCoverIDs.insert("\(record.serverID ?? "legacy")|\(cover)").inserted
+        }
+
+        artworkAliasMigrationTask = Task { [weak self] in
+            for record in candidates {
+                guard !Task.isCancelled else { return }
+                guard let song = record.song else { continue }
+                guard let cover = Self.coverArtID(for: song) else { continue }
+                let serverID = record.serverID
+                let groupID = Self.artworkGroupID(for: song, serverID: serverID)
+                let legacyGroupID = Self.artworkGroupID(for: song)
+                let owner = Self.coverArtworkOwner(groupID: groupID, serverID: serverID)
+                let isCurrentServer = serverID == self?.currentServerID
+                let urls = isCurrentServer || serverID == nil
+                    ? ([client.coverArtURL(id: cover)] + Self.artworkSizes.map { client.coverArtURL(id: cover, size: $0) }).compactMap { $0 }
+                    : []
+                let associated = await ArtworkLoader.shared.associatePinnedCoverArt(
+                    id: cover,
+                    urls: urls,
+                    label: song.album ?? song.title,
+                    groupID: groupID,
+                    serverID: serverID,
+                    owner: owner,
+                    legacyGroupIDs: [legacyGroupID]
+                )
+                _ = await ArtworkLoader.shared.associatePinnedAnimatedArtwork(
+                    id: cover,
+                    urls: isCurrentServer || serverID == nil ? client.liveArtworkURLs(id: cover) : [],
+                    label: song.album ?? song.title,
+                    groupID: groupID,
+                    serverID: serverID,
+                    owner: owner,
+                    legacyGroupIDs: [legacyGroupID]
+                )
+                if !associated {
+                    // Old records without a persisted server identity retain
+                    // legacy lookup behavior; never relabel them to current.
+                    guard serverID != nil, isCurrentServer else { continue }
+                    let canonicalURL = client.coverArtURL(id: cover, size: Self.canonicalArtworkPixelSize)
+                        ?? client.coverArtURL(id: cover)
+                    if let canonicalURL {
+                        _ = await ArtworkLoader.shared.persist(
+                            canonicalURL,
+                            label: song.album ?? song.title,
+                            kind: "Album Cover",
+                            groupID: groupID,
+                            lookupID: ArtworkLoader.coverArtLookupID(cover, serverID: serverID),
+                            owner: owner
+                        )
+                    }
+                }
+            }
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.artworkAliasMigrationTask = nil }
+        }
     }
 
     private func fail(_ songID: String, removing dest: URL, updateBulk: Bool = true, token: UUID? = nil) {
@@ -1192,13 +1409,20 @@ final class DownloadService: ObservableObject {
         }
         guard !pending.isEmpty else { return }
 
+        let expectedBytes = Self.estimatedBulkBytes(pending)
+        guard DeviceStorageCapacity.current().allowsDownload(expectedBytes: expectedBytes) else {
+            VoltaNotificationCenter.shared.post("Not enough free storage to preserve the device safety reserve", tone: .warning)
+            AppLogger.shared.log("Bulk download rejected by device-capacity reserve; expected=\(expectedBytes)", category: .downloads, level: .warning)
+            return
+        }
+
         bulkSongsByID = Dictionary(uniqueKeysWithValues: pending.map { ($0.id, $0) })
         bulkActiveIDs = Set(pending.map(\.id))
         bulkCompletedCount = 0
         bulkFailedCount = 0
         bulkSkippedCount = 0
         bulkBytesFinished = 0
-        bulkBytesTotal = pending.reduce(0) { $0 + ($1.size ?? 0) }
+        bulkBytesTotal = expectedBytes
         bulkTotalCount = pending.count
         bulkStartedAt = Date()
         lastBulkSnapshotAt = .distantPast
@@ -1228,6 +1452,7 @@ final class DownloadService: ObservableObject {
                 client: client,
                 notifyOnCompletion: false,
                 belongsToBulkDownload: true,
+                serverID: currentServerID,
                 pumpImmediately: false
             )
         }
@@ -1338,10 +1563,11 @@ final class DownloadService: ObservableObject {
     // MARK: - Manifest
 
     struct Record: Codable, Sendable {
-        let path: String
+        var path: String
         var song: Song?
         var lastPlayed: Date?
         var downloadedAt: Date?
+        var serverID: String?
     }
 
     private var manifest: [String: Record] = [:]
@@ -1439,6 +1665,9 @@ final class DownloadService: ObservableObject {
         }
 
         let ids = Array(manifest.keys)
+        let removedSongs = manifest.values.compactMap { record in
+            record.song.map { (song: $0, serverID: record.serverID) }
+        }
         for (id, record) in manifest {
             try? FileManager.default.removeItem(atPath: record.path)
             setState(.notDownloaded, forID: id)
@@ -1448,6 +1677,9 @@ final class DownloadService: ObservableObject {
         downloadedRecentCache = nil
         downloadedRevision += 1
         saveManifest(to: manifestURL)
+        // Manifest is now empty, so canonical download-owned artwork can be
+        // released while explicitly synced local-artwork-library owners remain.
+        for removed in removedSongs { unpinOrphanedArtwork(after: removed.song, serverID: removed.serverID) }
         AppLogger.shared.log("All downloaded tracks removed: count=\(ids.count)", category: .downloads)
     }
 
@@ -1467,11 +1699,13 @@ final class DownloadService: ObservableObject {
             .filter { $0.key != protectedID && state(forID: $0.key) == .downloaded }
             .sorted { ($0.value.lastPlayed ?? .distantPast) < ($1.value.lastPlayed ?? .distantPast) }
 
+        var evictedSongs: [(song: Song, serverID: String?)] = []
         for (id, rec) in candidates {
             guard total > capBytes else { break }
             let size = fileSize(rec.path)
             try? FileManager.default.removeItem(atPath: rec.path)
             manifest.removeValue(forKey: id)
+            if let song = rec.song { evictedSongs.append((song, rec.serverID)) }
             setState(.notDownloaded, forID: id)
             downloadedRevision += 1
             total -= size
@@ -1479,6 +1713,7 @@ final class DownloadService: ObservableObject {
             VoltaNotificationCenter.shared.post(L(.notif_evicted_old_download), tone: .info)
         }
         saveManifest(to: manifestURL)
+        for evicted in evictedSongs { unpinOrphanedArtwork(after: evicted.song, serverID: evicted.serverID) }
     }
 
     func downloadedSongs() -> [Song] {
@@ -1493,6 +1728,23 @@ final class DownloadService: ObservableObject {
         }
         downloadedSongsCache = (revision, songs)
         return songs
+    }
+
+    // Download-manifest order for Library's Recently Downloaded shelf.
+    // This keeps valid metadata when a filesystem size probe returns zero.
+    func downloadedSongsByDownloadDate() -> [Song] {
+        manifest.values
+            .filter { record in
+                guard let song = record.song else { return false }
+                return FileManager.default.fileExists(atPath: record.path) || !song.id.isEmpty
+            }
+            .sorted {
+                let lhsDate = $0.downloadedAt ?? .distantPast
+                let rhsDate = $1.downloadedAt ?? .distantPast
+                if lhsDate != rhsDate { return lhsDate > rhsDate }
+                return ($0.song?.title ?? "").localizedCaseInsensitiveCompare($1.song?.title ?? "") == .orderedAscending
+            }
+            .compactMap(\.song)
     }
 
     func downloadedSongsByRecentPlay() -> [Song] {
@@ -1521,7 +1773,7 @@ final class DownloadService: ObservableObject {
             if let decoded = try? JSONDecoder().decode([String: Record].self, from: data) {
                 manifest = decoded
             } else if let legacy = try? JSONDecoder().decode([String: String].self, from: data) {
-                manifest = legacy.mapValues { Record(path: $0, song: nil) }
+                manifest = legacy.mapValues { Record(path: $0, song: nil, lastPlayed: nil, downloadedAt: nil, serverID: nil) }
             } else {
                 // The manifest is present but unreadable (corrupt / partially
                 // written / schema drift). Never blindly continue — that path
@@ -1589,7 +1841,7 @@ final class DownloadService: ObservableObject {
             guard Self.fileSize(at: url) >= 1_024 else { continue }
             let id = Self.songID(fromFileName: url.lastPathComponent)
             guard !id.isEmpty, manifest[id] == nil else { continue }
-            manifest[id] = Record(path: url.path, song: nil)
+            manifest[id] = Record(path: url.path, song: nil, lastPlayed: nil, downloadedAt: nil, serverID: nil)
             setState(.downloaded, forID: id)
             added = true
         }

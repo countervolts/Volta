@@ -22,6 +22,7 @@ struct StatsView: View {
                 Theme.background.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 20) {
+                        statsHeader
                         StatsTabSelector(selection: $tab)
 
                         if tab == .listening {
@@ -33,31 +34,8 @@ struct StatsView: View {
                     .padding(.top, 8)
                 }
             }
-            .navigationTitle("Stats")
-            .navigationBarTitleDisplayMode(.large)
-            .accountToolbar(path: $path)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            showShareSheet = true
-                        } label: {
-                            Label(L(.stats_share_title), systemImage: "square.and.arrow.up")
-                        }
-
-                        if tab == .listening {
-                            Button {
-                                exportStats()
-                            } label: {
-                                Label(L(.stats_share_export_data), systemImage: "arrow.down.doc")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
-                    }
-                    .tint(Theme.accent)
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
+            .settingsDestinations()
         }
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
@@ -119,6 +97,48 @@ struct StatsView: View {
     private func applyWidgetDestinationIfNeeded() {
         guard let destination = appState.consumeWidgetStatsDestination() else { return }
         tab = destination == .library ? .library : .listening
+    }
+
+    private var statsHeader: some View {
+        HStack(spacing: 10) {
+            Text("Stats")
+                .font(.largeTitle.bold())
+                .foregroundStyle(Theme.primaryText)
+
+            Spacer(minLength: 8)
+
+            statsOptionsButton
+            ServerMenuButton(onOpenSettings: { path.append(SettingsRoute.root) })
+        }
+        .padding(.horizontal, Theme.Layout.screenPadding)
+        .padding(.top, 14)
+        .padding(.bottom, 2)
+    }
+
+    private var statsOptionsButton: some View {
+        Menu {
+            Button {
+                showShareSheet = true
+            } label: {
+                Label(L(.stats_share_title), systemImage: "square.and.arrow.up")
+            }
+
+            if tab == .listening {
+                Button {
+                    exportStats()
+                } label: {
+                    Label(L(.stats_share_export_data), systemImage: "arrow.down.doc")
+                }
+            }
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Theme.primaryText)
+                .frame(width: 38, height: 38)
+                .glassCircle()
+        }
+        .menuStyle(.button)
+        .accessibilityLabel("Stats options")
     }
 
     private var periodSelector: some View {

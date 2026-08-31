@@ -1,8 +1,6 @@
 import SwiftUI
 import AVFoundation
-import Combine
 
-// Settings AutoMix preview.
 struct AutoMixPreviewView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var engine = AutoMixPreviewEngine()
@@ -11,14 +9,14 @@ struct AutoMixPreviewView: View {
         ZStack {
             Theme.background.ignoresSafeArea()
             ScrollView {
-                VStack(spacing: 24) {
-                    if engine.errorMessage != nil {
-                        emptyState
+                VStack(spacing: 18) {
+                    if let error = engine.errorMessage {
+                        emptyState(error)
                     } else {
-                        songsRow
-                        harmonicBadge
+                        tracks
+                        transitionSummary
                         timeline
-                        legend
+                        reasons
                         controls
                     }
                 }
@@ -26,7 +24,7 @@ struct AutoMixPreviewView: View {
             }
             .scrollContentBackground(.hidden)
         }
-        .navigationTitle("Preview AutoMix")
+        .navigationTitle("AutoMix Diagnostics")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
@@ -37,551 +35,406 @@ struct AutoMixPreviewView: View {
         .onDisappear { engine.stop() }
     }
 
-    // MARK: - Two songs
-
-    private var songsRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            songCard(engine.songA, key: engine.keyA, label: "Now Playing")
-            Image(systemName: "arrow.right")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Theme.secondaryText)
-                .padding(.top, 44)
-            songCard(engine.songB, key: engine.keyB, label: "Up Next")
+    private var tracks: some View {
+        VStack(spacing: 12) {
+            trackCard(song: engine.songA, analysis: engine.analysisA, label: "Track A")
+            Image(systemName: "arrow.down").foregroundStyle(Theme.secondaryText)
+            trackCard(song: engine.songB, analysis: engine.analysisB, label: "Track B")
         }
     }
 
-    private func songCard(_ song: Song?, key: MusicalKey?, label: String) -> some View {
-        VStack(spacing: 8) {
-            Text(label)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(Theme.secondaryText)
-                .textCase(.uppercase)
-            ArtworkView(coverArtID: song?.coverArt, size: 200, cornerRadius: 12)
-                .frame(width: 110, height: 110)
+    private func trackCard(
+        song: Song?,
+        analysis: AutoMixTrackAnalysis?,
+        label: String
+    ) -> some View {
+        HStack(spacing: 14) {
+            ArtworkView(coverArtID: song?.coverArt, size: 160, cornerRadius: 12)
+                .frame(width: 88, height: 88)
                 .overlay {
                     if engine.isLoading {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(.black.opacity(0.25))
+                        RoundedRectangle(cornerRadius: 12).fill(.black.opacity(0.25))
                         ProgressView().tint(.white)
                     }
                 }
-            Text(song?.title ?? "—")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.primaryText)
-                .lineLimit(1)
-            Text(song?.artist ?? " ")
-                .font(.caption)
-                .foregroundStyle(Theme.secondaryText)
-                .lineLimit(1)
-            keyChip(key)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func keyChip(_ key: MusicalKey?) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "pianokeys")
-            Text(key?.camelot ?? "—")
-        }
-        .font(.caption2.weight(.medium))
-        .foregroundStyle(key == nil ? Theme.secondaryText : Theme.accent)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(Theme.secondaryBackground))
-    }
-
-    // Camelot match badge.
-    @ViewBuilder private var harmonicBadge: some View {
-        if let compat = engine.harmonicCompatibility {
-            let (text, color, icon): (String, Color, String) =
-                compat >= 0.8 ? ("Harmonic match", .green, "checkmark.seal.fill")
-                : compat >= 0.45 ? ("Keys blend well", Theme.accent, "circle.dashed")
-                : ("Different keys — quick blend", .orange, "arrow.triangle.swap")
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                Text(text)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Theme.accent)
+                Text(song?.title ?? "—")
+                    .font(.headline)
+                    .foregroundStyle(Theme.primaryText)
+                    .lineLimit(1)
+                Text(song?.artist ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(1)
+                if let analysis {
+                    Text(trackFacts(analysis))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(color.opacity(0.14)))
+            Spacer(minLength: 0)
         }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Theme.secondaryBackground))
     }
 
-    // MARK: - Timeline
+    private func trackFacts(_ analysis: AutoMixTrackAnalysis) -> String {
+        let tempo = analysis.tempo.map {
+            "\(String(format: "%.1f", $0.bpm)) BPM \(percent($0.confidence))"
+        } ?? "Tempo unavailable"
+        let meter = analysis.meter.map {
+            "meter \($0.beatsPerBar) \(percent($0.confidence))"
+        } ?? "meter uncertain"
+        let key = analysis.key.map {
+            "\($0.key.camelot) \(percent($0.confidence))"
+        } ?? "key uncertain"
+        return "\(tempo)  •  beat \(percent(analysis.beatConfidence))\n\(meter)  •  downbeat \(percent(analysis.downbeatConfidence))  •  \(key)"
+    }
+
+    @ViewBuilder private var transitionSummary: some View {
+        if let plan = engine.plan {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label(plan.type.displayName, systemImage: transitionIcon(plan.type))
+                        .font(.headline)
+                        .foregroundStyle(Theme.primaryText)
+                    Spacer()
+                    Text(percent(plan.confidence))
+                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+                diagnosticRow("Out cue", clock(plan.outgoingCue))
+                diagnosticRow("In cue", clock(plan.incomingCue))
+                diagnosticRow("Overlap", "\(String(format: "%.2f", plan.duration)) s")
+                diagnosticRow("Tempo", tempoAdjustment(plan))
+                diagnosticRow("Alignment", alignment(plan))
+                if let fallback = plan.fallbackReason {
+                    diagnosticRow("Fallback", fallback)
+                }
+            }
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Theme.secondaryBackground))
+        }
+    }
 
     private var timeline: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Timeline")
-                .font(.caption.weight(.semibold))
+            Text("PREVIEW TIMELINE")
+                .font(.caption2.weight(.bold))
                 .foregroundStyle(Theme.secondaryText)
-                .textCase(.uppercase)
-
-            GeometryReader { geo in
-                let total = max(0.001, engine.totalDuration)
-                let w = geo.size.width
-                let pxPerSec = w / total
-                let leadInW = engine.leadIn * pxPerSec
-                let blendW = engine.blend * pxPerSec
-                let songAW = (engine.leadIn + engine.blend) * pxPerSec
-                let songBW = (engine.blend + engine.leadOut) * pxPerSec
-                let barHeight: CGFloat = 16
-                let gap: CGFloat = 8
-
-                ZStack(alignment: .topLeading) {
-                    // Song A on the top row.
+            GeometryReader { geometry in
+                let width = geometry.size.width
+                let total = max(0.01, engine.previewDuration)
+                let leadWidth = width * engine.leadIn / total
+                let blendWidth = width * engine.blend / total
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.accent.opacity(0.6)).frame(height: 13)
                     Capsule()
-                        .fill(Theme.accent.opacity(0.55))
-                        .frame(width: max(0, songAW), height: barHeight)
-                        .offset(x: 0, y: 0)
-
-                    // Song B starts at the blend.
-                    Capsule()
-                        .fill(Color(red: 0.30, green: 0.62, blue: 0.95).opacity(0.65))
-                        .frame(width: max(0, songBW), height: barHeight)
-                        .offset(x: leadInW, y: barHeight + gap)
-
-                    // Active blend window.
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.orange.opacity(0.30))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .strokeBorder(Color.orange, lineWidth: 1.5)
-                        )
-                        .frame(width: max(0, blendW), height: barHeight * 2 + gap)
-                        .offset(x: leadInW, y: 0)
-
-                    // Playhead while previewing.
+                        .fill(Color.blue.opacity(0.7))
+                        .frame(width: max(0, width - leadWidth), height: 13)
+                        .offset(x: leadWidth, y: 18)
+                    RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(Color.orange, lineWidth: 1.5)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.orange.opacity(0.18)))
+                        .frame(width: blendWidth, height: 31)
+                        .offset(x: leadWidth)
                     if engine.isPlaying {
                         Rectangle()
-                            .fill(Color.white)
-                            .frame(width: 2, height: barHeight * 2 + gap)
-                            .offset(x: min(w - 1, max(0, engine.progress * w)), y: 0)
-                            .shadow(color: .black.opacity(0.4), radius: 1)
+                            .fill(.white)
+                            .frame(width: 2, height: 34)
+                            .offset(x: min(width - 1, max(0, width * engine.progress)))
                     }
                 }
-                .frame(height: barHeight * 2 + gap, alignment: .topLeading)
             }
-            .frame(height: 40)
-
-            HStack {
-                Text(durationLabel(engine.leadIn) + " intro")
-                Spacer()
-                Text("\(Int(engine.blend.rounded()))s blend")
-                    .foregroundStyle(.orange)
-                Spacer()
-                Text(durationLabel(engine.leadOut) + " outro")
-            }
-            .font(.caption2)
-            .foregroundStyle(Theme.secondaryText)
+            .frame(height: 34)
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.secondaryBackground))
+        .background(RoundedRectangle(cornerRadius: 16).fill(Theme.secondaryBackground))
     }
 
-    private func durationLabel(_ seconds: TimeInterval) -> String {
-        "\(Int(seconds.rounded()))s"
-    }
-
-    private var legend: some View {
-        HStack(spacing: 16) {
-            legendDot(Theme.accent.opacity(0.55), "Track A")
-            legendDot(Color(red: 0.30, green: 0.62, blue: 0.95).opacity(0.65), "Track B")
-            legendDot(.orange, "AutoMix")
-            Spacer()
-        }
-        .font(.caption2)
-        .foregroundStyle(Theme.secondaryText)
-    }
-
-    private func legendDot(_ color: Color, _ text: String) -> some View {
-        HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 9, height: 9)
-            Text(text)
+    @ViewBuilder private var reasons: some View {
+        if let plan = engine.plan {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("PLANNER REASONS")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Theme.secondaryText)
+                ForEach(Array(plan.reasons.enumerated()), id: \.offset) { _, reason in
+                    Label(reason, systemImage: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(Theme.primaryText)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Theme.secondaryBackground))
         }
     }
-
-    // MARK: - Controls
 
     private var controls: some View {
-        HStack(spacing: 14) {
-            Button {
-                Task { await engine.reshuffle() }
-            } label: {
-                Label("Shuffle", systemImage: "shuffle")
-                    .font(.subheadline.weight(.semibold))
+        HStack(spacing: 12) {
+            Button { Task { await engine.reshuffle() } } label: {
+                Label("New Pair", systemImage: "shuffle")
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 11)
                     .background(Capsule().fill(Theme.secondaryBackground))
-                    .foregroundStyle(Theme.primaryText)
             }
             .disabled(engine.isLoading)
 
-            Button {
-                if engine.isPlaying { engine.stop() } else { engine.play() }
-            } label: {
-                Label(engine.isPlaying ? "Stop" : "Play Preview",
-                      systemImage: engine.isPlaying ? "stop.fill" : "play.fill")
-                    .font(.subheadline.weight(.semibold))
+            Button { engine.isPlaying ? engine.stop() : engine.play() } label: {
+                Label(engine.isPlaying ? "Stop" : "Play", systemImage: engine.isPlaying ? "stop.fill" : "play.fill")
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 11)
                     .background(Capsule().fill(Theme.accent))
                     .foregroundStyle(.white)
             }
-            .disabled(engine.isLoading || engine.songA == nil)
+            .disabled(engine.isLoading || engine.plan?.usesDualPlayers != true)
         }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(Theme.primaryText)
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 12) {
+    private func emptyState(_ message: String) -> some View {
+        VStack(spacing: 14) {
             Image(systemName: "waveform.slash")
-                .font(.system(size: 40, weight: .light))
+                .font(.system(size: 42, weight: .light))
                 .foregroundStyle(Theme.secondaryText)
-            Text(engine.errorMessage ?? "")
+            Text(message)
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
                 .multilineTextAlignment(.center)
             Button("Try Again") { Task { await engine.reshuffle() } }
-                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.accent)
         }
-        .frame(maxWidth: .infinity)
         .padding(.top, 60)
+    }
+
+    private func diagnosticRow(_ name: String, _ value: String) -> some View {
+        HStack {
+            Text(name).foregroundStyle(Theme.secondaryText)
+            Spacer()
+            Text(value).foregroundStyle(Theme.primaryText).monospacedDigit()
+        }
+        .font(.caption)
+    }
+
+    private func percent(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
+    private func clock(_ value: TimeInterval) -> String {
+        let totalMilliseconds = Int((max(0, value) * 1_000).rounded())
+        return String(format: "%d:%02d.%03d", totalMilliseconds / 60_000, (totalMilliseconds / 1_000) % 60, totalMilliseconds % 1_000)
+    }
+    private func tempoAdjustment(_ plan: AutoMixTransitionPlan) -> String {
+        guard abs(plan.incomingRate - 1) >= 0.001 else { return "native" }
+        return String(format: "%+.2f%% incoming", (Double(plan.incomingRate) - 1) * 100)
+    }
+    private func alignment(_ plan: AutoMixTransitionPlan) -> String {
+        if plan.alignedBarCount > 0 { return "\(plan.alignedBarCount) bars" }
+        if plan.alignedBeatCount > 0 { return "\(plan.alignedBeatCount) beats" }
+        return "none"
+    }
+    private func transitionIcon(_ type: AutoMixTransitionType) -> String {
+        switch type {
+        case .intendedGapless: "link"
+        case .silenceTrim: "scissors"
+        case .adaptiveCrossfade: "waveform"
+        case .beatMix: "metronome"
+        case .phraseMix: "music.note.list"
+        case .tightCut: "bolt.fill"
+        }
     }
 }
 
-// Audible + visual AutoMix preview, separate from the main queue.
 @MainActor
 final class AutoMixPreviewEngine: ObservableObject {
     @Published private(set) var songA: Song?
     @Published private(set) var songB: Song?
-    @Published private(set) var keyA: MusicalKey?
-    @Published private(set) var keyB: MusicalKey?
-    private var gridA: AutoMixBeatGrid?
-    private var gridB: AutoMixBeatGrid?
-    private var analysisA: AutoMixTrackAnalysis?
-    private var analysisB: AutoMixTrackAnalysis?
-    // Incoming preview duck; preview path has no ReplayGain.
-    private var volumeMatchB: Float = 1
+    @Published private(set) var analysisA: AutoMixTrackAnalysis?
+    @Published private(set) var analysisB: AutoMixTrackAnalysis?
+    @Published private(set) var plan: AutoMixTransitionPlan?
     @Published private(set) var isLoading = false
     @Published private(set) var isPlaying = false
-    @Published private(set) var isBlending = false
-    @Published private(set) var progress: Double = 0
+    @Published private(set) var progress = 0.0
     @Published private(set) var errorMessage: String?
 
-    // Timeline seconds with fixed context on each side.
-    @Published private(set) var leadIn: TimeInterval = 5
-    @Published private(set) var leadOut: TimeInterval = 5
-    @Published private(set) var blend: TimeInterval = 8
-    var totalDuration: TimeInterval { leadIn + blend + leadOut }
+    let leadIn: TimeInterval = 5
+    let leadOut: TimeInterval = 5
+    var blend: TimeInterval { plan?.duration ?? 0 }
+    var previewDuration: TimeInterval { leadIn + blend + leadOut }
 
     private weak var appState: AppState?
-    private var clipStartA: TimeInterval = 0
-    private var clipStartB: TimeInterval = 0
-    private var playerA: AVPlayer?
-    private var playerB: AVPlayer?
-    private var driveTask: Task<Void, Never>?
+    private var outgoingPlayer: AVPlayer?
+    private var incomingPlayer: AVPlayer?
+    private var observers: [(AVPlayer, Any)] = []
+    private var generation: UInt64 = 0
 
     func prepare(_ appState: AppState) async {
-        if self.appState == nil { self.appState = appState }
+        self.appState = appState
         guard songA == nil, !isLoading else { return }
         await pickSongs()
     }
 
     func reshuffle() async {
         stop()
-        songA = nil; songB = nil
-        keyA = nil; keyB = nil; gridA = nil; gridB = nil; errorMessage = nil
-        analysisA = nil; analysisB = nil; volumeMatchB = 1
+        songA = nil
+        songB = nil
+        analysisA = nil
+        analysisB = nil
+        plan = nil
+        errorMessage = nil
         await pickSongs()
     }
 
-    // Camelot compatibility for the preview pair.
-    var harmonicCompatibility: Double? {
-        guard let keyA, let keyB else { return nil }
-        return MusicalKey.compatibility(keyA, keyB)
-    }
-
-    // MARK: - Song selection
-
     private func pickSongs() async {
+        guard let appState else { return }
         isLoading = true
         defer { isLoading = false }
-
-        var pool = DownloadService.shared.downloadedSongs().filter { ($0.duration ?? 0) >= 30 }
-        if pool.count < 2, let client = appState?.client {
-            let random = (try? await client.randomSongs(size: 40)) ?? []
-            pool += random.filter { ($0.duration ?? 0) >= 30 }
+        var pool = DownloadService.shared.downloadedSongs().filter { ($0.duration ?? 0) >= 45 }
+        if pool.count < 2, let client = appState.client {
+            pool += ((try? await client.randomSongs(size: 30)) ?? []).filter { ($0.duration ?? 0) >= 45 }
         }
         var seen = Set<String>()
         pool = pool.filter { seen.insert($0.id).inserted }
         guard pool.count >= 2 else {
-            errorMessage = "Add or download some music to preview AutoMix."
+            errorMessage = "Add or download at least two tracks to inspect AutoMix."
             return
         }
-        // Prefer downloaded candidates.
-        pool.sort { (DownloadService.shared.localURL(for: $0) != nil ? 0 : 1)
-                  < (DownloadService.shared.localURL(for: $1) != nil ? 0 : 1) }
-        if pool.allSatisfy({ DownloadService.shared.localURL(for: $0) != nil }) { pool.shuffle() }
-
-        let a = pool[0]
-        songA = a
-        let aAnalysis = await appState?.audioPlayer.autoMixAnalysis(for: a)
-        guard songA?.id == a.id else { return }
-        keyA = aAnalysis?.key; gridA = aAnalysis?.grid; analysisA = aAnalysis
-
-        // Pick a pair that can actually show off the mix.
-        let candidates = Array(pool.dropFirst().prefix(6))
-        var best: (song: Song, analysis: AutoMixTrackAnalysis?, score: Double)?
-        for cand in candidates {
-            guard songA?.id == a.id else { return }
-            let ca = await appState?.audioPlayer.autoMixAnalysis(for: cand)
-            let score = Self.mixScore(aKey: keyA, aGrid: gridA, bKey: ca?.key, bGrid: ca?.grid)
-            if best == nil || score > best!.score { best = (cand, ca, score) }
-            if score >= 0.85 { break }   // good enough
-        }
-        guard songA?.id == a.id, let chosen = best else {
-            errorMessage = "Add or download some music to preview AutoMix."
-            return
-        }
-        songB = chosen.song
-        keyB = chosen.analysis?.key
-        gridB = chosen.analysis?.grid
-        analysisB = chosen.analysis
-        computePlan(a: a)
+        pool.shuffle()
+        let first = pool[0]
+        let second = pool.dropFirst().first(where: {
+            $0.albumId == nil || first.albumId == nil || $0.albumId != first.albumId
+        }) ?? pool[1]
+        songA = first
+        songB = second
+        async let firstAnalysis = appState.audioPlayer.autoMixAnalysis(for: first)
+        async let secondAnalysis = appState.audioPlayer.autoMixAnalysis(for: second)
+        async let pairPlan = appState.audioPlayer.autoMixPlan(current: first, next: second)
+        let results = await (firstAnalysis, secondAnalysis, pairPlan)
+        guard !Task.isCancelled,
+              songA?.id == first.id,
+              songB?.id == second.id else { return }
+        analysisA = results.0
+        analysisB = results.1
+        plan = results.2
     }
-
-    // Rough mix score: key compatibility plus lockable tempo.
-    private static func mixScore(aKey: MusicalKey?, aGrid: AutoMixBeatGrid?, bKey: MusicalKey?, bGrid: AutoMixBeatGrid?) -> Double {
-        var score = (aKey != nil && bKey != nil) ? MusicalKey.compatibility(aKey, bKey) : 0.5
-        if let aGrid, let bGrid, AutoMixTempo.outgoingRate(currentBPM: aGrid.bpm, nextBPM: bGrid.bpm) != nil {
-            score += 0.15
-        }
-        return score
-    }
-
-    private func computePlan(a: Song) {
-        var b = Self.crossSongBlend()
-        // Match the live engine's cold/arrhythmic handling.
-        if analysisA?.endsCold == true {
-            b = min(b, 3.2)
-        } else if gridA == nil, gridB == nil {
-            let raw = UserDefaults.standard.double(forKey: "automixMaxBlendSeconds")
-            let maxBlend = min(18, max(4, raw > 0 ? raw : 10))
-            b = min(maxBlend, max(b, 10))
-        }
-        // Match live harmonic length scaling.
-        let harmonicOn = UserDefaults.standard.object(forKey: "automixHarmonic") as? Bool ?? true
-        if harmonicOn, let compat = harmonicCompatibility {
-            if compat < 0.5 { b = max(2.5, b * 0.6) }
-            else if compat < 0.85 { b = max(3, b * 0.85) }
-        }
-        // Beat-locked pairs blend in whole bars.
-        if let ga = gridA, let gb = gridB,
-           AutoMixTempo.outgoingRate(currentBPM: ga.bpm, nextBPM: gb.bpm) != nil {
-            let bar = gb.period * 4
-            if bar > 0.5 {
-                let raw = UserDefaults.standard.double(forKey: "automixMaxBlendSeconds")
-                let maxBlend = min(18, max(4, raw > 0 ? raw : 10))
-                let bars = max(1, (b / bar).rounded())
-                b = min(maxBlend, max(2, bars * bar))
-            }
-        }
-        // Vocal guard for double-vocal handoffs.
-        if let durA = analysisA?.duration, durA > 0,
-           let vocalTail = analysisA?.vocalTailEnd, vocalTail > durA - 3 {
-            let entryEst = max(gridB?.firstStrongBeat ?? 0, analysisB?.mixInPoint ?? 0)
-            if let vocalIn = analysisB?.vocalIntroStart, vocalIn < entryEst + b + 1 {
-                b = min(b, 4)
-            }
-        }
-        blend = b
-        leadIn = 5
-        leadOut = 5
-        let sweetSpotOn = UserDefaults.standard.object(forKey: "automixSweetSpot") as? Bool ?? true
-        let analysedDurA = analysisA?.duration ?? 0
-        let durA = analysedDurA > 0 ? analysedDurA : Double(a.duration ?? 180)
-        let need = leadIn + blend + 1
-        // Anchor near the live engine's outro exit.
-        let ideal: TimeInterval
-        if sweetSpotOn, var out = analysisA?.mixOutPoint, out > 0 {
-            // Do not exit mid-line.
-            if let vocalTail = analysisA?.vocalTailEnd, vocalTail > out, vocalTail < durA - 2 {
-                out = min(durA - 2, vocalTail + 0.3)
-            }
-            ideal = max(20, out - leadIn)
-        } else {
-            ideal = max(20, durA * 0.35)
-        }
-        var startA = max(0, min(ideal, durA - need))
-        // Open on A's downbeat.
-        if let ga = gridA {
-            let open = ga.downbeat(atOrAfter: startA + leadIn)
-            startA = max(0, min(open - leadIn, durA - need))
-        }
-        clipStartA = startA
-        // Start B on its first strong downbeat.
-        if let gb = gridB {
-            var entryFloor = max(0, gb.firstStrongBeat)
-            if sweetSpotOn, let inPoint = analysisB?.mixInPoint, inPoint > entryFloor + 1.0 {
-                entryFloor = inPoint
-            }
-            var entry = gb.downbeat(atOrAfter: entryFloor)
-            // Prefer a nearby 4-bar phrase boundary.
-            let bar = gb.period * 4
-            let phrase = bar * 4
-            let anchor = gb.downbeat(atOrAfter: gb.firstStrongBeat)
-            if phrase > 0, entry > anchor + 0.01 {
-                let k = ((entry - anchor) / phrase).rounded(.up)
-                let phraseEntry = anchor + k * phrase
-                if phraseEntry - entry <= bar * 2 + 0.01 { entry = phraseEntry }
-            }
-            clipStartB = entry
-        } else {
-            clipStartB = 0
-        }
-        // Duck a hotter incoming master.
-        volumeMatchB = 1
-        let loudnessOn = UserDefaults.standard.object(forKey: "automixLoudnessMatch") as? Bool ?? true
-        if loudnessOn, let ra = analysisA?.rms, let rb = analysisB?.rms, ra > 0, rb > 0 {
-            let ratio = ra / rb
-            if ratio < 0.95 { volumeMatchB = max(0.7, ratio) }
-        }
-    }
-
-    // Same duration rule as live AutoMix for unrelated tracks.
-    private static func crossSongBlend() -> TimeInterval {
-        let style = UserDefaults.standard.string(forKey: "automixStyle") ?? "balanced"
-        let raw = UserDefaults.standard.double(forKey: "automixMaxBlendSeconds")
-        let maxBlend = min(18, max(4, raw > 0 ? raw : 10))
-        let base: TimeInterval
-        switch style {
-        case "tight": base = 5
-        case "wide": base = 10
-        default: base = 8
-        }
-        return min(maxBlend, max(3, base))
-    }
-
-    // Outgoing-track tempo bend, when the tempos are close enough.
-    private func outgoingRate() -> Float? {
-        let enabled = UserDefaults.standard.object(forKey: "automixTempoMatch") as? Bool ?? true
-        guard enabled, let a = gridA?.bpm, let b = gridB?.bpm,
-              let r = AutoMixTempo.outgoingRate(currentBPM: a, nextBPM: b) else { return nil }
-        return r.rate
-    }
-
-    // MARK: - Playback
 
     func play() {
-        guard !isPlaying, let a = songA, let b = songB,
-              let urlA = playbackURL(for: a), let urlB = playbackURL(for: b) else { return }
+        guard !isPlaying,
+              let appState,
+              let songA,
+              let songB,
+              let plan,
+              plan.usesDualPlayers,
+              let urlA = appState.audioPlayer.autoMixPreviewURL(for: songA),
+              let urlB = appState.audioPlayer.autoMixPreviewURL(for: songB) else { return }
+        appState.audioPlayer.pause()
+        generation &+= 1
+        let token = generation
+        Task { @MainActor [weak self] in
+            await self?.startPreview(urlA: urlA, urlB: urlB, plan: plan, generation: token)
+        }
+    }
 
-        appState?.audioPlayer.pause()
-        try? AVAudioSession.sharedInstance().setActive(true)
-
-        // Pick the pitch algorithm once.
-        let outgoingRate = self.outgoingRate()
+    private func startPreview(
+        urlA: URL,
+        urlB: URL,
+        plan: AutoMixTransitionPlan,
+        generation token: UInt64
+    ) async {
         let itemA = AVPlayerItem(url: urlA)
-        itemA.audioTimePitchAlgorithm = .timeDomain
         let itemB = AVPlayerItem(url: urlB)
-        itemB.audioTimePitchAlgorithm = .timeDomain
+        itemA.audioTimePitchAlgorithm = .spectral
+        itemB.audioTimePitchAlgorithm = .spectral
+        guard let trackA = try? await itemA.asset.loadTracks(withMediaType: .audio).first,
+              let trackB = try? await itemB.asset.loadTracks(withMediaType: .audio).first,
+              generation == token else { return }
 
-        let pa = AVPlayer(playerItem: itemA)
-        let pb = AVPlayer(playerItem: itemB)
-        pa.volume = 1
-        pb.volume = 0
-        playerA = pa
-        playerB = pb
+        let parametersA = AVMutableAudioMixInputParameters(track: trackA)
+        let parametersB = AVMutableAudioMixInputParameters(track: trackB)
+        AutoMixTimedEnvelope.applyOutgoing(plan, to: parametersA)
+        AutoMixTimedEnvelope.applyIncoming(plan, to: parametersB)
+        let mixA = AVMutableAudioMix(); mixA.inputParameters = [parametersA]
+        let mixB = AVMutableAudioMix(); mixB.inputParameters = [parametersB]
+        itemA.audioMix = mixA
+        itemB.audioMix = mixB
 
-        // Start both players together so B is already rolling at the blend.
-        pa.seek(to: CMTime(seconds: clipStartA, preferredTimescale: 600))
-        pb.seek(to: CMTime(seconds: clipStartB, preferredTimescale: 600))
+        let playerA = AVPlayer(playerItem: itemA)
+        let playerB = AVPlayer(playerItem: itemB)
+        outgoingPlayer = playerA
+        incomingPlayer = playerB
+        let startA = max(0, plan.outgoingCue - leadIn)
+        await seek(playerA, to: startA)
+        await seek(playerB, to: plan.incomingCue)
+        let ready = await waitUntilReady(itemB, timeout: 3)
+        guard ready, generation == token else {
+            stop()
+            return
+        }
 
         isPlaying = true
-        isBlending = false
         progress = 0
-        pa.play()
-        pb.play()
-
-        let total = totalDuration
-        let leadIn = self.leadIn
-        let blend = self.blend
-        driveTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            let start = Date()
-            var blendStarted = false
-            var blendDone = false
-            var phaseLocked = false
-            while !Task.isCancelled {
-                let t = Date().timeIntervalSince(start)
-                if t >= total { break }
-                self.progress = min(1, t / total)
-
-                if t < leadIn {
-                    // Intro: A audible, B muted.
-                    pa.volume = 1
-                    pb.volume = 0
-                } else if !blendDone {
-                    self.isBlending = true
-                    // Muted downbeat seek for B.
-                    if !phaseLocked {
-                        phaseLocked = true
-                        if let gb = self.gridB {
-                            let pIn = pb.currentTime().seconds
-                            if pIn.isFinite {
-                                let db = gb.downbeat(atOrAfter: pIn + 0.02)
-                                let tol = CMTime(seconds: 0.012, preferredTimescale: 600)
-                                pb.seek(to: CMTime(seconds: db, preferredTimescale: 600), toleranceBefore: tol, toleranceAfter: tol, completionHandler: { _ in })
-                            }
-                        }
-                    }
-                    let x = min(1, max(0, (t - leadIn) / blend))
-                    if x < 1 {
-                        // Equal-power eased blend.
-                        let phase = x * x * (3 - 2 * x)
-                        let theta = phase * (Double.pi / 2)
-                        pa.volume = Float(cos(theta))
-                        pb.volume = Float(sin(theta)) * self.volumeMatchB
-                        // Bend A once after it is already ducking.
-                        if let outgoingRate, !blendStarted, x >= 0.15 {
-                            blendStarted = true
-                            pa.rate = outgoingRate
-                        }
-                    } else {
-                        blendDone = true
-                        self.isBlending = false
-                        pa.volume = 0
-                        pa.pause()
-                        pb.volume = self.volumeMatchB
-                    }
-                }
-
-                try? await Task.sleep(nanoseconds: 33_000_000)
-            }
-            self.finish()
+        try? AVAudioSession.sharedInstance().setActive(true)
+        playerA.playImmediately(atRate: 1)
+        addBoundary(player: playerA, time: plan.outgoingCue) { [weak self, weak playerB] in
+            guard self?.generation == token else { return }
+            playerB?.playImmediately(atRate: plan.incomingRate)
         }
+        addBoundary(
+            player: playerB,
+            time: plan.incomingCue + plan.incomingMediaDuration + leadOut * Double(plan.incomingRate)
+        ) { [weak self] in self?.stop() }
+        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+        let progressToken = playerA.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            Task { @MainActor in
+                guard let self, self.generation == token else { return }
+                self.progress = min(1, max(0, (time.seconds - startA) / self.previewDuration))
+            }
+        }
+        observers.append((playerA, progressToken))
     }
 
     func stop() {
-        driveTask?.cancel()
-        driveTask = nil
-        finish()
-    }
-
-    private func finish() {
-        playerA?.pause()
-        playerB?.pause()
-        playerA = nil
-        playerB = nil
+        generation &+= 1
+        for (player, observer) in observers { player.removeTimeObserver(observer) }
+        observers.removeAll()
+        outgoingPlayer?.pause()
+        incomingPlayer?.pause()
+        outgoingPlayer?.rate = 1
+        incomingPlayer?.rate = 1
+        outgoingPlayer = nil
+        incomingPlayer = nil
         isPlaying = false
-        isBlending = false
         progress = 0
     }
 
-    private func playbackURL(for song: Song) -> URL? {
-        if let local = DownloadService.shared.localURL(for: song) { return local }
-        return appState?.client?.streamURL(for: song)
+    private func addBoundary(player: AVPlayer, time: TimeInterval, action: @escaping @MainActor () -> Void) {
+        let observer = player.addBoundaryTimeObserver(
+            forTimes: [NSValue(time: CMTime(seconds: time, preferredTimescale: 600))],
+            queue: .main
+        ) { Task { @MainActor in action() } }
+        observers.append((player, observer))
+    }
+
+    private func seek(_ player: AVPlayer, to seconds: TimeInterval) async {
+        await withCheckedContinuation { continuation in
+            player.seek(
+                to: CMTime(seconds: seconds, preferredTimescale: 600),
+                toleranceBefore: CMTime(seconds: 0.012, preferredTimescale: 600),
+                toleranceAfter: CMTime(seconds: 0.012, preferredTimescale: 600)
+            ) { _ in continuation.resume() }
+        }
+    }
+
+    private func waitUntilReady(_ item: AVPlayerItem, timeout: TimeInterval) async -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if item.status == .readyToPlay { return true }
+            if item.status == .failed { return false }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            if Task.isCancelled { return false }
+        }
+        return item.status == .readyToPlay
     }
 }

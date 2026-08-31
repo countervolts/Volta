@@ -36,6 +36,49 @@ private struct PinnedArtworkMetadata: Codable, Sendable {
     /// grouped by their display label as a migration fallback.
     let groupID: String?
     let isAnimated: Bool?
+    /// Stable lookup identity used when no server URL exists in offline mode.
+    let lookupID: String?
+    /// URL cache keys retained as metadata aliases. Aliases never own bytes.
+    let aliases: [String]?
+    /// Durable features retaining this source, for example a downloaded album
+    /// or an explicit local-artwork-library sync.
+    let owners: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case displayName, kind, savedAt, groupID, isAnimated, lookupID, aliases, owners
+    }
+
+    init(
+        displayName: String,
+        kind: String,
+        savedAt: Date,
+        groupID: String?,
+        isAnimated: Bool?,
+        lookupID: String?,
+        aliases: [String]? = nil,
+        owners: [String]? = nil
+    ) {
+        self.displayName = displayName
+        self.kind = kind
+        self.savedAt = savedAt
+        self.groupID = groupID
+        self.isAnimated = isAnimated
+        self.lookupID = lookupID
+        self.aliases = aliases
+        self.owners = owners
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        kind = try container.decode(String.self, forKey: .kind)
+        savedAt = try container.decode(Date.self, forKey: .savedAt)
+        groupID = try container.decodeIfPresent(String.self, forKey: .groupID)
+        isAnimated = try container.decodeIfPresent(Bool.self, forKey: .isAnimated)
+        lookupID = try container.decodeIfPresent(String.self, forKey: .lookupID)
+        aliases = try container.decodeIfPresent([String].self, forKey: .aliases)
+        owners = try container.decodeIfPresent([String].self, forKey: .owners)
+    }
 }
 
 private struct DownloadedArtworkFileRecord: Sendable {
@@ -99,6 +142,9 @@ actor ArtworkLoader {
     private static let extremeAnimatedPixelLimit = 160
     private static let extremeAnimatedDecodedBytes = 48 * 1024 * 1024
     private static let minimumAnimatedPixelLimit = 64
+    private static let catalogSchemaVersion = 3
+    private static let staticCachePruneInterval: TimeInterval = 5 * 60
+    private static let liveCachePruneInterval: TimeInterval = 5 * 60
 
     private let memory = NSCache<NSString, UIImage>()
     // Optional decoded-frame cache; animated covers are large.
@@ -107,10 +153,12 @@ actor ArtworkLoader {
     private let session: URLSession
     private let directory: URL
     private let liveArtworkDirectory: URL
-    private let pinnedDirectory: URL
+    private var pinnedDirectory: URL
     private let pinnedCatalogURL: URL
-    // Downloaded live-artwork cache; survives normal artwork-cache clears.
-    private let pinnedLiveDirectory: URL
+    private let pinnedCatalogSchemaURL: URL
+    // Legacy location for reconstructible pinned animation derivatives. New
+    // derivatives always live in Caches/live-artwork.
+    private var pinnedLiveDirectory: URL
     private var inFlight: [String: Task<UIImage?, Never>] = [:]
     private var liveInFlight: [String: Task<LiveArtworkAsset?, Never>] = [:]
     private let prepareImages: Bool
@@ -121,6 +169,11 @@ actor ArtworkLoader {
     private var appliedDisableRAMOptimizations = false
     private var liveMemoryRawPolicy = false
     private var pinnedCatalog: [String: PinnedArtworkMetadata] = [:]
+    private var pinnedLookupKeys: [String: [String]] = [:]
+    private var pinnedAliasKeys: [String: String] = [:]
+    private var storedCatalogSchemaVersion = 0
+    private var lastStaticCachePrune = Date.distantPast
+    private var lastLiveCachePrune = Date.distantPast
 
     init() {
         // Performance Mode overrides the user image profile.
@@ -131,8 +184,11 @@ actor ArtworkLoader {
             ? "light"
             : (UserDefaults.standard.string(forKey: "cacheMode") ?? "balanced")
 
-        let config = URLSessionConfiguration.default
-        config.requestCachePolicy = .returnCacheDataElseLoad
+        // Artwork already has a bounded, explicit disk cache. Keep Foundation's
+        // HTTP cache in memory so one response cannot occupy three disk tiers.
+        let config = URLSessionConfiguration.ephemeral
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.timeoutIntervalForRequest = 20
         config.httpMaximumConnectionsPerHost = RuntimeCompatibility.artworkConnectionLimit(imageMode: imageMode)
         session = URLSession(configuration: config)
@@ -153,17 +209,27 @@ actor ArtworkLoader {
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        pinnedDirectory = appSupport.appendingPathComponent("Volta/OfflineArtwork", isDirectory: true)
+        pinnedDirectory = DownloadStorageLocation.current.artworkDirectory()
         pinnedCatalogURL = appSupport.appendingPathComponent("Volta/OfflineArtworkCatalog.json")
+        pinnedCatalogSchemaURL = appSupport.appendingPathComponent("Volta/OfflineArtworkCatalogSchema.json")
         pinnedLiveDirectory = pinnedDirectory.appendingPathComponent("live", isDirectory: true)
         try? fileManager.createDirectory(at: pinnedDirectory, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: pinnedCatalogURL),
            let decoded = try? JSONDecoder().decode([String: PinnedArtworkMetadata].self, from: data) {
             pinnedCatalog = decoded
         }
+        pinnedLookupKeys = Self.lookupIndex(for: pinnedCatalog)
+        pinnedAliasKeys = Self.aliasIndex(for: pinnedCatalog)
+        if let data = try? Data(contentsOf: pinnedCatalogSchemaURL),
+           let version = try? JSONDecoder().decode(Int.self, from: data) {
+            storedCatalogSchemaVersion = version
+        }
         if LiveArtworkSettings.supportsAnimatedArtwork {
             try? fileManager.createDirectory(at: liveArtworkDirectory, withIntermediateDirectories: true)
-            try? fileManager.createDirectory(at: pinnedLiveDirectory, withIntermediateDirectories: true)
+            // Derived assets moved to Caches/live-artwork in schema v3.
+            if storedCatalogSchemaVersion >= Self.catalogSchemaVersion {
+                try? fileManager.removeItem(at: pinnedLiveDirectory)
+            }
         } else {
             try? fileManager.removeItem(at: liveArtworkDirectory)
             try? fileManager.removeItem(at: pinnedLiveDirectory)
@@ -174,6 +240,10 @@ actor ArtworkLoader {
             forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
         ) { _ in
             Task { await ArtworkLoader.shared.clearMemoryCachesForWarning() }
+        }
+
+        if storedCatalogSchemaVersion < Self.catalogSchemaVersion {
+            Task { await self.migrateLegacyPinnedArtworkIfNeeded() }
         }
     }
 
@@ -230,34 +300,58 @@ actor ArtworkLoader {
         }
 
         let identityKey = Self.cacheKey(for: url, sizeAgnostic: true)
+        let pinnedKeys = [
+            pinnedAliasKeys[rawKey],
+            pinnedAliasKeys[identityKey],
+            rawKey,
+            identityKey
+        ].compactMap { $0 }
         let fallbackPixelCap = disableRAMOptimizations ? nil : RuntimeCompatibility.cappedArtworkSize(await Self.currentScreenPixelCap())
-        let task = Task<UIImage?, Never> { [directory, pinnedDirectory, session, prepareImages] in
-            let fileURL = directory.appendingPathComponent(rawKey)
-            let pinnedURL = pinnedDirectory.appendingPathComponent(rawKey)
-            let identityURL = pinnedDirectory.appendingPathComponent(identityKey)
+        let fm = fileManager
+        let task = Task<UIImage?, Never> { [directory, pinnedDirectory, session, prepareImages, pinnedKeys, fm] in
+            let canonicalCacheURL = directory.appendingPathComponent(identityKey)
+            let legacyCacheURL = directory.appendingPathComponent(rawKey)
+            var lowResolutionFallback: UIImage?
             func finish(_ data: Data) async -> UIImage? {
                 // Full-size still means "screen sized" here.
                 let pixelCap = disableRAMOptimizations ? nil : (decodeMaxPixelSize ?? fallbackPixelCap)
                 return await Self.decodeStillImage(from: data, maxPixelSize: pixelCap, prepare: prepareImages)
             }
-            if let data = try? Data(contentsOf: pinnedURL), let image = await finish(data) {
-                return image
+            func isLargeEnough(_ image: UIImage) -> Bool {
+                guard let requested = decodeMaxPixelSize, requested > 0 else { return true }
+                let longest = max(image.size.width, image.size.height) * image.scale
+                // Do not upscale a list thumbnail into the player cover. A
+                // server refresh can replace a previously cached small image.
+                return longest >= CGFloat(requested) * 0.9
             }
-            // Local artwork library wins over transient cache/network.
-            if let data = try? Data(contentsOf: identityURL), let image = await finish(data) {
-                return image
+            // Durable downloaded artwork wins over transient cache/network.
+            for pinnedKey in pinnedKeys {
+                let url = pinnedDirectory.appendingPathComponent(pinnedKey)
+                if let data = try? Data(contentsOf: url), let image = await finish(data) {
+                    if isLargeEnough(image) { return image }
+                    lowResolutionFallback = image
+                }
             }
-            if let data = try? Data(contentsOf: fileURL), let image = await finish(data) {
-                return image
+            for cacheURL in [canonicalCacheURL, legacyCacheURL] where fm.fileExists(atPath: cacheURL.path) {
+                if let data = try? Data(contentsOf: cacheURL), let image = await finish(data) {
+                    if isLargeEnough(image) {
+                        try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: cacheURL.path)
+                        return image
+                    }
+                    lowResolutionFallback = image
+                }
             }
             guard let (data, response) = try? await session.data(from: url),
                   Self.isImageResponse(response, data: data),
                   let image = await finish(data) else {
-                return nil
+                return lowResolutionFallback
             }
             // Demo-server artwork is shown from memory but never written to disk.
             if !DemoServers.isDemo(url) {
-                try? data.write(to: fileURL, options: .atomic)
+                try? data.write(to: canonicalCacheURL, options: .atomic)
+                if legacyCacheURL != canonicalCacheURL {
+                    try? fm.removeItem(at: legacyCacheURL)
+                }
             }
             return image
         }
@@ -266,6 +360,257 @@ actor ArtworkLoader {
         inFlight[key] = nil
         if let image {
             memory.setObject(image, forKey: key as NSString, cost: image.cost)
+        }
+        pruneStaticCacheIfNeeded()
+        return image
+    }
+
+    /// Loads pinned cover art without needing a live server URL.
+    func image(forCoverArtID id: String?, maxPixelSize: Int? = nil) async -> UIImage? {
+        guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else { return nil }
+        return await image(
+            forPinnedLookupIDs: Self.coverArtLookupIDs(id),
+            maxPixelSize: maxPixelSize
+        )
+    }
+
+    /// Loads a namespaced offline cover. The legacy, unscoped lookup remains a
+    /// fallback for catalogs written before server namespacing existed.
+    func image(
+        forCoverArtID id: String?,
+        serverID: String?,
+        maxPixelSize: Int? = nil
+    ) async -> UIImage? {
+        guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else { return nil }
+        return await image(
+            forPinnedLookupIDs: Self.coverArtLookupIDs(id, serverID: serverID),
+            maxPixelSize: maxPixelSize
+        )
+    }
+
+    /// Last-resort offline artwork recovery. Some servers expose cover art only
+    /// while online, but many downloaded audio files contain the same still in
+    /// their common metadata. Once recovered, pin it under the server's cover
+    /// identity so every album/track view can reuse it without parsing audio.
+    func image(
+        fromEmbeddedArtworkAt audioURL: URL,
+        coverArtID id: String?,
+        serverID: String?,
+        groupID: String?,
+        owner: String,
+        maxPixelSize: Int? = nil
+    ) async -> UIImage? {
+        guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !id.isEmpty,
+              fileManager.fileExists(atPath: audioURL.path) else { return nil }
+
+        applyMemoryPolicy(rawMode: LiveArtworkSettings.rawAnimatedArtworkEnabled)
+        let disableRAMOptimizations = DeveloperExperiments.disableRAMOptimizations
+        let cappedMaxPixelSize = RuntimeCompatibility.cappedArtworkSize(maxPixelSize)
+        let decodeMaxPixelSize = disableRAMOptimizations ? nil : cappedMaxPixelSize
+        let cacheKey = "embedded-cover-\(Crypto.md5Hex(id))-\(decodeMaxPixelSize.map(String.init) ?? "raw")"
+        if let cached = memory.object(forKey: cacheKey as NSString) { return cached }
+
+        let asset = AVURLAsset(url: audioURL)
+        guard let metadata = try? await asset.load(.commonMetadata),
+              let artwork = metadata.first(where: { $0.commonKey == .commonKeyArtwork }),
+              let data = try? await artwork.load(.dataValue),
+              let image = await Self.decodeStillImage(
+                from: data,
+                maxPixelSize: decodeMaxPixelSize,
+                prepare: prepareImages
+              ) else { return nil }
+
+        let lookupID = Self.coverArtLookupID(id, serverID: serverID)
+        _ = persistCanonicalData(
+            data,
+            aliases: [],
+            label: audioURL.deletingPathExtension().lastPathComponent,
+            kind: "Album Cover",
+            groupID: groupID,
+            lookupID: lookupID,
+            owner: owner,
+            isAnimated: false
+        )
+        memory.setObject(image, forKey: cacheKey as NSString, cost: image.cost)
+        AppLogger.shared.log("Recovered offline cover art from downloaded audio", category: .artwork)
+        return image
+    }
+
+    /// Loads pinned artist art without needing a live server URL.
+    func image(forArtistID id: String?, maxPixelSize: Int? = nil) async -> UIImage? {
+        guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else { return nil }
+        return await image(
+            forPinnedKeys: pinnedLookupKeys[Self.artistLookupID(id)] ?? [Crypto.md5Hex("artist:" + id)],
+            cacheNamespace: "artist:\(id)",
+            maxPixelSize: maxPixelSize
+        )
+    }
+
+    func image(forArtistID id: String?, serverID: String?, maxPixelSize: Int? = nil) async -> UIImage? {
+        guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else { return nil }
+        let lookupIDs = Self.artistLookupIDs(id, serverID: serverID)
+        let keys = lookupIDs.flatMap { pinnedLookupKeys[$0] ?? [] }
+        return await image(
+            forPinnedKeys: keys.isEmpty ? [Crypto.md5Hex("artist:" + id)] : keys,
+            cacheNamespace: lookupIDs.first ?? "artist:\(id)",
+            maxPixelSize: maxPixelSize
+        )
+    }
+
+    /// Associates already-pinned URL artwork with its stable cover-art ID.
+    /// Used to migrate downloads created before offline ID lookup existed.
+    @discardableResult
+    func associatePinnedCoverArt(
+        id: String,
+        urls: [URL],
+        label: String?,
+        groupID: String?,
+        serverID: String? = nil,
+        owner: String? = nil,
+        legacyGroupIDs: [String] = []
+    ) -> Bool {
+        let lookupID = Self.coverArtLookupID(id, serverID: serverID)
+        return associatePinnedArtwork(
+            lookupID: lookupID,
+            urls: urls,
+            label: label,
+            groupID: groupID,
+            owner: owner ?? "manual:\(lookupID)",
+            legacyGroupIDs: legacyGroupIDs,
+            requireAnimation: false
+        )
+    }
+
+    @discardableResult
+    func associatePinnedAnimatedArtwork(
+        id: String,
+        urls: [URL],
+        label: String?,
+        groupID: String?,
+        serverID: String? = nil,
+        owner: String? = nil,
+        legacyGroupIDs: [String] = []
+    ) -> Bool {
+        let lookupID = Self.liveArtworkLookupID(id, serverID: serverID)
+        return associatePinnedArtwork(
+            lookupID: lookupID,
+            urls: urls,
+            label: label,
+            groupID: groupID,
+            owner: owner ?? "manual:\(lookupID)",
+            legacyGroupIDs: legacyGroupIDs,
+            requireAnimation: true
+        )
+    }
+
+    private func associatePinnedArtwork(
+        lookupID: String,
+        urls: [URL],
+        label: String?,
+        groupID: String?,
+        owner: String,
+        legacyGroupIDs: [String],
+        requireAnimation: Bool
+    ) -> Bool {
+        let urlAliases = urls.flatMap { [Self.cacheKey(for: $0), Self.cacheKey(for: $0, sizeAgnostic: true)] }
+        let allowedGroups = Set(([groupID].compactMap { $0 }) + legacyGroupIDs)
+        let candidateKeys = Set(urlAliases.compactMap { pinnedAliasKeys[$0] ?? $0 })
+            .union(pinnedCatalog.compactMap { key, metadata in
+                guard !allowedGroups.isEmpty,
+                      allowedGroups.contains(metadata.groupID ?? "") else { return nil }
+                return key
+            })
+        let candidates = candidateKeys.compactMap { key -> (key: String, data: Data, descriptor: ImageDescriptor, metadata: PinnedArtworkMetadata?)? in
+            let url = pinnedDirectory.appendingPathComponent(key)
+            guard let data = try? Data(contentsOf: url),
+                  let descriptor = Self.imageDescriptor(at: url),
+                  (descriptor.frameCount > 1) == requireAnimation else { return nil }
+            return (key, data, descriptor, pinnedCatalog[key])
+        }
+        guard let source = candidates.max(by: { lhs, rhs in
+            if lhs.descriptor.pixelCount != rhs.descriptor.pixelCount {
+                return lhs.descriptor.pixelCount < rhs.descriptor.pixelCount
+            }
+            if lhs.descriptor.frameCount != rhs.descriptor.frameCount {
+                return lhs.descriptor.frameCount < rhs.descriptor.frameCount
+            }
+            return lhs.descriptor.bytes < rhs.descriptor.bytes
+        }) else { return false }
+        let aliases = Set(urlAliases)
+            .union(candidates.map(\.key))
+            .union(candidates.flatMap { $0.metadata?.aliases ?? [] })
+        let saved = persistCanonicalData(
+            source.data,
+            aliases: aliases.sorted(),
+            label: label,
+            kind: requireAnimation ? "Animated" : "Album Cover",
+            groupID: groupID,
+            lookupID: lookupID,
+            owner: owner,
+            isAnimated: requireAnimation
+        )
+        guard saved else { return false }
+        let canonicalKey = Self.canonicalFileKey(for: lookupID)
+        for candidate in candidates where candidate.key != canonicalKey {
+            try? fileManager.removeItem(at: pinnedDirectory.appendingPathComponent(candidate.key))
+            removePinnedDerivatives(for: candidate.key)
+            pinnedCatalog.removeValue(forKey: candidate.key)
+        }
+        rebuildPinnedIndexesAndSave()
+        return true
+    }
+
+    private func image(
+        forPinnedLookupIDs lookupIDs: [String],
+        maxPixelSize: Int?
+    ) async -> UIImage? {
+        let keys = lookupIDs.flatMap { pinnedLookupKeys[$0] ?? [] }
+        return await image(
+            forPinnedKeys: keys,
+            cacheNamespace: lookupIDs.first ?? "pinned",
+            maxPixelSize: maxPixelSize
+        )
+    }
+
+    private func image(
+        forPinnedKeys keys: [String],
+        cacheNamespace: String,
+        maxPixelSize: Int?
+    ) async -> UIImage? {
+        guard !keys.isEmpty else { return nil }
+        applyMemoryPolicy(rawMode: LiveArtworkSettings.rawAnimatedArtworkEnabled)
+        let disableRAMOptimizations = DeveloperExperiments.disableRAMOptimizations
+        let cappedMaxPixelSize = RuntimeCompatibility.cappedArtworkSize(maxPixelSize)
+        let decodeMaxPixelSize = disableRAMOptimizations ? nil : cappedMaxPixelSize
+        let cacheKey = "pinned-\(Crypto.md5Hex(cacheNamespace))-\(decodeMaxPixelSize.map(String.init) ?? "raw")"
+
+        if let cached = memory.object(forKey: cacheKey as NSString) {
+            return cached
+        }
+        if let existing = inFlight[cacheKey] {
+            return await existing.value
+        }
+
+        let task = Task<UIImage?, Never> { [pinnedDirectory, prepareImages] in
+            let fallbackPixelCap = disableRAMOptimizations
+                ? nil
+                : RuntimeCompatibility.cappedArtworkSize(await Self.currentScreenPixelCap())
+            for key in keys.reversed() {
+                let url = pinnedDirectory.appendingPathComponent(key)
+                guard let data = try? Data(contentsOf: url) else { continue }
+                let pixelCap = disableRAMOptimizations ? nil : (decodeMaxPixelSize ?? fallbackPixelCap)
+                if let image = await Self.decodeStillImage(from: data, maxPixelSize: pixelCap, prepare: prepareImages) {
+                    return image
+                }
+            }
+            return nil
+        }
+        inFlight[cacheKey] = task
+        let image = await task.value
+        inFlight[cacheKey] = nil
+        if let image {
+            memory.setObject(image, forKey: cacheKey as NSString, cost: image.cost)
         }
         return image
     }
@@ -276,12 +621,17 @@ actor ArtworkLoader {
         // Never persist demo-server artwork to disk.
         guard !DemoServers.isDemo(url) else { return }
         let key = Self.cacheKey(for: url)
-        let fileURL = directory.appendingPathComponent(key)
+        let identityKey = Self.cacheKey(for: url, sizeAgnostic: true)
+        let fileURL = directory.appendingPathComponent(identityKey)
         guard !fileManager.fileExists(atPath: fileURL.path),
-              !fileManager.fileExists(atPath: pinnedDirectory.appendingPathComponent(key).path),
+              pinnedAliasKeys[key] == nil,
               let (data, response) = try? await session.data(from: url),
               Self.isImageResponse(response, data: data) else { return }
         try? data.write(to: fileURL, options: .atomic)
+        if key != identityKey {
+            try? fileManager.removeItem(at: directory.appendingPathComponent(key))
+        }
+        pruneStaticCacheIfNeeded()
     }
 
     // MARK: - Live (animated) artwork
@@ -290,6 +640,35 @@ actor ArtworkLoader {
         guard LiveArtworkSettings.supportsAnimatedArtwork else { return nil }
         // Album headers do not need lock-screen video.
         return await liveArtwork(for: url, includeVideo: false)?.animatedImage
+    }
+
+    /// Loads animation persisted beside a downloaded album without needing a
+    /// live server URL. Static artwork intentionally does not qualify.
+    func animatedImage(forCoverArtID id: String?, serverID: String?) async -> UIImage? {
+        guard LiveArtworkSettings.supportsAnimatedArtwork,
+              LiveArtworkSettings.shouldShowAnimatedArtwork,
+              let id = id?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !id.isEmpty else { return nil }
+
+        let scoped = Self.liveArtworkLookupID(id, serverID: serverID)
+        let legacy = Self.liveArtworkLookupID(id)
+        let lookupIDs = scoped == legacy ? [legacy] : [scoped, legacy]
+        let keys = lookupIDs.flatMap { pinnedLookupKeys[$0] ?? [] }
+        guard !keys.isEmpty else { return nil }
+
+        for key in keys.reversed() {
+            let url = pinnedDirectory.appendingPathComponent(key)
+            guard let data = try? Data(contentsOf: url),
+                  let descriptor = Self.imageDescriptor(at: url),
+                  descriptor.frameCount > 1,
+                  let sequence = await Self.decodeAnimation(
+                    from: data,
+                    maxPixelSize: LiveArtworkSettings.maxPixelSize,
+                    maxFrames: LiveArtworkSettings.maxFrameCount
+                  ) else { continue }
+            return sequence.image
+        }
+        return nil
     }
 
     func liveArtwork(
@@ -326,6 +705,7 @@ actor ArtworkLoader {
         liveInFlight[requestKey] = task
         let asset = await task.value
         liveInFlight[requestKey] = nil
+        pruneLiveCacheIfNeeded()
         AppLogger.shared.log(
             "Live artwork load finished; key=\(String(requestKey.prefix(12))); success=\(asset != nil); frames=\(asset?.animatedImage.images?.count ?? 0); videoReady=\(asset?.videoURL != nil); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
             category: .artwork,
@@ -342,21 +722,23 @@ actor ArtworkLoader {
         let rawMode = LiveArtworkSettings.rawAnimatedArtworkEnabled
         applyMemoryPolicy(rawMode: rawMode)
         let key = Self.cacheKey(for: url)
+        let identityKey = Self.cacheKey(for: url, sizeAgnostic: true)
+        let pinnedKey = pinnedAliasKeys[key] ?? pinnedAliasKeys[identityKey]
+        let sourceKey = pinnedKey ?? key
         let maxPixelSize = LiveArtworkSettings.maxPixelSize
         let maxFrames = LiveArtworkSettings.maxFrameCount
         // Cache identity includes frame/resolution settings.
         let variantKey = rawMode
-            ? "\(key)-raw"
-            : "\(key)-v\(Self.liveDecodePolicyVersion)-r\(maxPixelSize)-f\(maxFrames)"
+            ? "\(sourceKey)-raw"
+            : "\(sourceKey)-v\(Self.liveDecodePolicyVersion)-r\(maxPixelSize)-f\(maxFrames)"
         let wantVideo = includeVideo && LiveArtworkSettings.prepareVideoAsset
         let keepInRAM = LiveArtworkSettings.keepDecodedFramesInRAM
 
-        let pinnedURL = pinnedDirectory.appendingPathComponent(key)
-        let identityURL = pinnedDirectory.appendingPathComponent(Self.cacheKey(for: url, sizeAgnostic: true))
-        // Downloaded covers use durable live-artwork storage.
-        let isPinned = fileManager.fileExists(atPath: pinnedURL.path)
-            || fileManager.fileExists(atPath: identityURL.path)
-        let liveDir = isPinned ? pinnedLiveDirectory : liveArtworkDirectory
+        let pinnedURL = pinnedKey.map { pinnedDirectory.appendingPathComponent($0) }
+        // Canonical downloaded source stays durable. Every frame/video artifact
+        // stays reconstructible under Caches/live-artwork.
+        let isPinned = pinnedURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
+        let liveDir = liveArtworkDirectory
 
         if keepInRAM, let box = liveMemory.object(forKey: variantKey as NSString) {
             AppLogger.shared.log(
@@ -371,23 +753,17 @@ actor ArtworkLoader {
         // Durable cache first, then transient. Raw mode skips optimized frames.
         var sequence: AnimationSequence?
         if !rawMode {
-            sequence = await Self.loadOptimizedFrameCache(variantKey: variantKey, directory: pinnedLiveDirectory)
-            if sequence == nil {
-                sequence = await Self.loadOptimizedFrameCache(variantKey: variantKey, directory: liveArtworkDirectory)
-            }
+            sequence = await Self.loadOptimizedFrameCache(variantKey: variantKey, directory: liveDir)
         }
         if sequence == nil {
-            let fileURL = directory.appendingPathComponent(key)
+            let fileURL = liveArtworkDirectory.appendingPathComponent(key + ".source")
             let data: Data?
-            if let d = try? Data(contentsOf: pinnedURL) {
+            if let pinnedURL, let d = try? Data(contentsOf: pinnedURL) {
                 AppLogger.shared.log("Live artwork bytes loaded from offline cache; bytes=\(d.count)", category: .artwork)
-                data = d
-            } else if let d = try? Data(contentsOf: identityURL) {
-                // Prefer the downloaded original so offline live artwork stays animated.
-                AppLogger.shared.log("Live artwork bytes loaded from offline identity cache; bytes=\(d.count)", category: .artwork)
                 data = d
             } else if let d = try? Data(contentsOf: fileURL) {
                 AppLogger.shared.log("Live artwork bytes loaded from disk cache; bytes=\(d.count)", category: .artwork)
+                try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: fileURL.path)
                 data = d
             } else {
                 data = await Self.downloadLiveArtworkBytes(from: url, using: session)
@@ -397,7 +773,7 @@ actor ArtworkLoader {
             }
             guard let data else { return nil }
             sequence = await Self.decodeAnimation(from: data, maxPixelSize: maxPixelSize, maxFrames: maxFrames)
-            if sequence != nil {
+            if sequence != nil, !isPinned {
                 try? data.write(to: fileURL, options: .atomic)
             } else {
                 try? fileManager.removeItem(at: fileURL)
@@ -405,7 +781,7 @@ actor ArtworkLoader {
             if let sequence, !rawMode {
                 let dir = liveDir
                 DeveloperExperiments.launch(priority: .utility) {
-                    await Self.writeOptimizedFrameCache(sequence, key: key, variantKey: variantKey, directory: dir)
+                    await Self.writeOptimizedFrameCache(sequence, key: sourceKey, variantKey: variantKey, directory: dir)
                 }
             }
         }
@@ -504,6 +880,14 @@ actor ArtworkLoader {
         var sourceSizeLabel: String {
             sourceWidth > 0 && sourceHeight > 0 ? "\(sourceWidth)x\(sourceHeight)" : "unknown"
         }
+    }
+
+    private struct ImageDescriptor {
+        let width: Int
+        let height: Int
+        let frameCount: Int
+        let bytes: Int
+        var pixelCount: Int64 { Int64(width) * Int64(height) }
     }
 
     private final class LiveAssetBox {
@@ -841,10 +1225,13 @@ actor ArtworkLoader {
             try fm.moveItem(at: tmp, to: dir)
             // Other variants of this artwork are stale now.
             if let entries = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
-                for entry in entries where entry.lastPathComponent.hasPrefix(key)
-                    && entry.lastPathComponent.hasSuffix(".frames")
-                    && entry.lastPathComponent != variantKey + ".frames" {
-                    try? fm.removeItem(at: entry)
+                for entry in entries where entry.lastPathComponent.hasPrefix(key + "-") {
+                    let name = entry.lastPathComponent
+                    let isDerived = name.hasSuffix(".frames") || name.hasSuffix(".mov")
+                    let isCurrent = name == variantKey + ".frames"
+                    if isDerived && !isCurrent {
+                        try? fm.removeItem(at: entry)
+                    }
                 }
             }
         } catch {
@@ -1098,15 +1485,97 @@ actor ArtworkLoader {
         }
     }
 
+    // MARK: - Bounded disposable caches
+
+    private var staticCacheLimitBytes: Int {
+        let megabytes: Int
+        switch PerformanceMode.reduceImageQuality ? "light" : (UserDefaults.standard.string(forKey: "cacheMode") ?? "balanced") {
+        case "light": megabytes = 100
+        case "aggressive": megabytes = 384
+        default: megabytes = 200
+        }
+        return megabytes * 1_048_576
+    }
+
+    private var liveCacheLimitBytes: Int {
+        let megabytes: Int
+        switch PerformanceMode.reduceImageQuality ? "light" : (UserDefaults.standard.string(forKey: "cacheMode") ?? "balanced") {
+        case "light": megabytes = 160
+        case "aggressive": megabytes = 512
+        default: megabytes = 320
+        }
+        return megabytes * 1_048_576
+    }
+
+    private func pruneStaticCacheIfNeeded(force: Bool = false) {
+        let now = Date()
+        guard force || now.timeIntervalSince(lastStaticCachePrune) >= Self.staticCachePruneInterval else { return }
+        lastStaticCachePrune = now
+        Self.pruneFlatDirectory(directory, limitBytes: staticCacheLimitBytes)
+    }
+
+    private func pruneLiveCacheIfNeeded(force: Bool = false) {
+        let now = Date()
+        guard force || now.timeIntervalSince(lastLiveCachePrune) >= Self.liveCachePruneInterval else { return }
+        lastLiveCachePrune = now
+        Self.pruneArtifactDirectory(liveArtworkDirectory, limitBytes: liveCacheLimitBytes)
+    }
+
+    private nonisolated static func pruneFlatDirectory(_ directory: URL, limitBytes: Int) {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let files = entries.compactMap { url -> (URL, Int, Date)? in
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]),
+                  values.isRegularFile == true else { return nil }
+            return (url, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
+        }
+        var total = files.reduce(0) { $0 + $1.1 }
+        guard total > limitBytes else { return }
+        for file in files.sorted(by: { $0.2 < $1.2 }) {
+            guard total > limitBytes else { break }
+            try? FileManager.default.removeItem(at: file.0)
+            total -= file.1
+        }
+    }
+
+    private nonisolated static func pruneArtifactDirectory(_ directory: URL, limitBytes: Int) {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let artifacts = entries.map { url -> (URL, Int, Date) in
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+            return (url, directorySize(at: url), values?.contentModificationDate ?? .distantPast)
+        }
+        var total = artifacts.reduce(0) { $0 + $1.1 }
+        guard total > limitBytes else { return }
+        for artifact in artifacts.sorted(by: { $0.2 < $1.2 }) {
+            guard total > limitBytes else { break }
+            try? FileManager.default.removeItem(at: artifact.0)
+            total -= artifact.1
+        }
+    }
+
     func clearCache() {
         memory.removeAllObjects()
-        liveMemory.removeAllObjects()
         try? fileManager.removeItem(at: directory)
-        try? fileManager.removeItem(at: liveArtworkDirectory)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        lastStaticCachePrune = .now
+    }
+
+    /// Clears only disposable animated sources and derived frame/video assets.
+    /// Downloaded animated sources stay in OfflineArtwork.
+    func clearLiveCache() {
+        liveMemory.removeAllObjects()
+        try? fileManager.removeItem(at: liveArtworkDirectory)
         if LiveArtworkSettings.supportsAnimatedArtwork {
             try? fileManager.createDirectory(at: liveArtworkDirectory, withIntermediateDirectories: true)
         }
+        lastLiveCachePrune = .now
     }
 
     // MARK: - Offline (pinned) artwork
@@ -1117,109 +1586,301 @@ actor ArtworkLoader {
         label: String? = nil,
         kind: String = "Artwork",
         groupID: String? = nil,
-        requireAnimation: Bool = false
+        requireAnimation: Bool = false,
+        lookupID: String? = nil,
+        owner: String? = nil
     ) async -> Bool {
         guard let url else { return false }
         // Demo-server artwork is never pinned for offline use.
         guard !DemoServers.isDemo(url) else { return false }
-        let key = Self.cacheKey(for: url)
-        let pinnedURL = pinnedDirectory.appendingPathComponent(key)
-        if fileManager.fileExists(atPath: pinnedURL.path) {
-            guard !requireAnimation || Self.isAnimatedImage(at: pinnedURL) else { return false }
+        let rawKey = Self.cacheKey(for: url)
+        let identityKey = Self.cacheKey(for: url, sizeAgnostic: true)
+        let resolvedLookupID = lookupID ?? "url:\(identityKey)"
+        let resolvedOwner = owner ?? "manual:\(resolvedLookupID)"
+        let canonicalKey = Self.canonicalFileKey(for: resolvedLookupID)
+        let canonicalURL = pinnedDirectory.appendingPathComponent(canonicalKey)
+
+        if fileManager.fileExists(atPath: canonicalURL.path) {
+            guard !requireAnimation || Self.isAnimatedImage(at: canonicalURL) else { return false }
             recordPinnedArtwork(
-                id: key,
+                id: canonicalKey,
                 label: label,
                 kind: kind,
                 groupID: groupID,
-                isAnimated: Self.isAnimatedImage(at: pinnedURL)
+                isAnimated: Self.isAnimatedImage(at: canonicalURL),
+                lookupID: resolvedLookupID,
+                aliases: [rawKey, identityKey],
+                owner: resolvedOwner
             )
+            let aliases = (pinnedCatalog[canonicalKey]?.aliases ?? []) + [rawKey, identityKey]
+            removeTransientAliases(aliases)
+            if requireAnimation { removeTransientLiveSources(aliases) }
             return true
         }
 
-        let cacheURL = directory.appendingPathComponent(key)
-        if let data = try? Data(contentsOf: cacheURL), UIImage(data: data) != nil {
-            guard !requireAnimation || Self.isAnimatedImageData(data) else { return false }
-            try? data.write(to: pinnedURL, options: .atomic)
-            let saved = fileManager.fileExists(atPath: pinnedURL.path)
-            if saved {
-                recordPinnedArtwork(
-                    id: key,
-                    label: label,
-                    kind: kind,
-                    groupID: groupID,
-                    isAnimated: Self.isAnimatedImageData(data)
-                )
-            }
-            return saved
+        let data: Data?
+        let aliases = [rawKey, identityKey]
+        if requireAnimation,
+           let cached = firstValidData(at: aliases.map { liveArtworkDirectory.appendingPathComponent($0 + ".source") }),
+           Self.isAnimatedImageData(cached) {
+            data = cached
+        } else if let cached = firstValidData(at: aliases.map { directory.appendingPathComponent($0) }) {
+            data = cached
+        } else if let downloaded = try? await session.data(from: url),
+                  Self.isImageResponse(downloaded.1, data: downloaded.0),
+                  UIImage(data: downloaded.0) != nil {
+            data = downloaded.0
+        } else {
+            data = nil
         }
-        guard let (data, response) = try? await session.data(from: url),
-              Self.isImageResponse(response, data: data),
-              UIImage(data: data) != nil,
-              !requireAnimation || Self.isAnimatedImageData(data) else { return false }
-        try? data.write(to: cacheURL, options: .atomic)
-        try? data.write(to: pinnedURL, options: .atomic)
-        let saved = fileManager.fileExists(atPath: pinnedURL.path)
-        if saved {
-            recordPinnedArtwork(
-                id: key,
-                label: label,
-                kind: kind,
-                groupID: groupID,
-                isAnimated: Self.isAnimatedImageData(data)
-            )
-        }
-        return saved
+        guard let data, !requireAnimation || Self.isAnimatedImageData(data) else { return false }
+        return persistCanonicalData(
+            data,
+            aliases: aliases,
+            label: label,
+            kind: kind,
+            groupID: groupID,
+            lookupID: resolvedLookupID,
+            owner: resolvedOwner,
+            isAnimated: Self.isAnimatedImageData(data)
+        )
     }
 
     @discardableResult
-    func persistArtistImage(id: String, from url: URL, label: String? = nil) async -> Bool {
+    func persistArtistImage(
+        id: String,
+        from url: URL,
+        label: String? = nil,
+        serverID: String? = nil,
+        owner: String? = nil
+    ) async -> Bool {
         guard !DemoServers.isDemo(url) else { return false }
-        let idKey = Crypto.md5Hex("artist:" + id)
-        let pinnedIDURL = pinnedDirectory.appendingPathComponent(idKey)
-        guard !fileManager.fileExists(atPath: pinnedIDURL.path) else {
-            recordPinnedArtwork(id: idKey, label: label, kind: "Artist Photo", groupID: "artist:\(id)")
+        let lookupID = Self.artistLookupID(id, serverID: serverID)
+        let canonicalKey = Self.canonicalFileKey(for: lookupID)
+        let pinnedIDURL = pinnedDirectory.appendingPathComponent(canonicalKey)
+        let urlKey = Self.cacheKey(for: url)
+        let identityKey = Self.cacheKey(for: url, sizeAgnostic: true)
+        let retainedBy = owner ?? "manual:\(lookupID)"
+        if fileManager.fileExists(atPath: pinnedIDURL.path) {
+            recordPinnedArtwork(
+                id: canonicalKey,
+                label: label,
+                kind: "Artist Photo",
+                groupID: "artist:\(id)",
+                lookupID: lookupID,
+                aliases: [urlKey, identityKey],
+                owner: retainedBy
+            )
+            removeTransientAliases((pinnedCatalog[canonicalKey]?.aliases ?? []) + [urlKey, identityKey])
             return true
         }
         guard let (data, response) = try? await session.data(from: url),
               Self.isImageResponse(response, data: data),
               UIImage(data: data) != nil else { return false }
-        try? data.write(to: pinnedIDURL, options: .atomic)
-        let urlKey = Self.cacheKey(for: url)
-        try? data.write(to: pinnedDirectory.appendingPathComponent(urlKey), options: .atomic)
-        try? data.write(to: directory.appendingPathComponent(urlKey), options: .atomic)
-        let saved = fileManager.fileExists(atPath: pinnedIDURL.path)
-        if saved {
-            recordPinnedArtwork(id: idKey, label: label, kind: "Artist Photo", groupID: "artist:\(id)")
-            recordPinnedArtwork(id: urlKey, label: label, kind: "Artist Photo", groupID: "artist:\(id)")
-        }
-        return saved
+        return persistCanonicalData(
+            data,
+            aliases: [urlKey, identityKey],
+            label: label,
+            kind: "Artist Photo",
+            groupID: "artist:\(id)",
+            lookupID: lookupID,
+            owner: retainedBy,
+            isAnimated: Self.isAnimatedImageData(data)
+        )
     }
 
-    func pinnedArtistImage(id: String) -> UIImage? {
-        let idKey = Crypto.md5Hex("artist:" + id)
-        let url = pinnedDirectory.appendingPathComponent(idKey)
+    func pinnedArtistImage(id: String, serverID: String? = nil) -> UIImage? {
+        let lookupIDs = Self.artistLookupIDs(id, serverID: serverID)
+        let key = lookupIDs.compactMap { pinnedLookupKeys[$0]?.last }.first ?? Crypto.md5Hex("artist:" + id)
+        let url = pinnedDirectory.appendingPathComponent(key)
         guard let data = try? Data(contentsOf: url) else { return nil }
         return UIImage(data: data)
     }
 
     func unpin(_ urls: [URL]) {
-        for url in urls {
-            let key = Self.cacheKey(for: url)
-            try? fileManager.removeItem(at: pinnedDirectory.appendingPathComponent(key))
-            pinnedCatalog.removeValue(forKey: key)
-        }
-        savePinnedCatalog()
+        let aliases = urls.flatMap { [Self.cacheKey(for: $0), Self.cacheKey(for: $0, sizeAgnostic: true)] }
+        let keys = Set(aliases.compactMap { pinnedAliasKeys[$0] } + aliases)
+        removePinnedRecords(keys)
     }
 
     func unpinArtist(id: String) {
-        let idKey = Crypto.md5Hex("artist:" + id)
-        try? fileManager.removeItem(at: pinnedDirectory.appendingPathComponent(idKey))
-        pinnedCatalog.removeValue(forKey: idKey)
-        savePinnedCatalog()
+        let keys = Set(pinnedLookupKeys[Self.artistLookupID(id)] ?? [])
+            .union([Crypto.md5Hex("artist:" + id)])
+        removePinnedRecords(keys)
+    }
+
+    /// Releases one durable owner without guessing URL variants. A canonical
+    /// source and its pinned animation derivatives are removed only after its
+    /// final owner disappears.
+    func removeOwnership(lookupID: String, owner: String) {
+        let keys = pinnedLookupKeys[lookupID] ?? []
+        var removals: Set<String> = []
+        for key in keys {
+            guard var metadata = pinnedCatalog[key] else { continue }
+            var owners = Set(metadata.owners ?? [])
+            guard owners.remove(owner) != nil else { continue }
+            if owners.isEmpty {
+                removals.insert(key)
+            } else {
+                metadata = PinnedArtworkMetadata(
+                    displayName: metadata.displayName,
+                    kind: metadata.kind,
+                    savedAt: metadata.savedAt,
+                    groupID: metadata.groupID,
+                    isAnimated: metadata.isAnimated,
+                    lookupID: metadata.lookupID,
+                    aliases: metadata.aliases,
+                    owners: owners.sorted()
+                )
+                pinnedCatalog[key] = metadata
+            }
+        }
+        if !removals.isEmpty {
+            removePinnedRecords(removals, save: false)
+        }
+        rebuildPinnedIndexesAndSave()
+    }
+
+    func removeOwnership(lookupIDs: [String], owner: String) {
+        for lookupID in Set(lookupIDs) {
+            removeOwnership(lookupID: lookupID, owner: owner)
+        }
+    }
+
+    @discardableResult
+    func retainOwnership(lookupID: String, owner: String) -> Bool {
+        guard let key = pinnedLookupKeys[lookupID]?.last,
+              let metadata = pinnedCatalog[key],
+              fileManager.fileExists(atPath: pinnedDirectory.appendingPathComponent(key).path)
+        else { return false }
+        recordPinnedArtwork(
+            id: key,
+            label: metadata.displayName,
+            kind: metadata.kind,
+            groupID: metadata.groupID,
+            isAnimated: metadata.isAnimated == true,
+            lookupID: lookupID,
+            aliases: metadata.aliases ?? [],
+            owner: owner
+        )
+        return true
     }
 
     func pinnedArtworkSize() -> Int {
         Self.directorySize(at: pinnedDirectory)
+    }
+
+    /// Catalog stays private; it contains metadata only. Artwork bytes move to
+    /// the selected location after every downloader has stopped.
+    func migrateStorage(to location: DownloadStorageLocation, method: DownloadStorageTransferMethod) throws {
+        let destination = location.artworkDirectory()
+        try DownloadStorageTransfer.transfer(from: pinnedDirectory, to: destination, method: method)
+        pinnedDirectory = destination
+        pinnedLiveDirectory = pinnedDirectory.appendingPathComponent("live", isDirectory: true)
+        memory.removeAllObjects()
+        liveMemory.removeAllObjects()
+    }
+
+    func hasLocalArtworkLibrary(serverID: String?) -> Bool {
+        let owner = "local-artwork-library:\(serverID ?? "legacy")"
+        return pinnedCatalog.values.contains { $0.owners?.contains(owner) == true }
+    }
+
+    /// Converges cataloged URL/size variants into one canonical file per lookup
+    /// without a network request. Copy succeeds and decodes before old files
+    /// are removed, so interruption leaves the previous source readable.
+    private func migrateLegacyPinnedArtworkIfNeeded() {
+        var groups: [String: [(key: String, metadata: PinnedArtworkMetadata)]] = [:]
+        for (key, metadata) in pinnedCatalog {
+            guard let lookupID = metadata.lookupID,
+                  !lookupID.isEmpty,
+                  !key.hasPrefix("live/") else { continue }
+            let animated = Self.imageDescriptor(at: pinnedDirectory.appendingPathComponent(key))?.frameCount ?? 0 > 1
+                || metadata.isAnimated == true
+            let typedLookupID: String
+            if animated {
+                typedLookupID = lookupID.hasSuffix(":animated") ? lookupID : "\(lookupID):animated"
+            } else {
+                typedLookupID = lookupID.hasSuffix(":animated")
+                    ? String(lookupID.dropLast(":animated".count))
+                    : lookupID
+            }
+            groups[typedLookupID, default: []].append((key, metadata))
+        }
+
+        for (lookupID, entries) in groups {
+            let targetKey = Self.canonicalFileKey(for: lookupID)
+            let targetURL = pinnedDirectory.appendingPathComponent(targetKey)
+            let wantsAnimation = lookupID.hasSuffix(":animated")
+            let candidates = entries.compactMap { entry -> (key: String, metadata: PinnedArtworkMetadata, descriptor: ImageDescriptor)? in
+                let url = pinnedDirectory.appendingPathComponent(entry.key)
+                guard let descriptor = Self.imageDescriptor(at: url),
+                      descriptor.frameCount > 0,
+                      (descriptor.frameCount > 1) == wantsAnimation else { return nil }
+                return (entry.key, entry.metadata, descriptor)
+            }
+            guard !candidates.isEmpty else { continue }
+
+            let source = candidates.max { lhs, rhs in
+                if lhs.descriptor.pixelCount != rhs.descriptor.pixelCount {
+                    return lhs.descriptor.pixelCount < rhs.descriptor.pixelCount
+                }
+                if lhs.descriptor.frameCount != rhs.descriptor.frameCount {
+                    return lhs.descriptor.frameCount < rhs.descriptor.frameCount
+                }
+                return lhs.descriptor.bytes < rhs.descriptor.bytes
+            }!
+
+            if !fileManager.fileExists(atPath: targetURL.path) {
+                let sourceURL = pinnedDirectory.appendingPathComponent(source.key)
+                let temporary = pinnedDirectory.appendingPathComponent(targetKey + ".migration-\(UUID().uuidString)")
+                do {
+                    try fileManager.copyItem(at: sourceURL, to: temporary)
+                    guard let descriptor = Self.imageDescriptor(at: temporary),
+                          descriptor.frameCount > 0,
+                          (descriptor.frameCount > 1) == wantsAnimation else {
+                        try? fileManager.removeItem(at: temporary)
+                        continue
+                    }
+                    try fileManager.moveItem(at: temporary, to: targetURL)
+                } catch {
+                    try? fileManager.removeItem(at: temporary)
+                    continue
+                }
+            }
+
+            guard fileManager.fileExists(atPath: targetURL.path) else { continue }
+            let current = pinnedCatalog[targetKey]
+            let aliases = Set(entries.flatMap { $0.metadata.aliases ?? [] }).union(entries.map(\.key))
+            let owners = Set(entries.flatMap { $0.metadata.owners ?? [] })
+            let selected = current ?? source.metadata
+            pinnedCatalog[targetKey] = PinnedArtworkMetadata(
+                displayName: selected.displayName,
+                kind: selected.kind,
+                savedAt: selected.savedAt,
+                groupID: selected.groupID,
+                isAnimated: wantsAnimation,
+                lookupID: lookupID,
+                aliases: aliases.sorted(),
+                owners: owners.sorted()
+            )
+            // Persist canonical metadata before removing any legacy file.
+            rebuildPinnedIndexesAndSave()
+            for entry in entries where entry.key != targetKey {
+                try? fileManager.removeItem(at: pinnedDirectory.appendingPathComponent(entry.key))
+                removePinnedDerivatives(for: entry.key)
+                pinnedCatalog.removeValue(forKey: entry.key)
+            }
+        }
+        // Old pinned live entries are derived frame/video artifacts, never
+        // canonical sources. Cache tier now owns all such artifacts.
+        try? fileManager.removeItem(at: pinnedLiveDirectory)
+        rebuildPinnedIndexesAndSave()
+        storedCatalogSchemaVersion = Self.catalogSchemaVersion
+        if let data = try? JSONEncoder().encode(storedCatalogSchemaVersion) {
+            try? data.write(to: pinnedCatalogSchemaURL, options: .atomic)
+        }
+        AppLogger.shared.log("Offline artwork catalog schema migrated", category: .artwork)
     }
 
     func downloadedArtworkItems() -> [DownloadedArtworkItem] {
@@ -1301,7 +1962,7 @@ actor ArtworkLoader {
                 Crypto.md5Hex(artworkGroupIdentity(relativePath: key, metadata: metadata)) != token
             }
             removeEmptyLiveArtworkDirectories()
-            savePinnedCatalog()
+            rebuildPinnedIndexesAndSave()
             memory.removeAllObjects()
             liveMemory.removeAllObjects()
             AppLogger.shared.log("Downloaded artwork group removed: \(token); files=\(removed)", category: .artwork)
@@ -1318,7 +1979,7 @@ actor ArtworkLoader {
             }
             try? fileManager.removeItem(at: pinnedDirectory.appendingPathComponent(key))
             pinnedCatalog.removeValue(forKey: key)
-            savePinnedCatalog()
+            rebuildPinnedIndexesAndSave()
             memory.removeAllObjects()
             liveMemory.removeAllObjects()
             AppLogger.shared.log("Downloaded animated artwork removed: \(key)", category: .artwork)
@@ -1330,7 +1991,7 @@ actor ArtworkLoader {
         guard target.path.hasPrefix(rootPath) else { return }
         try? fileManager.removeItem(at: target)
         pinnedCatalog.removeValue(forKey: id)
-        savePinnedCatalog()
+        rebuildPinnedIndexesAndSave()
         memory.removeAllObjects()
         liveMemory.removeAllObjects()
         AppLogger.shared.log("Downloaded artwork removed: \(id)", category: .artwork)
@@ -1424,6 +2085,18 @@ actor ArtworkLoader {
         return CGImageSourceGetCount(source)
     }
 
+    private nonisolated static func imageDescriptor(at url: URL) -> ImageDescriptor? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let frameCount = CGImageSourceGetCount(source)
+        guard frameCount > 0 else { return nil }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let width = intProperty(properties?[kCGImagePropertyPixelWidth])
+        let height = intProperty(properties?[kCGImagePropertyPixelHeight])
+        let bytes = fileSize(at: url)
+        guard width > 0, height > 0, bytes > 0 else { return nil }
+        return ImageDescriptor(width: width, height: height, frameCount: frameCount, bytes: bytes)
+    }
+
     private nonisolated static func compressedPreviewData(at url: URL) -> Data? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         let options: [CFString: Any] = [
@@ -1448,11 +2121,12 @@ actor ArtworkLoader {
         liveMemory.removeAllObjects()
         try? fileManager.removeItem(at: pinnedDirectory)
         pinnedCatalog.removeAll()
+        pinnedLookupKeys.removeAll()
+        pinnedAliasKeys.removeAll()
         try? fileManager.removeItem(at: pinnedCatalogURL)
+        try? fileManager.removeItem(at: pinnedCatalogSchemaURL)
+        storedCatalogSchemaVersion = 0
         try? fileManager.createDirectory(at: pinnedDirectory, withIntermediateDirectories: true)
-        if LiveArtworkSettings.supportsAnimatedArtwork {
-            try? fileManager.createDirectory(at: pinnedLiveDirectory, withIntermediateDirectories: true)
-        }
     }
 
     private func recordPinnedArtwork(
@@ -1460,18 +2134,172 @@ actor ArtworkLoader {
         label: String?,
         kind: String,
         groupID: String? = nil,
-        isAnimated: Bool = false
+        isAnimated: Bool = false,
+        lookupID: String? = nil,
+        aliases: [String] = [],
+        owner: String? = nil
     ) {
-        guard let label = label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty else { return }
         let previous = pinnedCatalog[id]
+        let displayName = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mergedAliases = Set((previous?.aliases ?? []) + aliases)
+        var mergedOwners = Set(previous?.owners ?? [])
+        if let owner, !owner.isEmpty { mergedOwners.insert(owner) }
         pinnedCatalog[id] = PinnedArtworkMetadata(
-            displayName: label,
+            displayName: (displayName?.isEmpty == false ? displayName! : previous?.displayName) ?? kind,
             kind: isAnimated ? "Animated" : kind,
             savedAt: .now,
             groupID: groupID ?? previous?.groupID,
-            isAnimated: isAnimated || previous?.isAnimated == true
+            isAnimated: isAnimated || previous?.isAnimated == true,
+            lookupID: lookupID ?? previous?.lookupID,
+            aliases: mergedAliases.sorted(),
+            owners: mergedOwners.sorted()
         )
+        rebuildPinnedIndexesAndSave()
+    }
+
+    private func persistCanonicalData(
+        _ data: Data,
+        aliases: [String],
+        label: String?,
+        kind: String,
+        groupID: String?,
+        lookupID: String,
+        owner: String,
+        isAnimated: Bool
+    ) -> Bool {
+        guard UIImage(data: data) != nil else { return false }
+        let key = Self.canonicalFileKey(for: lookupID)
+        let target = pinnedDirectory.appendingPathComponent(key)
+        if !fileManager.fileExists(atPath: target.path) {
+            let temporary = pinnedDirectory.appendingPathComponent(key + ".tmp-\(UUID().uuidString)")
+            do {
+                try data.write(to: temporary, options: .atomic)
+                guard Self.imageFrameCount(at: temporary) > 0 else {
+                    try? fileManager.removeItem(at: temporary)
+                    return false
+                }
+                try fileManager.moveItem(at: temporary, to: target)
+            } catch {
+                try? fileManager.removeItem(at: temporary)
+                return false
+            }
+        }
+        guard fileManager.fileExists(atPath: target.path) else { return false }
+        recordPinnedArtwork(
+            id: key,
+            label: label,
+            kind: kind,
+            groupID: groupID,
+            isAnimated: isAnimated,
+            lookupID: lookupID,
+            aliases: aliases,
+            owner: owner
+        )
+        removeTransientAliases(aliases)
+        if isAnimated { removeTransientLiveSources(aliases) }
+        return true
+    }
+
+    private func firstValidData(at urls: [URL]) -> Data? {
+        for url in urls {
+            if let data = try? Data(contentsOf: url), UIImage(data: data) != nil {
+                return data
+            }
+        }
+        return nil
+    }
+
+    private func removeTransientAliases(_ aliases: [String]) {
+        for alias in Set(aliases) {
+            try? fileManager.removeItem(at: directory.appendingPathComponent(alias))
+        }
+    }
+
+    private func removeTransientLiveSources(_ aliases: [String]) {
+        for alias in Set(aliases) {
+            try? fileManager.removeItem(at: liveArtworkDirectory.appendingPathComponent(alias + ".source"))
+        }
+    }
+
+    private func removePinnedRecords(_ keys: Set<String>, save: Bool = true) {
+        for key in keys {
+            let url = pinnedDirectory.appendingPathComponent(key)
+            try? fileManager.removeItem(at: url)
+            removePinnedDerivatives(for: key)
+            pinnedCatalog.removeValue(forKey: key)
+        }
+        removeEmptyLiveArtworkDirectories()
+        if save { rebuildPinnedIndexesAndSave() }
+    }
+
+    private func removePinnedDerivatives(for key: String) {
+        try? fileManager.removeItem(at: pinnedLiveDirectory.appendingPathComponent(key + ".frames"))
+        if let entries = try? fileManager.contentsOfDirectory(at: pinnedLiveDirectory, includingPropertiesForKeys: nil) {
+            for entry in entries where entry.lastPathComponent.hasPrefix(key + "-") {
+                try? fileManager.removeItem(at: entry)
+            }
+        }
+    }
+
+    private func rebuildPinnedIndexesAndSave() {
+        pinnedLookupKeys = Self.lookupIndex(for: pinnedCatalog)
+        pinnedAliasKeys = Self.aliasIndex(for: pinnedCatalog)
         savePinnedCatalog()
+    }
+
+    nonisolated static func coverArtLookupID(_ id: String, serverID: String? = nil) -> String {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let serverID = serverID?.trimmingCharacters(in: .whitespacesAndNewlines), !serverID.isEmpty else {
+            return "coverArt:\(trimmed)"
+        }
+        return "coverArt:\(serverID):\(trimmed)"
+    }
+
+    nonisolated static func coverArtLookupIDs(_ id: String, serverID: String? = nil) -> [String] {
+        let scoped = coverArtLookupID(id, serverID: serverID)
+        let legacy = coverArtLookupID(id)
+        return scoped == legacy ? [legacy] : [scoped, legacy]
+    }
+
+    nonisolated static func liveArtworkLookupID(_ id: String, serverID: String? = nil) -> String {
+        "\(coverArtLookupID(id, serverID: serverID)):animated"
+    }
+
+    nonisolated static func artistLookupID(_ id: String, serverID: String? = nil) -> String {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let serverID = serverID?.trimmingCharacters(in: .whitespacesAndNewlines), !serverID.isEmpty else {
+            return "artist:\(trimmed)"
+        }
+        return "artist:\(serverID):\(trimmed)"
+    }
+
+    nonisolated static func artistLookupIDs(_ id: String, serverID: String? = nil) -> [String] {
+        let scoped = artistLookupID(id, serverID: serverID)
+        let legacy = artistLookupID(id)
+        return scoped == legacy ? [legacy] : [scoped, legacy]
+    }
+
+    private nonisolated static func canonicalFileKey(for lookupID: String) -> String {
+        Crypto.md5Hex("canonical:\(lookupID)")
+    }
+
+    private nonisolated static func lookupIndex(
+        for catalog: [String: PinnedArtworkMetadata]
+    ) -> [String: [String]] {
+        catalog.reduce(into: [:]) { index, entry in
+            guard let lookupID = entry.value.lookupID else { return }
+            index[lookupID, default: []].append(entry.key)
+        }
+    }
+
+    private nonisolated static func aliasIndex(
+        for catalog: [String: PinnedArtworkMetadata]
+    ) -> [String: String] {
+        catalog.reduce(into: [:]) { index, entry in
+            for alias in entry.value.aliases ?? [] {
+                index[alias] = entry.key
+            }
+        }
     }
 
     private func savePinnedCatalog() {
@@ -1488,6 +2316,10 @@ actor ArtworkLoader {
         return enumerator.compactMap { ($0 as? URL) }
             .compactMap { try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize }
             .reduce(0, +)
+    }
+
+    private nonisolated static func fileSize(at url: URL) -> Int {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
     }
 }
 

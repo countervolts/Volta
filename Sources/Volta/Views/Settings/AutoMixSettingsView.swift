@@ -2,17 +2,8 @@ import SwiftUI
 
 struct AutoMixSettingsView: View {
     @EnvironmentObject private var appState: AppState
-
-    @AppStorage("gaplessPlayback") private var gaplessPlayback = "on"
-    @AppStorage("automixStyle") private var automixStyle = "balanced"
-    @AppStorage("automixMaxBlendSeconds") private var automixMaxBlendSeconds = 10.0
-    @AppStorage("automixSilenceTrim") private var automixSilenceTrim = true
-    @AppStorage("automixTempoMatch") private var automixTempoMatch = true
-    @AppStorage("automixBeatAlign") private var automixBeatAlign = true
-    @AppStorage("automixHarmonic") private var automixHarmonic = true
-    @AppStorage("automixBassSwap") private var automixBassSwap = true
-    @AppStorage("automixSweetSpot") private var automixSweetSpot = true
-    @AppStorage("automixLoudnessMatch") private var automixLoudnessMatch = true
+    @AppStorage("automixStyle") private var automixStyle = AutoMixStyle.balanced.rawValue
+    @AppStorage("automixMinimumEndLeadSeconds") private var minimumEndLead = 8.0
 
     private var audio: AudioPlayer { appState.audioPlayer }
 
@@ -26,97 +17,62 @@ struct AutoMixSettingsView: View {
                         set: { audio.setTransitionMode($0) }
                     )) {
                         ForEach(PlaybackTransitionMode.allCases) { mode in
-                            Text(mode.settingsLabel)
-                                .tag(mode)
-                                .disabled(mode == .automix && gaplessPlayback == "off")
+                            Text(mode.settingsLabel).tag(mode)
                         }
                     } label: {
                         Label(L(.settings_track_transition), systemImage: audio.transitionMode.icon)
                     }
                     .tint(Theme.accent)
                 } header: {
-                    Text("Mode")
+                    Text("Transition")
                 } footer: {
-                    Text("AutoMix requires Gapless Playback set to Weak or On.")
+                    Text("Crossfade uses a fixed overlap. AutoMix analyzes each pair and chooses gapless handoff, silence trim, adaptive fade, beat or phrase mix, or a tight cut.")
                 }
                 .listRowBackground(Theme.secondaryBackground)
 
-                Section {
-                    Picker(selection: $automixStyle) {
-                        Text("Tight").tag("tight")
-                        Text("Balanced").tag("balanced")
-                        Text("Wide").tag("wide")
-                    } label: {
-                        Label("Style", systemImage: "slider.horizontal.3")
-                    }
-                    .tint(Theme.accent)
-                    .onChangeCompat(of: automixStyle) { _, _ in audio.setTransitionMode(audio.transitionMode) }
+                if audio.transitionMode == .automix {
+                    Section {
+                        Picker("AutoMix Style", selection: $automixStyle) {
+                            Text("Tight").tag(AutoMixStyle.tight.rawValue)
+                            Text("Balanced").tag(AutoMixStyle.balanced.rawValue)
+                            Text("Wide").tag(AutoMixStyle.wide.rawValue)
+                        }
+                        .tint(Theme.accent)
+                        .onChangeCompat(of: automixStyle) { _, _ in
+                            audio.setTransitionMode(.automix)
+                        }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        LabeledContent("Max Blend", value: "\(Int(automixMaxBlendSeconds))s")
-                            .foregroundStyle(Theme.primaryText)
-                        Slider(value: $automixMaxBlendSeconds, in: 4...18, step: 1)
-                            .tint(Theme.accent)
-                            .onChangeCompat(of: automixMaxBlendSeconds) { _, _ in
-                                audio.setTransitionMode(audio.transitionMode)
-                            }
+                        VStack(alignment: .leading, spacing: 8) {
+                            LabeledContent(
+                                "Minimum End Lead",
+                                value: "\(Int(minimumEndLead.rounded()))s"
+                            )
+                            Slider(value: $minimumEndLead, in: 4...20, step: 1)
+                                .tint(Theme.accent)
+                        }
+                        .onChangeCompat(of: minimumEndLead) { _, _ in
+                            audio.setTransitionMode(.automix)
+                        }
+                    } footer: {
+                        Text("Minimum End Lead controls how much audible outro should remain when AutoMix tries to start. Style never overrides confidence safety.")
                     }
-
-                    Toggle(isOn: $automixSilenceTrim) {
-                        Label("Silence Trim", systemImage: "scissors")
-                    }
-                    .tint(Theme.accent)
-                    .onChangeCompat(of: automixSilenceTrim) { _, _ in audio.setTransitionMode(audio.transitionMode) }
-
-                    Toggle(isOn: $automixTempoMatch) {
-                        Label("BPM Match", systemImage: "metronome")
-                    }
-                    .tint(Theme.accent)
-                    .onChangeCompat(of: automixTempoMatch) { _, _ in audio.setTransitionMode(audio.transitionMode) }
-
-                    Toggle(isOn: $automixBeatAlign) {
-                        Label("Beat Lock", systemImage: "waveform.path.ecg")
-                    }
-                    .tint(Theme.accent)
-                    .disabled(!automixTempoMatch)
-                    .onChangeCompat(of: automixBeatAlign) { _, _ in audio.setTransitionMode(audio.transitionMode) }
-
-                    Toggle(isOn: $automixHarmonic) {
-                        Label("Harmonic Mixing", systemImage: "pianokeys")
-                    }
-                    .tint(Theme.accent)
-                    .onChangeCompat(of: automixHarmonic) { _, _ in audio.setTransitionMode(audio.transitionMode) }
-
-                    Toggle(isOn: $automixBassSwap) {
-                        Label("Bass Swap", systemImage: "dial.low")
-                    }
-                    .tint(Theme.accent)
-                    .onChangeCompat(of: automixBassSwap) { _, _ in audio.setTransitionMode(audio.transitionMode) }
-
-                    Toggle(isOn: $automixSweetSpot) {
-                        Label("Sweet Spot", systemImage: "scope")
-                    }
-                    .tint(Theme.accent)
-                    .onChangeCompat(of: automixSweetSpot) { _, _ in audio.setTransitionMode(audio.transitionMode) }
-
-                    Toggle(isOn: $automixLoudnessMatch) {
-                        Label("Loudness Match", systemImage: "speaker.wave.2")
-                    }
-                    .tint(Theme.accent)
-                    .onChangeCompat(of: automixLoudnessMatch) { _, _ in audio.setTransitionMode(audio.transitionMode) }
-                } header: {
-                    Text("Mixing")
-                } footer: {
-                    Text("BPM Match bends the outgoing track to the incoming tempo (±6%, pitch preserved). Beat Lock then fires the blend on the downbeat so the two tracks' beats land together, like a DJ. Harmonic Mixing reads each track's musical key (Camelot) and gives compatible pairs a longer blend, clashing pairs a shorter, cleaner handover. Bass Swap rolls the incoming track's low end off and brings it in as it takes over, so the two basslines don't muddy each other (applies when the equalizer is off). Sweet Spot mixes out during a long fading outro and drops in past a sparse intro (capped at 16 seconds) instead of always blending at the track edges; sequential album tracks are handed off near-gaplessly and never DJ-blended. Loudness Match levels a hotter incoming track so the blend doesn't jump in volume.")
+                    .listRowBackground(Theme.secondaryBackground)
                 }
-                .listRowBackground(Theme.secondaryBackground)
 
                 Section {
                     SettingsDetailNavigationLink(.autoMixPreview) {
-                        Label("Preview AutoMix", systemImage: "waveform.badge.magnifyingglass")
+                        Label("Preview & Diagnostics", systemImage: "waveform.badge.magnifyingglass")
                     }
                 } footer: {
-                    Text("Hear and see how two of your tracks blend with the current settings.")
+                    Text("Analyze a real pair with the same cache, normalized models, planner, gain envelopes, and media-time scheduling used during playback.")
+                }
+                .listRowBackground(Theme.secondaryBackground)
+
+                Section {
+                    Label("Analysis stays on this device", systemImage: "lock.shield")
+                        .foregroundStyle(Theme.primaryText)
+                } footer: {
+                    Text("Tempo comes from decoded audio. BPM tags are optional hints. Results are versioned and cached locally; no audio or analysis is uploaded.")
                 }
                 .listRowBackground(Theme.secondaryBackground)
             }

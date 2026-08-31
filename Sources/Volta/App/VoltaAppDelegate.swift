@@ -9,6 +9,7 @@ final class VoltaAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        CrashReportingService.shared.startIfEnabled()
         CrashHangReporter.shared.start()
         return true
     }

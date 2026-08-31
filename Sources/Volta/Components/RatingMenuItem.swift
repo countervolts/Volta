@@ -55,6 +55,7 @@ final class RatingStore: ObservableObject {
 enum RatingItemKind: String {
     case song
     case album
+    case playlist
 }
 
 /// A single menu item that keeps the old favourite action available, or swaps it

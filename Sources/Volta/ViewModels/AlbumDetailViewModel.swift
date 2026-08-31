@@ -67,32 +67,26 @@ final class AlbumDetailViewModel: ObservableObject {
             relatedAlbums = await artistAlbums
         }
 
-        let sortTracks: ([Song]) -> [Song] = { list in
-            list.sorted {
-                let d0 = $0.discNumber ?? 1, d1 = $1.discNumber ?? 1
-                if d0 != d1 { return d0 < d1 }
-                return ($0.track ?? 0) < ($1.track ?? 0)
-            }
-        }
-
         if let loaded = loadedAlbum, !(loaded.song ?? []).isEmpty {
             album = loaded
-            songs = sortTracks(loaded.song ?? [])
+            songs = Self.sortedTracks(loaded.song ?? [])
             AppLogger.shared.log(
                 "Album metadata loaded from server; albumID=\(albumID); songs=\(songs.count); related=\(relatedAlbums.count); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
                 category: .library
             )
-        } else if songs.isEmpty {
-            // Offline fallback: show this album's downloaded tracks.
-            let local = DownloadService.shared.downloadedSongs().filter { $0.albumId == album.id }
+        } else {
+            // A profile can supply only this artist's tracks from a compilation.
+            // Always expand from local downloads when the server did not provide
+            // the full album, even if the initial album already has some songs.
+            let local = Self.downloadedSongs(matching: album)
             if !local.isEmpty {
-                songs = sortTracks(local)
+                songs = Self.sortedTracks(local)
                 AppLogger.shared.log(
-                    "Album metadata used offline fallback; albumID=\(albumID); songs=\(songs.count)",
+                    "Album metadata used downloaded fallback; albumID=\(albumID); songs=\(songs.count)",
                     category: .library,
                     level: .warning
                 )
-            } else {
+            } else if songs.isEmpty {
                 AppLogger.shared.log(
                     "Album metadata unavailable; albumID=\(albumID); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
                     category: .library,
@@ -101,6 +95,58 @@ final class AlbumDetailViewModel: ObservableObject {
             }
         }
         moreBySameArtist = relatedAlbums.filter { $0.id != album.id }
+    }
+
+    func loadOffline() {
+        let local = Self.downloadedSongs(matching: album)
+        guard !local.isEmpty else {
+            AppLogger.shared.log(
+                "Album offline tracks unavailable; albumID=\(album.id)",
+                category: .library,
+                level: .warning
+            )
+            return
+        }
+        songs = Self.sortedTracks(local)
+        moreBySameArtist = []
+        AppLogger.shared.log(
+            "Album detail expanded from offline downloads; albumID=\(album.id); songs=\(songs.count)",
+            category: .library
+        )
+    }
+
+    private static func sortedTracks(_ tracks: [Song]) -> [Song] {
+        tracks.sorted {
+            let d0 = $0.discNumber ?? 1, d1 = $1.discNumber ?? 1
+            if d0 != d1 { return d0 < d1 }
+            return ($0.track ?? 0) < ($1.track ?? 0)
+        }
+    }
+
+    private static func downloadedSongs(matching album: Album) -> [Song] {
+        let downloaded = DownloadService.shared.downloadedSongs()
+        let direct = downloaded.filter { $0.albumId?.nonBlank == album.id }
+        if !direct.isEmpty { return direct }
+
+        guard let albumName = normalized(album.name) else { return [] }
+        var matches = downloaded.filter { normalized($0.album) == albumName }
+        guard !matches.isEmpty else { return [] }
+
+        if let artist = normalized(album.artist) {
+            let artistMatches = matches.filter {
+                normalized($0.albumArtist ?? $0.artist) == artist
+            }
+            if !artistMatches.isEmpty { matches = artistMatches }
+        }
+        if let year = album.year {
+            let yearMatches = matches.filter { $0.year == year }
+            if !yearMatches.isEmpty { matches = yearMatches }
+        }
+        return matches
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        value?.nonBlank?.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
     }
 
     func resolveExplicitStatuses(client: any MusicService) async {

@@ -26,6 +26,9 @@ struct AlbumDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
+#if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+#endif
     @State private var iPadPanel: iPadDetailPanel = .songs
     @State private var acceptsPlaybackInput = true
 
@@ -45,10 +48,20 @@ struct AlbumDetailView: View {
         return Color(UIColor(hue: h, saturation: min(s, 1), brightness: max(0.25, min(b * 0.72, 0.65)), alpha: 1))
     }
 
+    private var usesLandscapePhoneLayout: Bool {
+#if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone && verticalSizeClass == .compact
+#else
+        false
+#endif
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             bg.ignoresSafeArea()
-            if sizeClass == .regular {
+            if usesLandscapePhoneLayout {
+                phoneLandscapeLayout
+            } else if sizeClass == .regular {
                 iPadLayout
             } else {
                 phoneScrollView
@@ -89,21 +102,17 @@ struct AlbumDetailView: View {
                 }
             })
         }
-        .task {
+        .task(id: "\(appState.isOfflineMode)|\(appState.client == nil)") {
             let started = ProcessInfo.processInfo.systemUptime
             AppLogger.shared.log(
                 "Album detail load started; albumID=\(vm.album.id); initialSongs=\(vm.songs.count); fromArtist=\(fromArtist)",
                 category: .artwork
             )
-            if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
-                if let c = appState.client { await vm.load(client: c) }
-                await loadAnimatedCover()
-            } else {
-                // Fetch animated cover alongside the song list.
-                async let cover: Void = loadAnimatedCover()
-                if let c = appState.client { await vm.load(client: c) }
-                await cover
-            }
+            // Downloaded library albums can begin with synthesized artwork
+            // metadata. Resolve their full album first, then ask for live art
+            // from that final cover identity.
+            await loadAlbum()
+            await loadAnimatedCover()
             if showExplicitBadge, let client = appState.client {
                 await vm.resolveExplicitStatuses(client: client)
             }
@@ -111,6 +120,14 @@ struct AlbumDetailView: View {
                 "Album detail load finished; albumID=\(vm.album.id); songs=\(vm.songs.count); animatedCover=\(animatedCover != nil); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
                 category: .artwork
             )
+        }
+    }
+
+    private func loadAlbum() async {
+        if appState.isOfflineMode || appState.client == nil {
+            vm.loadOffline()
+        } else if let client = appState.client {
+            await vm.load(client: client)
         }
     }
 
@@ -122,6 +139,17 @@ struct AlbumDetailView: View {
         }
         guard LiveArtworkSettings.animateAlbumHeaders else {
             AppLogger.shared.log("Album live artwork skipped: device profile; albumID=\(vm.album.id)", category: .artwork)
+            return
+        }
+        let coverArtID = vm.album.coverArt?.nonBlank ?? vm.album.id
+        if let offline = await ArtworkLoader.shared.animatedImage(
+            forCoverArtID: coverArtID,
+            serverID: appState.currentServer?.id
+        ) {
+            let square = offline.centerCroppedSquare()
+            animatedCover = square
+            vm.setDominantColor(ColorExtractor.dominantColor(from: square.images?.first ?? square))
+            AppLogger.shared.log("Album live artwork loaded from downloaded cache; albumID=\(vm.album.id)", category: .artwork)
             return
         }
         guard let client = appState.client else {
@@ -143,14 +171,13 @@ struct AlbumDetailView: View {
             )
             return
         }
-        animatedCover = image
+        let square = image.centerCroppedSquare()
+        animatedCover = square
         AppLogger.shared.log(
-            "Album live artwork displayed; albumID=\(vm.album.id); frames=\(image.images?.count ?? 0); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+            "Album live artwork displayed; albumID=\(vm.album.id); frames=\(square.images?.count ?? 0); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
             category: .artwork
         )
-        if let first = image.images?.first {
-            vm.setDominantColor(ColorExtractor.dominantColor(from: first))
-        }
+        vm.setDominantColor(ColorExtractor.dominantColor(from: square.images?.first ?? square))
     }
 
     private nonisolated static func liveArtworkURLs(for album: Album, client: any MusicService) -> [URL] {
@@ -237,7 +264,7 @@ struct AlbumDetailView: View {
             .clipped()
             .offset(y: -stretch)
         }
-        .aspectRatio(1 / 1.35, contentMode: .fit)
+        .aspectRatio(1, contentMode: .fit)
     }
 
     // Static artwork can opt into the same immersive composition as live artwork.
@@ -250,6 +277,8 @@ struct AlbumDetailView: View {
                     coverArtID: vm.album.coverArt,
                     size: 1000,
                     cornerRadius: 0,
+                    squareContentMode: .fill,
+                    cropsImageToSquare: true,
                     onImageLoaded: { image in
                         vm.setDominantColor(ColorExtractor.dominantColor(from: image))
                     }
@@ -277,7 +306,7 @@ struct AlbumDetailView: View {
             .clipped()
             .offset(y: -stretch)
         }
-        .aspectRatio(1 / 1.35, contentMode: .fit)
+        .aspectRatio(1, contentMode: .fit)
     }
 
     private var iPadLayout: some View {
@@ -331,11 +360,51 @@ struct AlbumDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var phoneLandscapeLayout: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    artworkSection
+                    infoSection
+                    actionRow
+                    descriptionSection
+                    footer
+                    Color.clear.frame(height: 32)
+                }
+            }
+            .scrollIndicators(.hidden)
+            .frame(width: 300)
+
+            Rectangle()
+                .fill(.white.opacity(0.10))
+                .frame(width: 0.5)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(L(.media_songs))
+                    .font(.title3.bold())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+
+                Divider().overlay(.white.opacity(0.12))
+
+                ScrollView {
+                    trackList
+                    moreBySameArtist
+                    Color.clear.frame(height: 96)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     // MARK: - Artwork
 
     @ViewBuilder
     private var artworkSection: some View {
-        if let animated = animatedCover, sizeClass == .regular {
+        if let animated = animatedCover, sizeClass == .regular || usesLandscapePhoneLayout {
             // iPad keeps the card layout; only the artwork inside animates
             // (compact animated covers use animatedHeader instead)
             ZStack { AnimatedImageView(image: animated) }
@@ -346,6 +415,7 @@ struct AlbumDetailView: View {
                 .padding(.top, 32)
         } else {
             ArtworkView(coverArtID: vm.album.coverArt, size: 800, cornerRadius: 14,
+                        cropsImageToSquare: true,
                         onImageLoaded: { image in
                             let color = ColorExtractor.dominantColor(from: image)
                             vm.setDominantColor(color)

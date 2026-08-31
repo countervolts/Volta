@@ -51,13 +51,27 @@ final class PlaylistsViewModel: ObservableObject {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
+        let serverID = AppState.shared.currentServer?.id
+        let cachedPlaylists = PlaylistOfflineCache.shared.playlists(for: serverID)
         if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
-            playlists = (try? await client.playlists()) ?? []
+            if let loaded = try? await client.playlists() {
+                playlists = loaded
+                PlaylistOfflineCache.shared.cacheList(loaded, serverID: serverID)
+                Task { await PlaylistOfflineCache.shared.cacheAll(loaded, client: client, serverID: serverID) }
+            } else {
+                playlists = cachedPlaylists
+            }
             await publishSmartSource((try? await client.randomSongs(size: 1000)) ?? [])
         } else {
             async let playlistsTask = client.playlists()
             async let songsTask = client.randomSongs(size: 1000)
-            playlists = (try? await playlistsTask) ?? []
+            if let loaded = try? await playlistsTask {
+                playlists = loaded
+                PlaylistOfflineCache.shared.cacheList(loaded, serverID: serverID)
+                Task { await PlaylistOfflineCache.shared.cacheAll(loaded, client: client, serverID: serverID) }
+            } else {
+                playlists = cachedPlaylists
+            }
             await publishSmartSource((try? await songsTask) ?? [])
         }
         hasLoaded = true
@@ -67,9 +81,15 @@ final class PlaylistsViewModel: ObservableObject {
             Self.merging(primary: completeLibrary, fallback: fallback)
         }
         await publishSmartSource(merged)
-        if PlaylistBackupStore.shared.isEnabled {
-            Task { await PlaylistBackupStore.shared.backupAll(client: client) }
-        }
+    }
+
+    func loadOffline(serverID: String?) async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+        playlists = PlaylistOfflineCache.shared.playlists(for: serverID)
+        await publishSmartSource([])
+        hasLoaded = true
     }
 
     private nonisolated static func loadSmartPlaylistLibrary(client: any MusicService) async -> [Song] {
@@ -126,6 +146,7 @@ final class PlaylistsViewModel: ObservableObject {
         defer { isCreating = false }
         if let pl = try? await client.createPlaylist(name: trimmed) {
             playlists.append(pl)
+            PlaylistOfflineCache.shared.cache(pl, serverID: AppState.shared.currentServer?.id)
             PlaylistBackupStore.shared.backup(playlist: pl, client: client)
         }
         newPlaylistName = ""
@@ -135,6 +156,7 @@ final class PlaylistsViewModel: ObservableObject {
     func deletePlaylist(_ playlist: Playlist, client: any MusicService) async {
         await PlaylistBackupStore.shared.markDeleted(playlist, client: client)
         playlists.removeAll { $0.id == playlist.id }
+        PlaylistOfflineCache.shared.remove(id: playlist.id, serverID: AppState.shared.currentServer?.id)
         try? await client.deletePlaylist(id: playlist.id)
     }
 }

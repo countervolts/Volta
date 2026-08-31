@@ -11,8 +11,29 @@ struct SearchView: View {
     @StateObject private var networkMonitor = NetworkMonitor.shared
     @Binding var path: NavigationPath
     @Namespace private var heroNamespace
+#if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+#endif
 
-    private var isOffline: Bool { networkMonitor.connection == .none }
+    private var isOffline: Bool {
+        networkMonitor.connection == .none || appState.isOfflineMode || appState.client == nil
+    }
+
+    private var gridColumnCount: Int {
+#if os(iOS)
+        verticalSizeClass == .compact ? 4 : 2
+#else
+        2
+#endif
+    }
+
+    private var searchResultGridColumnCount: Int {
+#if os(iOS)
+        verticalSizeClass == .compact ? 4 : 3
+#else
+        3
+#endif
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -96,10 +117,10 @@ struct SearchView: View {
             LazyVStack(alignment: .leading, spacing: 28) {
                 if !vm.installedGenres.isEmpty {
                     browseSection(title: L(.search_browse_genres)) {
-                        let columns = [
-                            GridItem(.flexible(), spacing: 12),
-                            GridItem(.flexible(), spacing: 12)
-                        ]
+                        let columns = Array(
+                            repeating: GridItem(.flexible(), spacing: 12),
+                            count: gridColumnCount
+                        )
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(vm.installedGenres) { genre in
                                 Button {
@@ -254,7 +275,10 @@ struct SearchView: View {
                             .font(.title3.bold())
                             .foregroundStyle(Theme.primaryText)
                             .padding(.horizontal, 20)
-                        let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
+                        let columns = Array(
+                            repeating: GridItem(.flexible(), spacing: 16),
+                            count: searchResultGridColumnCount
+                        )
                         LazyVGrid(columns: columns, spacing: 16) {
                             ForEach(vm.albums) { album in
                                 Button {
@@ -412,7 +436,7 @@ struct SearchView: View {
             open(.artist(artist))
         } label: {
             VStack(spacing: 8) {
-                ArtworkView(coverArtID: artist.coverArt, size: 200, cornerRadius: 50)
+                ArtworkView(coverArtID: artist.coverArt, artistID: artist.id, size: 200, cornerRadius: 50)
                     .frame(width: 80, height: 80)
                     .clipShape(Circle())
                 Text(artist.name)
@@ -658,7 +682,9 @@ private struct GenreHomeView: View {
     @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
     @StateObject private var networkMonitor = NetworkMonitor.shared
 
-    private var isOffline: Bool { networkMonitor.connection == .none }
+    private var isOffline: Bool {
+        networkMonitor.connection == .none || appState.isOfflineMode || appState.client == nil
+    }
 
     private var pickFeed: [PickFeedItem] {
         var items = genreData.pickAlbums.map(PickFeedItem.album)
@@ -952,7 +978,7 @@ private struct SearchArtistScrollRow: View {
                 ForEach(artists) { artist in
                     Button { onTap(artist) } label: {
                         VStack(spacing: 8) {
-                            ArtworkView(coverArtID: artist.coverArt, size: 200, cornerRadius: 44)
+                            ArtworkView(coverArtID: artist.coverArt, artistID: artist.id, size: 200, cornerRadius: 44)
                                 .frame(width: 80, height: 80)
                                 .clipShape(Circle())
                                 .overlay(Circle().strokeBorder(.white.opacity(0.08), lineWidth: 1))

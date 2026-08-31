@@ -1,5 +1,5 @@
 import SwiftUI
-import UIKit
+import PhotosUI
 
 private enum PlaylistCreateKind: String, CaseIterable, Identifiable {
     case custom = "Custom"
@@ -22,32 +22,6 @@ private struct SmartPlaylistEvaluationKey: Hashable {
     let downloadedRevision: Int
 }
 
-/// Restores the parent list's navigation bar after an immersive playlist
-/// detail view has hidden it. This is scoped to the playlists stack so the
-/// parent grid returns with its normal large-title layout after a pop.
-private struct PlaylistNavigationBarRestorer: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> Controller { Controller() }
-
-    func updateUIViewController(_ controller: Controller, context: Context) {
-        controller.restore()
-    }
-
-    final class Controller: UIViewController {
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            restore()
-        }
-
-        func restore() {
-            // SwiftUI can update the background representable while the pushed
-            // detail is still on screen. Do not re-show the parent bar until
-            // this list's controller is actually visible again.
-            guard viewIfLoaded?.window != nil else { return }
-            navigationController?.setNavigationBarHidden(false, animated: false)
-        }
-    }
-}
-
 struct PlaylistsView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = PlaylistsViewModel()
@@ -62,9 +36,12 @@ struct PlaylistsView: View {
     @State private var pendingFolderDelete: PlaylistFolder?
     @Binding var path: NavigationPath
     @Namespace private var heroNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+#if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+#endif
 
     @State private var createKind: PlaylistCreateKind = .custom
-    @State private var customPlaylistIsDynamic = false
     @State private var smartDraft = SmartPlaylist(name: "")
     @State private var minYearText = ""
     @State private var maxYearText = ""
@@ -72,45 +49,60 @@ struct PlaylistsView: View {
     @State private var maxPlayText = ""
     @State private var duplicateCreateMessage: String?
 
-    private let columns = [GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
-                           GridItem(.flexible(), spacing: Theme.Layout.gridSpacing)]
+    private var columns: [GridItem] {
+        let count: Int
+#if os(iOS)
+        count = verticalSizeClass == .compact ? 4 : 2
+#else
+        count = 2
+#endif
+        return Array(repeating: GridItem(.flexible(), spacing: Theme.Layout.gridSpacing), count: count)
+    }
+
+    private var stateChangeAnimation: Animation {
+        reduceMotion || PerformanceMode.reduceAnimations
+            ? .linear(duration: 0.01)
+            : .spring(response: 0.34, dampingFraction: 0.84)
+    }
+
+    private var playlistContentKey: String {
+        if vm.isLoading && !vm.hasLoaded { return "loading" }
+        if rootPlaylists.isEmpty && rootSmartPlaylists.isEmpty && visibleFolders.isEmpty && vm.hasLoaded {
+            return "empty"
+        }
+        return "grid"
+    }
+
+    private var gridOrder: [String] {
+        visibleFolders.map { "folder-\($0.id)" }
+            + rootPlaylists.map { "playlist-\($0.id)" }
+            + rootSmartPlaylists.map { "smart-\($0.id)" }
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
             ZStack {
                 Theme.background.ignoresSafeArea()
-                if vm.isLoading && !vm.hasLoaded {
-                    ProgressView().controlSize(.large).tint(Theme.accent)
-                } else if rootPlaylists.isEmpty && rootSmartPlaylists.isEmpty && visibleFolders.isEmpty && vm.hasLoaded {
-                    emptyState
-                } else {
-                    grid
-                }
-            }
-            .navigationTitle(L(.tab_playlists))
-            .navigationBarTitleDisplayMode(.large)
-            // Playlist detail uses an immersive, hidden navigation bar. Reassert
-            // this stack's visible bar so an interactive pop cannot leave the
-            // grid drawing through the large "Playlists" title.
-            .toolbar(.visible, for: .navigationBar)
-            .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: L(.playlists_search_prompt))
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { vm.showCreateSheet = true } label: {
-                        Image(systemName: Symbols.newPlaylist)
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        playlistHeader
+                        playlistSearch
+                        playlistContent
+                            .id(playlistContentKey)
+                            .transition(.opacity)
+                            .animation(stateChangeAnimation, value: playlistContentKey)
                     }
-                    .buttonStyle(.plain)
+                    .padding(.bottom, 96)
                 }
+                .scrollIndicators(.hidden)
             }
-            .accountToolbar(path: $path)
+            .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Playlist.self) { pl in
                 PlaylistDetailView(playlist: pl)
                     .zoomNavigationTransition(sourceID: pl.id, in: heroNamespace)
             }
             .environment(\.heroNamespace, heroNamespace)
-            .background(PlaylistNavigationBarRestorer())
+            .settingsDestinations()
         }
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
@@ -161,8 +153,12 @@ struct PlaylistsView: View {
         } message: { folder in
             Text(L(.folder_delete_msg, folder.name))
         }
-        .task(id: appState.currentServer?.id) {
-            if let client = appState.client { await vm.load(client: client) }
+        .task(id: "\(appState.currentServer?.id ?? "none")|\(appState.isOfflineMode)") {
+            if appState.isOfflineMode || appState.client == nil {
+                await vm.loadOffline(serverID: appState.currentServer?.id)
+            } else if let client = appState.client {
+                await vm.load(client: client)
+            }
         }
         .task(id: dynamicEvaluationKey) {
             await refreshDynamicPlaylists()
@@ -223,85 +219,135 @@ struct PlaylistsView: View {
         )
     }
 
-    private var grid: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: Theme.Layout.gridSpacing) {
-                ForEach(visibleFolders) { folder in
-                    NavigationLink {
-                        PlaylistFolderDetailView(
-                            folderID: folder.id,
-                            serverPlaylists: vm.playlists,
-                            smartSourceSongs: smartPlaylistSourceSongs,
-                            sourceRevision: vm.smartSourceRevision,
-                            smartArtists: vm.smartArtists,
-                            smartAlbums: vm.smartAlbums,
-                            smartGenres: vm.smartGenres
-                        )
-                    } label: {
-                        playlistFolderCard(folder)
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            pendingFolderDelete = folder
-                        } label: {
-                            Label(L(.action_delete), systemImage: Symbols.trash)
-                        }
-                    }
-                }
+    private var playlistHeader: some View {
+        HStack(spacing: 10) {
+            Text(L(.tab_playlists))
+                .font(.largeTitle.bold())
+                .foregroundStyle(Theme.primaryText)
+            Spacer(minLength: 8)
+            Button { vm.showCreateSheet = true } label: {
+                Image(systemName: Symbols.newPlaylist)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 38, height: 38)
+                    .glassCircle()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L(.create_new_playlist_title))
+            ServerMenuButton(onOpenSettings: { path.append(SettingsRoute.root) })
+        }
+        .padding(.horizontal, Theme.Layout.screenPadding)
+        .padding(.top, 14)
+        .padding(.bottom, 14)
+    }
 
-                ForEach(rootPlaylists) { pl in
-                    NavigationLink(value: pl) { serverPlaylistCard(pl) }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        folderActions(for: pl)
-                        Button {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { vm.togglePin(pl) }
-                        } label: {
-                            Label(vm.isPinned(pl) ? L(.playlist_unpin) : L(.playlist_pin),
-                                  systemImage: vm.isPinned(pl) ? "pin.slash" : "pin")
-                        }
-                        Button(role: .destructive) {
-                            pendingDelete = pl
-                        } label: {
-                            Label(L(.action_delete), systemImage: Symbols.trash)
-                        }
-                    }
+    private var playlistSearch: some View {
+        HStack(spacing: 8) {
+            Image(systemName: Symbols.search)
+                .foregroundStyle(Theme.secondaryText)
+            TextField(L(.playlists_search_prompt), text: $vm.searchText)
+                .foregroundStyle(Theme.primaryText)
+                .autocorrectionDisabled()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Theme.secondaryBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, Theme.Layout.screenPadding)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private var playlistContent: some View {
+        if vm.isLoading && !vm.hasLoaded {
+            ProgressView()
+                .controlSize(.large)
+                .tint(Theme.accent)
+                .frame(maxWidth: .infinity, minHeight: 260)
+        } else if rootPlaylists.isEmpty && rootSmartPlaylists.isEmpty && visibleFolders.isEmpty && vm.hasLoaded {
+            emptyState
+                .frame(maxWidth: .infinity, minHeight: 260)
+        } else {
+            grid
+        }
+    }
+
+    private var grid: some View {
+        LazyVGrid(columns: columns, spacing: Theme.Layout.gridSpacing) {
+            ForEach(visibleFolders) { folder in
+                NavigationLink {
+                    PlaylistFolderDetailView(
+                        folderID: folder.id,
+                        serverPlaylists: vm.playlists,
+                        smartSourceSongs: smartPlaylistSourceSongs,
+                        sourceRevision: vm.smartSourceRevision,
+                        smartArtists: vm.smartArtists,
+                        smartAlbums: vm.smartAlbums,
+                        smartGenres: vm.smartGenres
+                    )
+                } label: {
+                    playlistFolderCard(folder)
                 }
-                ForEach(rootSmartPlaylists) { smart in
-                    NavigationLink {
-                        SmartPlaylistDetailView(
-                            playlist: smart,
-                            sourceSongs: smartPlaylistSourceSongs,
-                            sourceRevision: vm.smartSourceRevision,
-                            artists: vm.smartArtists,
-                            albums: vm.smartAlbums,
-                            genres: vm.smartGenres
-                        )
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button(role: .destructive) {
+                        pendingFolderDelete = folder
                     } label: {
-                        smartPlaylistCard(smart)
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        folderActions(for: smart)
-                        Button {
-                            smartStore.togglePin(smart)
-                        } label: {
-                            Label(smart.pinned ? L(.playlist_unpin) : L(.playlist_pin),
-                                  systemImage: smart.pinned ? "pin.slash" : "pin")
-                        }
-                        Button(role: .destructive) {
-                            pendingSmartDelete = smart
-                        } label: {
-                            Label(L(.action_delete), systemImage: Symbols.trash)
-                        }
+                        Label(L(.action_delete), systemImage: Symbols.trash)
                     }
                 }
             }
-            .padding(.horizontal, Theme.Layout.screenPadding)
-            .padding(.vertical, 12)
-            .padding(.bottom, 80)
+
+            ForEach(rootPlaylists) { pl in
+                NavigationLink(value: pl) { serverPlaylistCard(pl) }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    folderActions(for: pl)
+                    Button {
+                        withAnimation(stateChangeAnimation) { vm.togglePin(pl) }
+                    } label: {
+                        Label(vm.isPinned(pl) ? L(.playlist_unpin) : L(.playlist_pin),
+                              systemImage: vm.isPinned(pl) ? "pin.slash" : "pin")
+                    }
+                    Button(role: .destructive) {
+                        pendingDelete = pl
+                    } label: {
+                        Label(L(.action_delete), systemImage: Symbols.trash)
+                    }
+                }
+            }
+            ForEach(rootSmartPlaylists) { smart in
+                NavigationLink {
+                    SmartPlaylistDetailView(
+                        playlist: smart,
+                        sourceSongs: smartPlaylistSourceSongs,
+                        sourceRevision: vm.smartSourceRevision,
+                        artists: vm.smartArtists,
+                        albums: vm.smartAlbums,
+                        genres: vm.smartGenres
+                    )
+                } label: {
+                    smartPlaylistCard(smart)
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    folderActions(for: smart)
+                    Button {
+                        withAnimation(stateChangeAnimation) { smartStore.togglePin(smart) }
+                    } label: {
+                        Label(smart.pinned ? L(.playlist_unpin) : L(.playlist_pin),
+                              systemImage: smart.pinned ? "pin.slash" : "pin")
+                    }
+                    Button(role: .destructive) {
+                        pendingSmartDelete = smart
+                    } label: {
+                        Label(L(.action_delete), systemImage: Symbols.trash)
+                    }
+                }
+            }
         }
+        .padding(.horizontal, Theme.Layout.screenPadding)
+        .padding(.vertical, 12)
+        .animation(stateChangeAnimation, value: gridOrder)
     }
 
     private func playlistFolderCard(_ folder: PlaylistFolder) -> some View {
@@ -417,7 +463,7 @@ struct PlaylistsView: View {
     private func smartPlaylistCard(_ smart: SmartPlaylist) -> some View {
         let songs = dynamicResults.songs(for: smart.id)
         return VStack(alignment: .leading, spacing: 6) {
-            SmartPlaylistCover(songs: songs)
+            SmartPlaylistCover(playlistID: smart.id, songs: songs)
                 .frame(maxWidth: .infinity)
                 .aspectRatio(1, contentMode: .fit)
                 .overlay(alignment: .topTrailing) {
@@ -464,23 +510,6 @@ struct PlaylistsView: View {
                 if createKind == .custom {
                     Section {
                         TextField(L(.create_playlist_name_ph), text: $vm.newPlaylistName)
-                        if customPlaylistIsDynamic {
-                            TextField(L(.smart_desc), text: Binding(
-                                get: { smartDraft.subtitle ?? "" },
-                                set: { smartDraft.subtitle = $0.isEmpty ? nil : $0 }
-                            ))
-                        }
-                    }
-                    Section("Playlist Options") {
-                        Toggle("Dynamic Playlist", isOn: $customPlaylistIsDynamic)
-                        if customPlaylistIsDynamic {
-                            Text("Keep this custom playlist updated when your library, downloads, or taste changes.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    if customPlaylistIsDynamic {
-                        dynamicCustomPlaylistForm
                     }
                 } else if createKind == .folder {
                     Section {
@@ -510,10 +539,10 @@ struct PlaylistsView: View {
             resetCreateDrafts()
         }
         .task(id: smartPreviewEvaluationKey) {
-            guard createKind == .smart || (createKind == .custom && customPlaylistIsDynamic) else { return }
+            guard createKind == .smart else { return }
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled else { return }
-            let draft = playlistRuleDraftForCurrentKind()
+            let draft = smartDraftWithNumbers()
             let downloaded = downloadService.downloadedSongs()
             await previewResults.refresh(
                 playlists: [draft],
@@ -539,8 +568,7 @@ struct PlaylistsView: View {
     private var createDisabled: Bool {
         switch createKind {
         case .custom:
-            return vm.newPlaylistName.trimmingCharacters(in: .whitespaces).isEmpty
-                || (!customPlaylistIsDynamic && vm.isCreating)
+            return vm.newPlaylistName.trimmingCharacters(in: .whitespaces).isEmpty || vm.isCreating
         case .folder:
             return vm.newPlaylistName.trimmingCharacters(in: .whitespaces).isEmpty
         case .smart:
@@ -563,30 +591,13 @@ struct PlaylistsView: View {
         )
     }
 
-    private var dynamicCustomPlaylistForm: some View {
-        SmartPlaylistEditorSections(
-            draft: $smartDraft,
-            minYearText: $minYearText,
-            maxYearText: $maxYearText,
-            minPlayText: $minPlayText,
-            maxPlayText: $maxPlayText,
-            artists: vm.smartArtists,
-            albums: vm.smartAlbums,
-            genres: vm.smartGenres,
-            previewCount: smartPreviewCount,
-            includesIdentitySection: false
-        )
-    }
-
     private var smartPreviewCount: Int {
         previewResults.songs(for: smartDraft.id).count
     }
 
     private var smartPreviewEvaluationKey: SmartPlaylistEvaluationKey {
         SmartPlaylistEvaluationKey(
-            playlists: createKind == .smart || (createKind == .custom && customPlaylistIsDynamic)
-                ? [playlistRuleDraftForCurrentKind()]
-                : [],
+            playlists: createKind == .smart ? [smartDraftWithNumbers()] : [],
             sourceRevision: vm.smartSourceRevision,
             tasteRevision: tasteStore.revision,
             downloadedRevision: downloadService.downloadedRevision
@@ -609,30 +620,13 @@ struct PlaylistsView: View {
         closeCreateSheet()
     }
 
-    private func createCustomDynamicPlaylist() {
-        var draft = smartDraftWithNumbers()
-        draft.name = vm.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines)
-        smartStore.upsert(draft)
-        closeCreateSheet()
-    }
-
-    private func playlistRuleDraftForCurrentKind() -> SmartPlaylist {
-        var draft = smartDraftWithNumbers()
-        if createKind == .custom {
-            draft.name = vm.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return draft
-    }
-
     private func createCurrentDraft() {
         if let message = duplicateMessageForCurrentDraft() {
             duplicateCreateMessage = message
             return
         }
         if createKind == .custom {
-            if customPlaylistIsDynamic {
-                createCustomDynamicPlaylist()
-            } else if let client = appState.client {
+            if let client = appState.client {
                 Task { await vm.createPlaylist(client: client) }
             }
         } else if createKind == .folder {
@@ -647,13 +641,8 @@ struct PlaylistsView: View {
         switch createKind {
         case .custom:
             let name = normalizedCreateName(vm.newPlaylistName)
-            if customPlaylistIsDynamic {
-                guard smartStore.playlists.contains(where: { normalizedCreateName($0.name) == name }) else { return nil }
-                return L(.dup_smart, vm.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines))
-            } else {
-                guard vm.playlists.contains(where: { normalizedCreateName($0.name) == name }) else { return nil }
-                return L(.dup_playlist, vm.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
+            guard vm.playlists.contains(where: { normalizedCreateName($0.name) == name }) else { return nil }
+            return L(.dup_playlist, vm.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines))
         case .smart:
             let name = normalizedCreateName(smartDraft.name)
             guard smartStore.playlists.contains(where: { normalizedCreateName($0.name) == name }) else { return nil }
@@ -676,7 +665,6 @@ struct PlaylistsView: View {
 
     private func resetCreateDrafts() {
         createKind = .custom
-        customPlaylistIsDynamic = false
         vm.newPlaylistName = ""
         smartDraft = SmartPlaylist(name: "")
         minYearText = ""
@@ -701,8 +689,19 @@ private struct PlaylistFolderDetailView: View {
     @StateObject private var tasteStore = TasteStore.shared
     @StateObject private var dynamicResults = SmartPlaylistResults()
 
-    private let columns = [GridItem(.flexible(), spacing: Theme.Layout.gridSpacing),
-                           GridItem(.flexible(), spacing: Theme.Layout.gridSpacing)]
+#if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+#endif
+
+    private var columns: [GridItem] {
+        let count: Int
+#if os(iOS)
+        count = verticalSizeClass == .compact ? 4 : 2
+#else
+        count = 2
+#endif
+        return Array(repeating: GridItem(.flexible(), spacing: Theme.Layout.gridSpacing), count: count)
+    }
 
     private var folder: PlaylistFolder? {
         folderStore.folder(id: folderID)
@@ -821,7 +820,7 @@ private struct PlaylistFolderDetailView: View {
     private func folderSmartCard(_ smart: SmartPlaylist) -> some View {
         let songs = dynamicResults.songs(for: smart.id)
         return VStack(alignment: .leading, spacing: 6) {
-            SmartPlaylistCover(songs: songs)
+            SmartPlaylistCover(playlistID: smart.id, songs: songs)
                 .frame(maxWidth: .infinity)
                 .aspectRatio(1, contentMode: .fit)
             Text(smart.name)
@@ -846,50 +845,100 @@ private struct PlaylistFolderDetailView: View {
 }
 
 private struct SmartPlaylistCover: View {
+    let playlistID: String
     let songs: [Song]
 
+    @State private var custom: UIImage?
+    @State private var hasCustom: Bool
+
+    init(playlistID: String, songs: [Song]) {
+        self.playlistID = playlistID
+        self.songs = songs
+        // Match regular playlists: avoid showing generated art while a local
+        // cover is still loading from disk.
+        _custom = State(initialValue: PlaylistCoverStore.shared.cachedImage(for: playlistID))
+        _hasCustom = State(initialValue: PlaylistCoverStore.shared.hasCover(for: playlistID))
+    }
+
     var body: some View {
-        let coverSongs = Array(songs.lazy.filter { $0.coverArt != nil }.prefix(4))
         GeometryReader { geo in
             let side = min(geo.size.width, geo.size.height)
-            let tileSide = (side - 1) / 2
-
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: Theme.Layout.cardCorner, style: .continuous)
-                    .fill(Theme.secondaryBackground)
-                    .frame(width: side, height: side)
-
-                if coverSongs.isEmpty {
-                    Image(systemName: "wand.and.stars")
-                        .font(.system(size: 42, weight: .light))
-                        .foregroundStyle(Theme.secondaryText)
-                        .frame(width: side, height: side)
-                } else if coverSongs.count == 1 {
-                    ArtworkView(coverArtID: coverSongs[0].coverArt, size: 400, cornerRadius: 0)
-                        .frame(width: side, height: side)
-                } else {
-                    ForEach(Array(coverSongs.enumerated()), id: \.element.id) { index, song in
-                        ArtworkView(coverArtID: song.coverArt, size: 240, cornerRadius: 0)
-                            .frame(width: tileSide, height: tileSide)
-                            .clipped()
-                            .offset(
-                                x: CGFloat(index % 2) * (tileSide + 1),
-                                y: CGFloat(index / 2) * (tileSide + 1)
-                            )
-                    }
-                    if coverSongs.count == 3 {
-                        Rectangle()
-                            .fill(Theme.secondaryBackground)
-                            .frame(width: tileSide, height: tileSide)
-                            .offset(x: tileSide + 1, y: tileSide + 1)
-                    }
-                }
-            }
-            .frame(width: side, height: side)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Layout.cardCorner, style: .continuous))
-            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            coverContent(side: side)
+                .frame(width: side, height: side)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Layout.cardCorner, style: .continuous))
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
         .aspectRatio(1, contentMode: .fit)
+        .task(id: playlistID) { await reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .playlistCoverChanged)) { note in
+            if note.object as? String == playlistID { Task { await reload() } }
+        }
+    }
+
+    @ViewBuilder
+    private func coverContent(side: CGFloat) -> some View {
+        if let custom {
+            Image(uiImage: custom)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: side, height: side)
+                .clipped()
+        } else if hasCustom {
+            RoundedRectangle(cornerRadius: Theme.Layout.cardCorner, style: .continuous)
+                .fill(Theme.secondaryBackground)
+                .overlay {
+                    Image(systemName: Symbols.playlistPlaceholder)
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundStyle(Theme.secondaryText)
+                }
+        } else {
+            generatedCover(side: side)
+        }
+    }
+
+    @ViewBuilder
+    private func generatedCover(side: CGFloat) -> some View {
+        let coverSongs = Array(songs.lazy.filter { $0.coverArt != nil }.prefix(4))
+        let tileSide = (side - 1) / 2
+
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: Theme.Layout.cardCorner, style: .continuous)
+                .fill(Theme.secondaryBackground)
+                .frame(width: side, height: side)
+
+            if coverSongs.isEmpty {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 42, weight: .light))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: side, height: side)
+            } else if coverSongs.count == 1 {
+                ArtworkView(coverArtID: coverSongs[0].coverArt, size: 400, cornerRadius: 0)
+                    .frame(width: side, height: side)
+            } else {
+                ForEach(Array(coverSongs.enumerated()), id: \.element.id) { index, song in
+                    ArtworkView(coverArtID: song.coverArt, size: 240, cornerRadius: 0)
+                        .frame(width: tileSide, height: tileSide)
+                        .clipped()
+                        .offset(
+                            x: CGFloat(index % 2) * (tileSide + 1),
+                            y: CGFloat(index / 2) * (tileSide + 1)
+                        )
+                }
+                if coverSongs.count == 3 {
+                    Rectangle()
+                        .fill(Theme.secondaryBackground)
+                        .frame(width: tileSide, height: tileSide)
+                        .offset(x: tileSide + 1, y: tileSide + 1)
+                }
+            }
+        }
+        .frame(width: side, height: side)
+    }
+
+    private func reload() async {
+        hasCustom = PlaylistCoverStore.shared.hasCover(for: playlistID)
+        let image = await PlaylistCoverStore.shared.image(for: playlistID)
+        withAnimation(.easeOut(duration: 0.3)) { custom = image }
     }
 }
 
@@ -1104,6 +1153,8 @@ private struct SmartPlaylistEditorSheet: View {
     @State private var minPlayText: String
     @State private var maxPlayText: String
     @State private var duplicateNameMessage: String?
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var pickedCover: UIImage?
 
     init(
         playlist: SmartPlaylist,
@@ -1142,6 +1193,27 @@ private struct SmartPlaylistEditorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    PhotosPicker(selection: $pickerItem, matching: .images) {
+                        HStack {
+                            Spacer()
+                            ZStack(alignment: .bottomTrailing) {
+                                smartCoverPreview
+                                    .frame(width: 150, height: 150)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                                Image(systemName: "pencil.circle.fill")
+                                    .font(.system(size: 28))
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, Theme.accent)
+                                    .padding(6)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Color.clear)
+                }
                 SmartPlaylistEditorSections(
                     draft: $draft,
                     minYearText: $minYearText,
@@ -1164,6 +1236,15 @@ private struct SmartPlaylistEditorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L(.action_save)) { save() }
                         .disabled(normalizedName.isEmpty)
+                }
+            }
+        }
+        .onChangeCompat(of: pickerItem) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let image = UIImage(data: data) {
+                    withAnimation { pickedCover = image }
                 }
             }
         }
@@ -1197,6 +1278,20 @@ private struct SmartPlaylistEditorSheet: View {
 
     private var previewCount: Int {
         previewResults.songs(for: draft.id).count
+    }
+
+    @ViewBuilder
+    private var smartCoverPreview: some View {
+        if let pickedCover {
+            Image(uiImage: pickedCover)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            SmartPlaylistCover(
+                playlistID: draft.id,
+                songs: previewResults.songs(for: draft.id)
+            )
+        }
     }
 
     private var previewEvaluationKey: SmartPlaylistEvaluationKey {
@@ -1233,6 +1328,9 @@ private struct SmartPlaylistEditorSheet: View {
             duplicateNameMessage = L(.dup_smart, value.name)
             return
         }
+        if let pickedCover {
+            PlaylistCoverStore.shared.set(pickedCover, for: value.id)
+        }
         onSave(value)
         dismiss()
     }
@@ -1263,6 +1361,7 @@ private struct SmartPlaylistDetailView: View {
     @State private var editingPlaylist: SmartPlaylist?
     @State private var toastMessage: String?
     @AppStorage("showTrackArtwork") private var showTrackArtwork = true
+    @AppStorage("stylizedPlaylistCover") private var stylizedPlaylistCover = true
 
     // The navigation value is a snapshot. Resolve it through the store so this
     // screen refreshes immediately after an offline edit is saved.
@@ -1369,8 +1468,18 @@ private struct SmartPlaylistDetailView: View {
     }
 
     private var coverSection: some View {
+        Group {
+            if stylizedPlaylistCover {
+                stylizedCoverSection
+            } else {
+                standardCoverSection
+            }
+        }
+    }
+
+    private var stylizedCoverSection: some View {
         GeometryReader { geo in
-            SmartPlaylistCover(songs: songs)
+            SmartPlaylistCover(playlistID: currentPlaylist.id, songs: songs)
                 .frame(width: geo.size.width, height: geo.size.width)
                 .clipped()
                 .overlay(alignment: .bottom) {
@@ -1379,6 +1488,14 @@ private struct SmartPlaylistDetailView: View {
                 }
         }
         .aspectRatio(1, contentMode: .fit)
+    }
+
+    private var standardCoverSection: some View {
+        SmartPlaylistCover(playlistID: currentPlaylist.id, songs: songs)
+            .aspectRatio(1, contentMode: .fit)
+            .padding(.horizontal, 36)
+            .shadow(color: .black.opacity(0.45), radius: 28, x: 0, y: 10)
+            .padding(.top, 32)
     }
 
     private var infoSection: some View {

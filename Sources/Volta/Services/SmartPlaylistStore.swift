@@ -61,9 +61,9 @@ final class SmartPlaylistStore: ObservableObject {
         }
     }
 
-    /// An earlier build inserted dynamic playlists automatically. Remove those
-    /// generated records once so every dynamic playlist is explicitly created
-    /// and named by the user from now on.
+    /// An earlier build inserted smart-playlist presets automatically. Remove
+    /// those generated records once so every smart playlist is explicitly
+    /// created and named by the user.
     private func removeAutomaticPresetsIfNeeded() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: Self.automaticPresetRemovalKey) else { return }

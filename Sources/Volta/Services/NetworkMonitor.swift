@@ -123,10 +123,28 @@ enum WiFiSSIDPolicy {
         UserDefaults.standard.set(allowedSSIDs.filter { $0 != ssid }, forKey: allowedSSIDsKey)
     }
 
-    static func allows(connection: NetworkMonitor.Connection, currentSSID: String?) -> Bool {
-        let allowed = allowedSSIDs
-        guard connection == .wifi, !allowed.isEmpty else { return true }
-        guard let currentSSID else { return false }
-        return allowed.contains(currentSSID)
+    /// Selects the alternate (normally cellular/public) endpoint whenever the
+    /// device is not on one of the user's preferred server Wi-Fi networks.
+    /// With no preferred SSIDs configured, this preserves the normal behavior:
+    /// main endpoint on Wi-Fi, alternate endpoint on cellular.
+    static func shouldUseCellularEndpoint(
+        connection: NetworkMonitor.Connection,
+        currentSSID: String?
+    ) -> Bool {
+        shouldUseCellularEndpoint(
+            connection: connection,
+            currentSSID: currentSSID,
+            preferredSSIDs: allowedSSIDs
+        )
+    }
+
+    static func shouldUseCellularEndpoint(
+        connection: NetworkMonitor.Connection,
+        currentSSID: String?,
+        preferredSSIDs: [String]
+    ) -> Bool {
+        guard !preferredSSIDs.isEmpty else { return connection == .cellular }
+        guard connection == .wifi, let currentSSID else { return true }
+        return !preferredSSIDs.contains(currentSSID)
     }
 }

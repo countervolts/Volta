@@ -28,7 +28,11 @@ struct NowPlayingScreen: View {
     @Binding var isPresented: Bool
     var onDismissDragChanged: (CGFloat) -> Void = { _ in }
     var onDismissDragCancelled: () -> Void = {}
-    var onDismissDragEnded: (CGFloat) -> Void = { _ in }
+    var onDismissDragEnded: (CGFloat, CGFloat) -> Void = { _, _ in }
+    var onArtworkFrameChange: (CGRect) -> Void = { _ in }
+    var onDismissDebugGeometryChange: (PlayerDismissDebugGeometry) -> Void = { _ in }
+    var stableSafeAreaInsets = EdgeInsets()
+    var hidesArtworkForDismissal = false
     @State private var activeTab: PlayerTab = .nowPlaying
     @State private var pendingDragOffset: CGFloat = 0
     @State private var dragThrottler: VSyncThrottler?
@@ -60,6 +64,8 @@ struct NowPlayingScreen: View {
     @State private var lyricsTransitionProgress: CGFloat = 0
     @State private var queueStageOpacity: CGFloat = 1
     @State private var lyricsStageOpacity: CGFloat = 0
+    @State private var keepsBothPortraitStagesMounted = false
+    @State private var portraitStageCleanupTask: Task<Void, Never>?
     @AppStorage("showLosslessBadge") private var showLosslessBadge = true
     @AppStorage(DeveloperExperiments.preciseTimestampsKey) private var preciseTimestamps = false
     @AppStorage("artworkAnimation") private var artworkAnimation = true
@@ -74,6 +80,10 @@ struct NowPlayingScreen: View {
     // skip/prev nudge animation
     @State private var skipNudge: CGFloat = 0
     @State private var prevNudge: CGFloat = 0
+    @State private var skipBounceID = 0
+    @State private var prevBounceID = 0
+    @State private var skipNudgeResetTask: Task<Void, Never>?
+    @State private var prevNudgeResetTask: Task<Void, Never>?
     @State private var playerBackgroundColors = Self.fallbackPlayerBackgroundColors
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -115,6 +125,20 @@ struct NowPlayingScreen: View {
             ? .linear(duration: 0.01)
             : .spring(response: 0.42, dampingFraction: 1, blendDuration: 0.08)
     }
+    private var trackChangeTransition: AnyTransition {
+        if reducesPlayerMotion {
+            return .opacity
+        }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.97)),
+            removal: .opacity.combined(with: .scale(scale: 1.03))
+        )
+    }
+    private var trackChangeAnimation: Animation {
+        reducesPlayerMotion
+            ? .easeOut(duration: 0.14)
+            : .easeInOut(duration: 0.28)
+    }
     private static let fallbackPlayerBackgroundColors = [
         Color(white: 0.08)
     ]
@@ -153,16 +177,31 @@ struct NowPlayingScreen: View {
         }
     }
     var body: some View {
-        ZStack {
-            playerBackgroundSurface.ignoresSafeArea()
+        GeometryReader { rootGeometry in
+            ZStack {
+                fixedPlayerBackground(in: rootGeometry.size)
 
-            if isPhoneLandscape {
-                phoneLandscapeLayout
-            } else if sizeClass == .regular {
-                iPadLayout
-            } else {
-                phoneLayout
+                if isPhoneLandscape {
+                    phoneLandscapeLayout
+                } else if sizeClass == .regular {
+                    iPadLayout
+                } else {
+                    phoneLayout
+                }
             }
+            .frame(
+                width: rootGeometry.size.width,
+                height: rootGeometry.size.height
+            )
+        }
+        .onPreferenceChange(PlayerDismissDebugFramesKey.self) { frames in
+            let geometry = PlayerDismissDebugGeometry(
+                surfaceFrame: frames[.surface] ?? .zero,
+                grabberFrame: frames[.grabber] ?? .zero,
+                artworkFrame: frames[.artwork] ?? .zero
+            )
+            guard geometry.isMeaningful else { return }
+            onDismissDebugGeometryChange(geometry)
         }
         .gesture(
             DragGesture(coordinateSpace: .global)
@@ -186,9 +225,19 @@ struct NowPlayingScreen: View {
                         return
                     }
                     let finalOffset = max(0, v.translation.height)
-                    if v.translation.height > 120 || v.predictedEndTranslation.height > 300 {
+                    let viewportHeight = playerDismissViewportHeight
+                    let deliberateDistance = viewportHeight * 0.12
+                    let flickMinimumDistance = viewportHeight * 0.06
+                    let flickProjectedDistance = viewportHeight * 0.20
+                    let predictedOffset = max(
+                        finalOffset,
+                        v.predictedEndTranslation.height
+                    )
+                    let hasClearDownwardFlick = finalOffset >= flickMinimumDistance
+                        && predictedOffset >= flickProjectedDistance
+                    if finalOffset >= deliberateDistance || hasClearDownwardFlick {
                         AppLogger.shared.log(
-                            "Player dismissed by drag; translation=\(Int(v.translation.height)); predicted=\(Int(v.predictedEndTranslation.height))",
+                            "Player dismissed by drag; translation=\(Int(finalOffset)); predicted=\(Int(predictedOffset))",
                             category: .playback
                         )
                         // Synchronize the last gesture sample before the parent
@@ -199,7 +248,10 @@ struct NowPlayingScreen: View {
                         withTransaction(handoff) {
                             pendingDragOffset = 0
                         }
-                        onDismissDragEnded(finalOffset)
+                        onDismissDragEnded(
+                            finalOffset,
+                            predictedOffset
+                        )
                         return
                     }
                     pendingDragOffset = 0
@@ -294,6 +346,9 @@ struct NowPlayingScreen: View {
             AppLogger.shared.log("Full player disappeared", category: .playback)
             dragThrottler?.invalidate()
             dragThrottler = nil
+            skipNudgeResetTask?.cancel()
+            prevNudgeResetTask?.cancel()
+            portraitStageCleanupTask?.cancel()
         }
         .onChangeCompat(of: audio.currentSong?.id) { _, _ in
             refreshPlayerBackground(animated: true)
@@ -315,6 +370,27 @@ struct NowPlayingScreen: View {
         .preferredColorScheme(Theme.colorScheme)
     }
 
+    private func fixedPlayerBackground(in size: CGSize) -> some View {
+        let width = size.width + stableSafeAreaInsets.leading + stableSafeAreaInsets.trailing
+        let height = size.height + stableSafeAreaInsets.top + stableSafeAreaInsets.bottom
+        let centerX = (size.width + stableSafeAreaInsets.trailing - stableSafeAreaInsets.leading) / 2
+        let centerY = (size.height + stableSafeAreaInsets.bottom - stableSafeAreaInsets.top) / 2
+
+        return playerBackgroundSurface
+            .frame(width: width, height: height)
+            .position(x: centerX, y: centerY)
+            .reportPlayerDismissDebugFrame(.surface)
+    }
+
+    private var playerDismissViewportHeight: CGFloat {
+        let windowHeight = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \UIWindow.isKeyWindow)?
+            .bounds.height
+        return max(windowHeight ?? UIScreen.main.bounds.height, 1)
+    }
+
     @ViewBuilder
     private var phoneLayout: some View {
         GeometryReader { geo in
@@ -329,17 +405,21 @@ struct NowPlayingScreen: View {
                     Color.clear.frame(height: 24)
 
                     ZStack(alignment: .top) {
-                        QueueTransitionAnimator(progress: queueTransitionProgress) { progress in
-                            portraitQueueStage(in: geo, progress: progress)
+                        if keepsBothPortraitStagesMounted || queueStageOpacity > 0.001 || activeTab != .lyrics {
+                            QueueTransitionAnimator(progress: queueTransitionProgress) { progress in
+                                portraitQueueStage(in: geo, progress: progress)
+                            }
+                            .opacity(queueStageOpacity)
+                            .allowsHitTesting(activeTab != .lyrics)
                         }
-                        .opacity(queueStageOpacity)
-                        .allowsHitTesting(activeTab != .lyrics)
 
-                        QueueTransitionAnimator(progress: lyricsTransitionProgress) { progress in
-                            portraitLyricsStage(in: geo, stageHeight: stageHeight, progress: progress)
+                        if keepsBothPortraitStagesMounted || lyricsStageOpacity > 0.001 || activeTab == .lyrics {
+                            QueueTransitionAnimator(progress: lyricsTransitionProgress) { progress in
+                                portraitLyricsStage(in: geo, stageHeight: stageHeight, progress: progress)
+                            }
+                            .opacity(lyricsStageOpacity)
+                            .allowsHitTesting(activeTab == .lyrics)
                         }
-                        .opacity(lyricsStageOpacity)
-                        .allowsHitTesting(activeTab == .lyrics)
                     }
                     .frame(height: stageHeight, alignment: .top)
 
@@ -482,8 +562,15 @@ struct NowPlayingScreen: View {
                             x: artworkX,
                             y: artworkY + queueAnchorOffset * headerScrollProgress
                         )
-                        .opacity(transitionHeaderOpacity)
+                        .reportExpandedPlayerArtworkFrame { frame in
+                            guard activeTab != .lyrics else { return }
+                            onArtworkFrameChange(frame)
+                        }
+                        .reportPlayerDismissDebugFrame(.artwork)
+                        .opacity(hidesArtworkForDismissal ? 0 : transitionHeaderOpacity)
                         .id(audio.currentSong?.id)
+                        .transition(trackChangeTransition)
+                        .animation(trackChangeAnimation, value: audio.currentSong?.id)
 
                     if prefersFullBleedCover && !usesGradientPlayerBackground {
                         LinearGradient(
@@ -623,7 +710,15 @@ struct NowPlayingScreen: View {
                 .scaleEffect(artworkScale)
                 .animation(.spring(response: 0.5, dampingFraction: 0.75), value: audio.isPlaying)
                 .offset(x: artworkX, y: artworkY)
+                .reportExpandedPlayerArtworkFrame { frame in
+                    guard activeTab == .lyrics else { return }
+                    onArtworkFrameChange(frame)
+                }
+                .reportPlayerDismissDebugFrame(.artwork)
+                .opacity(hidesArtworkForDismissal ? 0 : 1)
                 .id(audio.currentSong?.id)
+                .transition(trackChangeTransition)
+                .animation(trackChangeAnimation, value: audio.currentSong?.id)
 
             if prefersFullBleedCover && !usesGradientPlayerBackground {
                 LinearGradient(
@@ -708,7 +803,8 @@ struct NowPlayingScreen: View {
     private var portraitArtworkSurface: some View {
         ZStack {
             Color(white: 0.12)
-            if let live = audio.currentLiveArtwork {
+            if shouldRenderLivePortraitArtwork,
+               let live = audio.currentLiveArtwork {
                 liveArtworkView(live)
             } else if let image = audio.currentArtwork {
                 Image(uiImage: image)
@@ -721,6 +817,14 @@ struct NowPlayingScreen: View {
             }
         }
         .clipped()
+    }
+
+    private var shouldRenderLivePortraitArtwork: Bool {
+        activeTab == .nowPlaying
+            && queueStageOpacity > 0.999
+            && lyricsStageOpacity < 0.001
+            && !keepsBothPortraitStagesMounted
+            && !hidesArtworkForDismissal
     }
 
     private func smoothStep(_ value: CGFloat, from lower: CGFloat, to upper: CGFloat) -> CGFloat {
@@ -792,6 +896,8 @@ struct NowPlayingScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .id(audio.currentSong?.id)
+        .transition(trackChangeTransition)
+        .animation(trackChangeAnimation, value: audio.currentSong?.id)
     }
 
     private var landscapeRightPanel: some View {
@@ -847,6 +953,9 @@ struct NowPlayingScreen: View {
             }
         }
         .padding(.top, 14)
+        .id(audio.currentSong?.id)
+        .transition(trackChangeTransition)
+        .animation(trackChangeAnimation, value: audio.currentSong?.id)
     }
 
     private var landscapeStarButton: some View {
@@ -971,17 +1080,12 @@ struct NowPlayingScreen: View {
         HStack(spacing: 0) {
             Spacer()
 
-            Button {
-                animatePrev()
-                audio.skipPrevious()
-            } label: {
-                Image(systemName: Symbols.previous)
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(.white)
+            Button { skipPrevious() } label: {
+                transportIcon(Symbols.previous, size: 34, bounceID: prevBounceID)
                     .frame(width: 78, height: 62)
                     .offset(x: prevNudge)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PlayerTransportButtonStyle(reducesMotion: reducesPlayerMotion))
 
             Spacer()
 
@@ -996,17 +1100,12 @@ struct NowPlayingScreen: View {
 
             Spacer()
 
-            Button {
-                animateSkip()
-                audio.skipNext()
-            } label: {
-                Image(systemName: Symbols.next)
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(.white)
+            Button { skipNext() } label: {
+                transportIcon(Symbols.next, size: 34, bounceID: skipBounceID)
                     .frame(width: 78, height: 62)
                     .offset(x: skipNudge)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PlayerTransportButtonStyle(reducesMotion: reducesPlayerMotion))
 
             Spacer()
         }
@@ -1327,6 +1426,7 @@ struct NowPlayingScreen: View {
             .frame(width: 36, height: 4)
             .padding(.top, 12)
             .padding(.bottom, 8)
+            .reportPlayerDismissDebugFrame(.grabber)
     }
 
     private func selectPlayerTab(_ tab: PlayerTab) {
@@ -1341,6 +1441,10 @@ struct NowPlayingScreen: View {
         let isPortraitAlternateSwitch = usesQueueHeroTransition
             && ((activeTab == .queue && tab == .lyrics)
                 || (activeTab == .lyrics && tab == .queue))
+
+        if isPortraitQueueToggle || isPortraitLyricsToggle || isPortraitAlternateSwitch {
+            mountBothPortraitStagesBriefly()
+        }
 
         if isPortraitAlternateSwitch {
             // Both destinations are already fully composed. Crossfade their
@@ -1401,6 +1505,17 @@ struct NowPlayingScreen: View {
             lyricsTransitionProgress = tab == .lyrics ? 1 : 0
             queueStageOpacity = tab == .lyrics ? 0 : 1
             lyricsStageOpacity = tab == .lyrics ? 1 : 0
+        }
+    }
+
+    private func mountBothPortraitStagesBriefly() {
+        portraitStageCleanupTask?.cancel()
+        keepsBothPortraitStagesMounted = true
+        portraitStageCleanupTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard !Task.isCancelled else { return }
+            keepsBothPortraitStagesMounted = false
+            portraitStageCleanupTask = nil
         }
     }
 
@@ -1851,6 +1966,9 @@ struct NowPlayingScreen: View {
                 }
             }
         }
+        .id(audio.currentSong?.id)
+        .transition(trackChangeTransition)
+        .animation(trackChangeAnimation, value: audio.currentSong?.id)
     }
 
     // MARK: - Now playing content (artwork + track info)
@@ -1892,6 +2010,8 @@ struct NowPlayingScreen: View {
         .scaleEffect((artworkAnimation && !PerformanceMode.reduceAnimations) ? (audio.isPlaying ? 1.0 : 0.88) : 1.0)
         .animation(.spring(response: 0.5, dampingFraction: 0.75), value: audio.isPlaying)
         .id(audio.currentSong?.id)
+        .transition(trackChangeTransition)
+        .animation(trackChangeAnimation, value: audio.currentSong?.id)
     }
 
     @ViewBuilder
@@ -2008,6 +2128,9 @@ struct NowPlayingScreen: View {
                 .buttonStyle(.plain)
             }
         }
+        .id(audio.currentSong?.id)
+        .transition(trackChangeTransition)
+        .animation(trackChangeAnimation, value: audio.currentSong?.id)
     }
 
     // MARK: - Scrubber
@@ -2093,17 +2216,12 @@ struct NowPlayingScreen: View {
         HStack(spacing: 0) {
             Spacer()
 
-            Button {
-                animatePrev()
-                audio.skipPrevious()
-            } label: {
-                Image(systemName: Symbols.previous)
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(.white)
+            Button { skipPrevious() } label: {
+                transportIcon(Symbols.previous, size: 32, bounceID: prevBounceID)
                     .frame(width: 68, height: 68)
                     .offset(x: prevNudge)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PlayerTransportButtonStyle(reducesMotion: reducesPlayerMotion))
 
             Spacer()
 
@@ -2118,17 +2236,12 @@ struct NowPlayingScreen: View {
 
             Spacer()
 
-            Button {
-                animateSkip()
-                audio.skipNext()
-            } label: {
-                Image(systemName: Symbols.next)
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(.white)
+            Button { skipNext() } label: {
+                transportIcon(Symbols.next, size: 32, bounceID: skipBounceID)
                     .frame(width: 68, height: 68)
                     .offset(x: skipNudge)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PlayerTransportButtonStyle(reducesMotion: reducesPlayerMotion))
 
             Spacer()
         }
@@ -2246,14 +2359,60 @@ struct NowPlayingScreen: View {
 
     // MARK: - Skip animations
 
+    @ViewBuilder
+    private func transportIcon(_ symbol: String, size: CGFloat, bounceID: Int) -> some View {
+        if reducesPlayerMotion {
+            Image(systemName: symbol)
+                .font(.system(size: size, weight: .bold))
+                .foregroundStyle(.white)
+        } else {
+            Image(systemName: symbol)
+                .font(.system(size: size, weight: .bold))
+                .foregroundStyle(.white)
+                .symbolBounceCompat(value: bounceID)
+        }
+    }
+
+    private func skipNext() {
+        animateSkip()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.85)
+        audio.skipNext()
+    }
+
+    private func skipPrevious() {
+        animatePrev()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.85)
+        audio.skipPrevious()
+    }
+
     private func animateSkip() {
-        withAnimation(.easeOut(duration: 0.1)) { skipNudge = 14 }
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.65).delay(0.1)) { skipNudge = 0 }
+        skipNudgeResetTask?.cancel()
+        guard !reducesPlayerMotion else {
+            skipNudge = 0
+            return
+        }
+        skipBounceID &+= 1
+        withAnimation(.easeOut(duration: 0.08)) { skipNudge = 12 }
+        skipNudgeResetTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 75_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.72)) { skipNudge = 0 }
+        }
     }
 
     private func animatePrev() {
-        withAnimation(.easeOut(duration: 0.1)) { prevNudge = -14 }
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.65).delay(0.1)) { prevNudge = 0 }
+        prevNudgeResetTask?.cancel()
+        guard !reducesPlayerMotion else {
+            prevNudge = 0
+            return
+        }
+        prevBounceID &+= 1
+        withAnimation(.easeOut(duration: 0.08)) { prevNudge = -12 }
+        prevNudgeResetTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 75_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.72)) { prevNudge = 0 }
+        }
     }
 
     private func refreshPlayerBackground(animated: Bool) {
@@ -2294,6 +2453,20 @@ struct NowPlayingScreen: View {
     }
 }
 
+private struct PlayerTransportButtonStyle: ButtonStyle {
+    let reducesMotion: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reducesMotion ? 0.86 : 1)
+            .opacity(configuration.isPressed ? 0.68 : 1)
+            .animation(
+                reducesMotion ? .linear(duration: 0.01) : .easeOut(duration: 0.08),
+                value: configuration.isPressed
+            )
+    }
+}
+
 /// Makes the closure receive SwiftUI's presentation value on every frame.
 /// Computing staged opacities directly from ordinary state would only animate
 /// their endpoints and lose the keyframe timing on iOS 16.
@@ -2324,6 +2497,82 @@ private struct QueueAnchorOffsetKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+struct PlayerDismissDebugGeometry: Equatable {
+    var surfaceFrame: CGRect = .zero
+    var grabberFrame: CGRect = .zero
+    var artworkFrame: CGRect = .zero
+
+    var isMeaningful: Bool {
+        [surfaceFrame, grabberFrame, artworkFrame].allSatisfy {
+            $0.minX.isFinite && $0.minY.isFinite
+                && $0.width > 1 && $0.height > 1
+        }
+    }
+}
+
+private enum PlayerDismissDebugElement: Hashable {
+    case surface
+    case grabber
+    case artwork
+}
+
+private struct PlayerDismissDebugFramesKey: PreferenceKey {
+    static var defaultValue: [PlayerDismissDebugElement: CGRect] = [:]
+
+    static func reduce(
+        value: inout [PlayerDismissDebugElement: CGRect],
+        nextValue: () -> [PlayerDismissDebugElement: CGRect]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func reportPlayerDismissDebugFrame(_ element: PlayerDismissDebugElement) -> some View {
+#if DEBUG
+        background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: PlayerDismissDebugFramesKey.self,
+                    value: [element: geometry.frame(in: .global)]
+                )
+            }
+        }
+#else
+        self
+#endif
+    }
+}
+
+private struct ExpandedPlayerArtworkFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next.width > 1, next.height > 1 {
+            value = next
+        }
+    }
+}
+
+private extension View {
+    func reportExpandedPlayerArtworkFrame(_ action: @escaping (CGRect) -> Void) -> some View {
+        background {
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: ExpandedPlayerArtworkFrameKey.self,
+                    value: geo.frame(in: .global)
+                )
+            }
+        }
+        .onPreferenceChange(ExpandedPlayerArtworkFrameKey.self) { frame in
+            guard frame.width > 1, frame.height > 1 else { return }
+            action(frame)
+        }
     }
 }
 
@@ -2930,10 +3179,6 @@ private struct SystemVolumeSlider: UIViewRepresentable {
             slider.alpha = 0.001
             slider.isEnabled = true
             slider.isUserInteractionEnabled = false
-            slider.minimumValue = 0
-            slider.maximumValue = 1
-            slider.value = displayedVolume
-
             let thumb = Self.transparentImage(size: CGSize(width: 1, height: 1))
             let track = Self.transparentImage(size: CGSize(width: 1, height: 4))
             for state in Self.controlStates {
@@ -3008,6 +3253,10 @@ private struct SystemVolumeSlider: UIViewRepresentable {
             let clamped = max(0, min(1, volume))
             displayedVolume = clamped
             guard let slider = configuredVolumeSlider() else { return }
+            // MPVolumeView's slider writes to the system volume. Keep that
+            // write exclusively on an intentional gesture; reapplying the
+            // display value during layout can otherwise nudge a volume that
+            // was changed from Control Center.
             slider.setValue(clamped, animated: false)
             slider.sendActions(for: .valueChanged)
             slider.sendActions(for: .touchUpInside)

@@ -8,11 +8,60 @@ import Combine
 enum RepeatMode: Sendable { case off, one, all }
 enum AutoplayMode: Sendable { case off, random, algorithm }
 
+enum GaplessPlaybackMode: String, Sendable {
+    case off
+    case weak
+    case on
+
+    static func resolved(storedValue: String?) -> GaplessPlaybackMode {
+        // Match the shipped player: gapless queue insertion is opt-in. Treat
+        // missing or unknown values as off so an upgrade cannot silently move
+        // an existing user onto a different AVQueuePlayer state machine.
+        storedValue.flatMap(GaplessPlaybackMode.init(rawValue:)) ?? .off
+    }
+
+    static var current: GaplessPlaybackMode {
+        resolved(storedValue: UserDefaults.standard.string(forKey: "gaplessPlayback"))
+    }
+
+    var preparesSuccessor: Bool { self != .off }
+    var enqueuesSuccessor: Bool { self == .on }
+}
+
 struct PlaybackTimeSnapshot: Sendable {
     let elapsed: TimeInterval
     let duration: TimeInterval
 
     var remaining: TimeInterval { max(0, duration - elapsed) }
+}
+
+struct PreviousTrackPlan: Equatable, Sendable {
+    let targetIndex: Int
+    let shouldMaterializePlayback: Bool
+
+    static func resolve(
+        elapsed: TimeInterval,
+        currentIndex: Int,
+        queueCount: Int,
+        isDeferredSession: Bool
+    ) -> PreviousTrackPlan? {
+        guard queueCount > 0, currentIndex >= 0, currentIndex < queueCount else { return nil }
+
+        if elapsed <= 3, currentIndex > 0 {
+            return PreviousTrackPlan(
+                targetIndex: currentIndex - 1,
+                shouldMaterializePlayback: true
+            )
+        }
+
+        return PreviousTrackPlan(
+            targetIndex: currentIndex,
+            // A restored launch session intentionally has no AVPlayerItem. A
+            // transport command must materialize one instead of seeking the
+            // empty queue player and leaving playback in a phantom state.
+            shouldMaterializePlayback: isDeferredSession
+        )
+    }
 }
 
 private struct SavedPlaybackSession: Codable, Sendable {
@@ -44,6 +93,10 @@ private enum SavedPlaybackSessionStore {
 private enum PlaybackHistoryStore {
     static let keyPrefix = "playbackHistory"
     static let maxCount = 50
+    static let persistenceQueue = DispatchQueue(
+        label: "com.ayo.music.playback-history",
+        qos: .utility
+    )
 
     static func key(for serverID: String) -> String {
         "\(keyPrefix).\(serverID)"
@@ -59,6 +112,32 @@ private enum PlaybackURLSource: String, Equatable {
 }
 
 private typealias PlaybackURLInfo = (url: URL, source: PlaybackURLSource, usesTranscode: Bool)
+
+private enum ItemAudioProcessingMode: Int {
+    case none
+    case transitionOnly
+    case effectsAllowed
+    case effectsBypassed
+}
+
+private final class ItemAudioPipeline {
+    let track: AVAssetTrack
+    let tap: MTAudioProcessingTap?
+    let autoMixChannelID: UInt64
+    let mode: ItemAudioProcessingMode
+
+    init(
+        track: AVAssetTrack,
+        tap: MTAudioProcessingTap?,
+        autoMixChannelID: UInt64,
+        mode: ItemAudioProcessingMode
+    ) {
+        self.track = track
+        self.tap = tap
+        self.autoMixChannelID = autoMixChannelID
+        self.mode = mode
+    }
+}
 
 // User-tunable infinite-play fill style.
 enum InfinitePlayStyle: String, CaseIterable, Identifiable, Sendable {
@@ -116,87 +195,18 @@ enum PlaybackTransitionMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-private struct PlaybackTransitionPlan: Sendable {
-    let mode: PlaybackTransitionMode
-    let duration: TimeInterval
-    let startLead: TimeInterval
-    let nextStart: TimeInterval
-    let reason: String
-    let oldRate: Float
-    let nextRate: Float
-    // Beat grids used for downbeat-locked transitions.
-    var beatAligned: Bool = false
-    var beatsPerBar: Int = 4
-    var outBeatPeriod: TimeInterval = 0     // outgoing-track beat period (s)
-    var outBeatPhase: TimeInterval = 0      // outgoing-track grid offset (s)
-    var inBeatPeriod: TimeInterval = 0      // incoming-track beat period (s)
-    var inBeatPhase: TimeInterval = 0       // incoming-track grid offset (s)
-    // Incoming-volume multiplier for hotter masters.
-    var volumeMatch: Float = 1
-
-    static func fallback(mode: PlaybackTransitionMode, current: Song, next: Song) -> PlaybackTransitionPlan {
-        let sameAlbum = current.albumId != nil && current.albumId == next.albumId
-        let sameArtist = current.artistId != nil && current.artistId == next.artistId
-        let sameGenre = current.genre != nil && current.genre?.caseInsensitiveCompare(next.genre ?? "") == .orderedSame
-        switch mode {
-        case .off:
-            return PlaybackTransitionPlan(mode: mode, duration: 0, startLead: 0, nextStart: 0, reason: "off", oldRate: 1, nextRate: 1)
-        case .crossfade:
-            let duration = PlaybackTransitionSettings.crossfadeDuration(sameAlbum: sameAlbum)
-            return PlaybackTransitionPlan(mode: mode, duration: duration, startLead: duration, nextStart: 0, reason: "fixed", oldRate: 1, nextRate: 1)
-        case .automix:
-            let duration = PlaybackTransitionSettings.automixDuration(
-                sameAlbum: sameAlbum,
-                sameArtist: sameArtist,
-                sameGenre: sameGenre
-            )
-            return PlaybackTransitionPlan(mode: mode, duration: duration, startLead: duration, nextStart: 0, reason: "metadata", oldRate: 1, nextRate: 1)
-        }
-    }
-}
-
 private enum PlaybackTransitionSettings {
-    static var style: String {
-        UserDefaults.standard.string(forKey: "automixStyle") ?? "balanced"
-    }
-
-    static var silenceTrimEnabled: Bool {
-        if UserDefaults.standard.object(forKey: "automixSilenceTrim") == nil { return true }
-        return UserDefaults.standard.bool(forKey: "automixSilenceTrim")
-    }
-
-    static var tempoMatchEnabled: Bool {
-        if UserDefaults.standard.object(forKey: "automixTempoMatch") == nil { return true }
-        return UserDefaults.standard.bool(forKey: "automixTempoMatch")
-    }
-
-    // Fire on the outgoing downbeat and drop the incoming on its downbeat.
-    static var beatAlignEnabled: Bool {
-        if UserDefaults.standard.object(forKey: "automixBeatAlign") == nil { return true }
-        return UserDefaults.standard.bool(forKey: "automixBeatAlign")
-    }
-
-    // Scale blend length by Camelot compatibility.
-    static var harmonicEnabled: Bool {
-        if UserDefaults.standard.object(forKey: "automixHarmonic") == nil { return true }
-        return UserDefaults.standard.bool(forKey: "automixHarmonic")
-    }
-
-    // Skip sparse intros and long decaying outros.
-    static var sweetSpotEnabled: Bool {
-        if UserDefaults.standard.object(forKey: "automixSweetSpot") == nil { return true }
-        return UserDefaults.standard.bool(forKey: "automixSweetSpot")
-    }
-
-    // Loudness match when ReplayGain is not already doing it.
-    static var loudnessMatchEnabled: Bool {
-        if UserDefaults.standard.object(forKey: "automixLoudnessMatch") == nil { return true }
-        return UserDefaults.standard.bool(forKey: "automixLoudnessMatch")
+    static var minimumEndLead: TimeInterval {
+        let value = UserDefaults.standard.double(forKey: "automixMinimumEndLeadSeconds")
+        return min(20, max(4, value > 0 ? value : 8))
     }
 
     static var maxBlend: TimeInterval {
-        let value = UserDefaults.standard.double(forKey: "automixMaxBlendSeconds")
-        return min(18, max(4, value > 0 ? value : 10))
+        switch AutoMixStyle.current {
+        case .tight: 7
+        case .balanced: 11
+        case .wide: 15
+        }
     }
 
     static func crossfadeDuration(sameAlbum: Bool) -> TimeInterval {
@@ -205,55 +215,6 @@ private enum PlaybackTransitionSettings {
         return sameAlbum ? min(duration, 4) : duration
     }
 
-    static func automixDuration(sameAlbum: Bool, sameArtist: Bool, sameGenre: Bool) -> TimeInterval {
-        if sameAlbum { return min(maxBlend, 4) }
-        let base: TimeInterval
-        switch style {
-        case "tight":
-            base = sameArtist || sameGenre ? 7 : 5
-        case "wide":
-            base = sameArtist || sameGenre ? 13 : 10
-        default:
-            base = sameArtist || sameGenre ? 10 : 8
-        }
-        return min(maxBlend, max(3, base))
-    }
-}
-
-private struct AudioSilenceProfile: Sendable {
-    var leadingSilence: TimeInterval
-    var trailingSilence: TimeInterval
-
-    static let zero = AudioSilenceProfile(leadingSilence: 0, trailingSilence: 0)
-}
-
-// Shared by live AutoMix and the Settings preview.
-enum AutoMixTempo {
-    // Gentle, pitch-preserved bend.
-    static let maxRate: Double = 1.06          // +/-6%
-    static let maxRatio: Double = 1.32         // engage only within ~32%
-
-    // 75 and 150 BPM are often the same pulse counted differently.
-    static func fold(_ bpm: Double, toward target: Double) -> Double {
-        let candidates = [bpm / 2, bpm, bpm * 2].filter { $0 >= 60 && $0 <= 210 }
-        return candidates.min {
-            abs(log($0 / target)) < abs(log($1 / target))
-        } ?? bpm
-    }
-
-    // Bend only the outgoing track, and hold one constant rate through the fade.
-    static func outgoingRate(currentBPM rawCurrent: Double, nextBPM rawNext: Double)
-        -> (rate: Float, currentBPM: Double, nextBPM: Double)? {
-        let currentBPM = fold(rawCurrent, toward: rawNext)
-        let nextBPM = fold(rawNext, toward: currentBPM)
-        guard currentBPM >= 60, nextBPM >= 60, currentBPM <= 210, nextBPM <= 210 else { return nil }
-        // play the outgoing track at the incoming track's tempo (nextBPM)
-        let ratio = nextBPM / currentBPM
-        guard ratio.isFinite, ratio > 0, abs(log(ratio)) <= log(maxRatio) else { return nil }
-        let rate = min(maxRate, max(1 / maxRate, ratio))
-        guard abs(rate - 1) >= 0.008 else { return nil }
-        return (Float(rate), currentBPM, nextBPM)
-    }
 }
 
 @MainActor
@@ -302,13 +263,24 @@ final class AudioPlayer: ObservableObject {
     private var client: (any MusicService)?
     private var primaryTimeObserverToken: Any?
     private var secondaryTimeObserverToken: Any?
+    private var primaryCurrentItemObservation: NSKeyValueObservation?
+    private var secondaryCurrentItemObservation: NSKeyValueObservation?
     private var loggedSongIDs: Set<String> = []
     private var targetVolume: Float = 1.0
-    private var transitionTask: Task<Void, Never>?
     private var transitionPlanTask: Task<Void, Never>?
     private var transitionPlanKey: String?
-    private var preparedTransitionPlan: PlaybackTransitionPlan?
+    private var preparedTransitionPlan: AutoMixTransitionPlan?
     private var isTransitioning = false
+    private let autoMixCoordinator = AutoMixCoordinator()
+    private let autoMixPlanner = AutoMixPlanner()
+    private weak var transitionOutgoingPlayer: AVQueuePlayer?
+    private weak var transitionIncomingPlayer: AVQueuePlayer?
+    private var transitionNextSong: Song?
+    private var activeTransitionPlan: AutoMixTransitionPlan?
+    private var transitionIncomingSource: PlaybackURLSource?
+    private var transitionIncomingUsesTranscode = false
+    private var transitionPromoted = false
+    private var readinessRetryCount = 0
     // Drives the "Mixing" indicator.
     @Published private(set) var isMixing = false
     private var transitionSuppressedUntil = Date.distantPast
@@ -316,13 +288,9 @@ final class AudioPlayer: ObservableObject {
     private var primedSongID: String?
     private var primingSongID: String?
     private var transitionPrimeTask: Task<Void, Never>?
-    // Scheduled downbeat transition that has not fired yet.
-    private var transitionArmTask: Task<Void, Never>?
-    private var transitionArmed = false
-    // Bass-swap tap ids; 0 means inactive.
-    private var primedBassID: UInt64 = 0
-    private var currentBassID: UInt64 = 0
     private var primedSongUsesTranscode = false
+    private var primedPlaybackSource: PlaybackURLSource?
+    private var primedReady = false
 
     private var gaplessNextItem: AVPlayerItem? = nil
     private var gaplessNextSongID: String? = nil
@@ -330,9 +298,16 @@ final class AudioPlayer: ObservableObject {
     private var gaplessNextUsesTranscode = false
     private var gaplessNextQueueIndex: Int? = nil
     private var gaplessPreloadTask: Task<Void, Never>?
+    private var gaplessPreloadGeneration: UInt64 = 0
+    private var gaplessNextStatusObservation: NSKeyValueObservation?
+    private var gaplessRetrySongID: String?
+    private var gaplessRetryCount = 0
     private var gaplessReadinessLoggedItemID: ObjectIdentifier?
     private var gaplessTransitionMeasurementTask: Task<Void, Never>?
     private var currentAudioProcessingTask: Task<Void, Never>?
+    private var playbackPreparationTask: Task<Void, Never>?
+    private let itemAudioProcessingModes = NSMapTable<AVPlayerItem, NSNumber>.weakToStrongObjects()
+    private let itemAudioPipelines = NSMapTable<AVPlayerItem, ItemAudioPipeline>.weakToStrongObjects()
     private var currentPlayerItem: AVPlayerItem? = nil
     private var currentPlaybackSource: PlaybackURLSource?
     private var prematureTranscodeEndRetries: [String: Int] = [:]
@@ -348,6 +323,8 @@ final class AudioPlayer: ObservableObject {
     private var warmStreamsTask: Task<Void, Never>?
     private let autoplayPreloadThreshold = 1
     private var currentServerID: String?
+    private var playbackHistoryPersistenceGeneration: UInt64 = 0
+    private var savedPlaybackSessionPersistenceGeneration: UInt64 = 0
     private var didAttemptSavedSessionRestore = false
     private var lastSessionAutosaveAt = Date.distantPast
     private let sessionAutosaveInterval: TimeInterval = 5
@@ -366,7 +343,7 @@ final class AudioPlayer: ObservableObject {
     private var sleepTimer: Timer?
 
     static var canUseAutoMix: Bool {
-        (UserDefaults.standard.string(forKey: "gaplessPlayback") ?? "on") != "off"
+        true
     }
 
     init() {
@@ -393,6 +370,7 @@ final class AudioPlayer: ObservableObject {
         configureAudioSession()
         configureRemoteCommands()
         addTimeObservers()
+        addCurrentItemObservers()
         addEndObserver()
         addInterruptionObserver()
         addRouteChangeObserver()
@@ -400,10 +378,15 @@ final class AudioPlayer: ObservableObject {
         NotificationCenter.default.addObserver(forName: .equalizerToggled, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let item = self.player.currentItem else { return }
+                let desiredMode = self.desiredAudioProcessingMode
+                let currentMode = self.audioProcessingMode(for: item)
+                guard desiredMode != currentMode else { return }
                 self.applyEqualizer(to: item)
                 self.invalidatePreloadedNext()
                 self.scheduleGaplessPreload()
                 self.clearPriming()
+                self.resetPreparedTransitionPlan()
+                self.prepareTransitionPlanIfNeeded()
             }
         }
     }
@@ -420,18 +403,51 @@ final class AudioPlayer: ObservableObject {
         let asset = AVURLAsset(url: urlInfo.url, options: options)
         let item = AVPlayerItem(asset: asset)
         if urlInfo.source == .stream {
-            item.preferredForwardBufferDuration = urlInfo.usesTranscode ? 18 : 3
+            item.preferredForwardBufferDuration = urlInfo.usesTranscode ? 24 : 12
             item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         }
         if requiresTimePitchProcessing {
-            item.audioTimePitchAlgorithm = .timeDomain
+            item.audioTimePitchAlgorithm = .spectral
         }
         return item
     }
 
+    private var desiredAudioProcessingMode: ItemAudioProcessingMode {
+        let visualizerActive = AudioVisualizerEngine.shared.isActive
+        let transitionActive = transitionMode != .off && !PerformanceMode.simpleTransitions
+        if PerformanceMode.bypassAudioEffects {
+            if visualizerActive { return .effectsBypassed }
+            return transitionActive ? .transitionOnly : .none
+        }
+        if EqualizerEngine.shared.isAnyEffectActive { return .effectsAllowed }
+        if visualizerActive { return .effectsBypassed }
+        return transitionActive ? .transitionOnly : .none
+    }
+
     private var audioProcessingRequired: Bool {
-        AudioVisualizerEngine.shared.isActive
-            || (EqualizerEngine.shared.isAnyEffectActive && !PerformanceMode.bypassAudioEffects)
+        desiredAudioProcessingMode != .none
+    }
+
+    private func audioProcessingMode(for item: AVPlayerItem) -> ItemAudioProcessingMode {
+        guard let raw = itemAudioProcessingModes.object(forKey: item)?.intValue else { return .none }
+        return ItemAudioProcessingMode(rawValue: raw) ?? .none
+    }
+
+    private func setAudioProcessingMode(_ mode: ItemAudioProcessingMode, for item: AVPlayerItem) {
+        if mode == .none {
+            itemAudioProcessingModes.removeObject(forKey: item)
+            releaseAudioPipeline(for: item)
+        } else {
+            itemAudioProcessingModes.setObject(NSNumber(value: mode.rawValue), forKey: item)
+        }
+    }
+
+    private func releaseAudioPipeline(for item: AVPlayerItem) {
+        if let pipeline = itemAudioPipelines.object(forKey: item), pipeline.autoMixChannelID != 0 {
+            AutoMixTransitionDSP.shared.release(channelID: pipeline.autoMixChannelID)
+        }
+        itemAudioPipelines.removeObject(forKey: item)
+        itemAudioProcessingModes.removeObject(forKey: item)
     }
 
     private func sourceNeedsNetworkBuffer(source: PlaybackURLSource, usesTranscode: Bool) -> Bool {
@@ -448,24 +464,91 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
+    private func activateAudioSessionForPlayback() -> Bool {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            // A long background pause can leave this app's session inactive.
+            // Reapplying category before activation makes a user-initiated
+            // resume deterministic instead of relying on a stale player state.
+            try session.setCategory(.playback, mode: .default)
+            try session.setActive(true)
+            return true
+        } catch {
+            AppLogger.shared.log(
+                "Playback resume could not activate audio session: \(error.localizedDescription)",
+                category: .playback,
+                level: .warning
+            )
+            return false
+        }
+    }
+
     // Loading an audio track is asynchronous. Callers preparing an upcoming
     // item await this before queue insertion so audioMix is never swapped at
     // the handoff boundary.
-    private func prepareAudioProcessing(for item: AVPlayerItem) async -> Bool {
-        let visualizerActive = AudioVisualizerEngine.shared.isActive
-        let effectsActive = EqualizerEngine.shared.isAnyEffectActive && !PerformanceMode.bypassAudioEffects
-        guard visualizerActive || effectsActive else {
+    private func prepareAudioProcessing(
+        for item: AVPlayerItem,
+        forceAutoMixDSP: Bool = false
+    ) async -> Bool {
+        let desiredMode = desiredAudioProcessingMode
+        let resolvedMode: ItemAudioProcessingMode = forceAutoMixDSP && desiredMode == .transitionOnly
+            ? .effectsBypassed
+            : desiredMode
+        guard resolvedMode != .none else {
             item.audioMix = nil
+            setAudioProcessingMode(.none, for: item)
             return true
         }
         guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first,
-              !Task.isCancelled,
-              let tap = EqualizerEngine.shared.makeTap(bypassEffects: !effectsActive) else { return false }
+              !Task.isCancelled else {
+            return false
+        }
+        // Settings may change while the asset load suspends. Build against the
+        // latest topology so a newly enabled EQ is not inserted unprocessed.
+        let latestDesiredMode = desiredAudioProcessingMode
+        let latestMode: ItemAudioProcessingMode = forceAutoMixDSP && latestDesiredMode == .transitionOnly
+            ? .effectsBypassed
+            : latestDesiredMode
+        guard latestMode != .none else {
+            item.audioMix = nil
+            setAudioProcessingMode(.none, for: item)
+            return true
+        }
+        releaseAudioPipeline(for: item)
+        let needsTap = latestMode == .effectsAllowed || latestMode == .effectsBypassed
+        let autoMixChannelID = needsTap
+            && transitionMode == .automix
+            && !PerformanceMode.simpleTransitions
+            ? AutoMixTransitionDSP.shared.reserveChannel()
+            : 0
+        let tap: MTAudioProcessingTap?
+        if needsTap {
+            tap = EqualizerEngine.shared.makeTap(
+                bypassEffects: latestMode == .effectsBypassed,
+                autoMixChannelID: autoMixChannelID
+            )
+            guard tap != nil else {
+                AutoMixTransitionDSP.shared.release(channelID: autoMixChannelID)
+                return false
+            }
+        } else {
+            tap = nil
+        }
         let params = AVMutableAudioMixInputParameters(track: track)
         params.audioTapProcessor = tap
         let mix = AVMutableAudioMix()
         mix.inputParameters = [params]
         item.audioMix = mix
+        itemAudioPipelines.setObject(
+            ItemAudioPipeline(
+                track: track,
+                tap: tap,
+                autoMixChannelID: autoMixChannelID,
+                mode: latestMode
+            ),
+            forKey: item
+        )
+        setAudioProcessingMode(latestMode, for: item)
         return true
     }
 
@@ -473,6 +556,7 @@ final class AudioPlayer: ObservableObject {
         currentAudioProcessingTask?.cancel()
         guard audioProcessingRequired else {
             item.audioMix = nil
+            setAudioProcessingMode(.none, for: item)
             currentAudioProcessingTask = nil
             return
         }
@@ -482,56 +566,74 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
-    // One audioMix tap per item, so bass-swap yields to EQ/effects.
-    private var bassSwapAvailable: Bool {
-        transitionMode == .automix
-            && AutoMixBassSwap.shared.isEnabled
-            && !EqualizerEngine.shared.isAnyEffectActive
-            && !AudioVisualizerEngine.shared.isActive
-            && !PerformanceMode.bypassAudioEffects
-    }
-
-    // Prepare incoming-track bass-swap before the item is inserted.
-    private func prepareBassSwap(for item: AVPlayerItem) async -> UInt64 {
-        guard bassSwapAvailable else { return 0 }
-        let id = AutoMixBassSwap.shared.reserveID()
-        guard let track = try? await item.asset.loadTracks(withMediaType: .audio).first,
-              !Task.isCancelled,
-              let tap = AutoMixBassSwap.shared.makeTap(id: id) else { return 0 }
-        let params = AVMutableAudioMixInputParameters(track: track)
-        params.audioTapProcessor = tap
+    private func installTransitionEnvelope(
+        on item: AVPlayerItem,
+        plan: AutoMixTransitionPlan,
+        outgoing: Bool
+    ) -> Bool {
+        guard let pipeline = itemAudioPipelines.object(forKey: item) else { return false }
+        let parameters = AVMutableAudioMixInputParameters(track: pipeline.track)
+        parameters.audioTapProcessor = pipeline.tap
+        if outgoing {
+            AutoMixTimedEnvelope.applyOutgoing(plan, to: parameters)
+        } else {
+            AutoMixTimedEnvelope.applyIncoming(plan, to: parameters)
+        }
         let mix = AVMutableAudioMix()
-        mix.inputParameters = [params]
+        mix.inputParameters = [parameters]
         item.audioMix = mix
-        return id
+        return true
     }
 
-    // Incoming bass opens as the new track takes over.
-    private func bassSwapCutoff(at x: Double) -> Double {
-        let openBy = 0.6
-        let k = max(0, 1 - x / openBy)
-        return AutoMixBassSwap.bypassHz + (AutoMixBassSwap.maxCutoffHz - AutoMixBassSwap.bypassHz) * (k * k)
+    private func resetTransitionEnvelope(on item: AVPlayerItem, at mediaTime: TimeInterval) {
+        guard let pipeline = itemAudioPipelines.object(forKey: item) else { return }
+        AutoMixTransitionDSP.shared.reset(channelID: pipeline.autoMixChannelID)
+        let parameters = AVMutableAudioMixInputParameters(track: pipeline.track)
+        parameters.audioTapProcessor = pipeline.tap
+        AutoMixTimedEnvelope.setUnity(to: parameters, at: mediaTime)
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = [parameters]
+        item.audioMix = mix
     }
 
-    // Align grids at the bend point, not at T0, then clamp to half a beat.
-    private func beatLockSeekShift(plan: PlaybackTransitionPlan) -> TimeInterval {
-        guard plan.beatAligned, plan.outBeatPeriod > 0.2, plan.inBeatPeriod > 0.2,
-              abs(plan.oldRate - 1) >= 0.01 else { return 0 }
-        let pi = plan.inBeatPeriod, po = plan.outBeatPeriod
-        let bendAt = 0.15 * max(0.75, plan.duration)
-        let outFrac = bendAt.truncatingRemainder(dividingBy: po) / po
-        let inFrac = bendAt.truncatingRemainder(dividingBy: pi) / pi
-        var shift = (outFrac - inFrac) * pi
-        shift = shift.truncatingRemainder(dividingBy: pi)
-        if shift > pi / 2 { shift -= pi }
-        if shift <= -pi / 2 { shift += pi }
-        return shift
+    private func configureTransitionFilters(
+        outgoingItem: AVPlayerItem,
+        incomingItem: AVPlayerItem,
+        plan: AutoMixTransitionPlan
+    ) {
+        if let pipeline = itemAudioPipelines.object(forKey: outgoingItem) {
+            AutoMixTransitionDSP.shared.configure(
+                channelID: pipeline.autoMixChannelID,
+                descriptor: AutoMixTransitionFilterDescriptor(
+                    mediaStart: plan.outgoingCue,
+                    mediaDuration: plan.duration,
+                    highPassStartHz: plan.filters.outgoingHighPassStartHz,
+                    highPassEndHz: plan.filters.outgoingHighPassEndHz,
+                    lowPassStartHz: plan.filters.outgoingLowPassStartHz,
+                    lowPassEndHz: plan.filters.outgoingLowPassEndHz
+                )
+            )
+        }
+        if let pipeline = itemAudioPipelines.object(forKey: incomingItem) {
+            AutoMixTransitionDSP.shared.configure(
+                channelID: pipeline.autoMixChannelID,
+                descriptor: AutoMixTransitionFilterDescriptor(
+                    mediaStart: plan.incomingCue,
+                    mediaDuration: plan.incomingMediaDuration,
+                    highPassStartHz: plan.filters.incomingHighPassStartHz,
+                    highPassEndHz: plan.filters.incomingHighPassEndHz,
+                    lowPassStartHz: plan.filters.incomingLowPassStartHz,
+                    lowPassEndHz: plan.filters.incomingLowPassEndHz
+                )
+            )
+        }
     }
 
     func updateClient(_ client: (any MusicService)?, serverID: String? = nil) {
         let previousServerID = currentServerID
         if previousServerID != serverID || client == nil {
             PlaybackCacheService.shared.cancelPrefetches()
+            Task { await AutoMixAnalysisService.shared.cancelAll() }
         }
         self.client = client
         currentServerID = serverID
@@ -539,7 +641,7 @@ final class AudioPlayer: ObservableObject {
         if previousServerID != serverID {
             loadPlaybackHistory(for: serverID)
         }
-        DownloadService.shared.updateClient(client)
+        DownloadService.shared.updateClient(client, serverID: serverID)
         AppLogger.shared.log(
             "Playback client updated; connected=\(client != nil)",
             category: .playback
@@ -562,7 +664,7 @@ final class AudioPlayer: ObservableObject {
             category: .playback
         )
         cancelTransitionPlayback()
-        gaplessNextItem = nil
+        invalidatePreloadedNext()
         autoplayArtistName = nil
         autoplayArtistId = nil
         infinitePlaySeed = []
@@ -603,6 +705,7 @@ final class AudioPlayer: ObservableObject {
     }
 
     func clearPlaybackHistory() {
+        playbackHistoryPersistenceGeneration &+= 1
         playbackHistory = []
         guard let currentServerID else { return }
         UserDefaults.standard.removeObject(forKey: PlaybackHistoryStore.key(for: currentServerID))
@@ -618,12 +721,13 @@ final class AudioPlayer: ObservableObject {
 
     func skipNext() {
         AppLogger.shared.log("Skip next; index=\(currentIndex); target=\(currentIndex + 1)", category: .playback)
+        guard !queue.isEmpty, queue.indices.contains(currentIndex) else { return }
         suppressTransitionsBriefly()
         cancelTransitionPlayback()
         switch repeatMode {
         case .one:
             seek(to: 0)
-            player.play()
+            resume()
         case .all:
             currentIndex = (currentIndex + 1) % queue.count
             playCurrent()
@@ -644,16 +748,22 @@ final class AudioPlayer: ObservableObject {
 
     func skipPrevious() {
         AppLogger.shared.log("Skip previous; index=\(currentIndex); elapsed=\(String(format: "%.3f", currentTime))s", category: .playback)
+        let isDeferredSession = currentPlayerItem == nil && deferredRestoredTime != nil
+        guard let plan = PreviousTrackPlan.resolve(
+            elapsed: playbackTimeSnapshot().elapsed,
+            currentIndex: currentIndex,
+            queueCount: queue.count,
+            isDeferredSession: isDeferredSession
+        ) else { return }
         suppressTransitionsBriefly()
         cancelTransitionPlayback()
-        if currentTime > 3 {
-            seek(to: 0)
-            if isPlaying { player.play() }
-        } else if currentIndex > 0 {
-            currentIndex -= 1
+
+        if plan.targetIndex != currentIndex || plan.shouldMaterializePlayback {
+            currentIndex = plan.targetIndex
             playCurrent()
         } else {
             seek(to: 0)
+            if isPlaying { resume() }
         }
     }
 
@@ -667,28 +777,11 @@ final class AudioPlayer: ObservableObject {
 
     func togglePlayPause() {
         guard currentSong != nil else { return }
-        let wasPlaying = isPlaying
         if isPlaying {
-            pauseAllPlayers()
-            cancelTransitionPlayback(keepPaused: true)
-        } else if resumeDeferredSessionIfNeeded() {
-            return
+            pause()
         } else {
-            player.play()
+            resume()
         }
-        isPlaying.toggle()
-        if !wasPlaying, let song = currentSong {
-            if currentSongStartedAt == nil {
-                currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, currentTime))
-            }
-            notifyNowPlaying(for: song)
-        }
-        AppLogger.shared.log(
-            "Playback \(isPlaying ? "resumed" : "paused"); songID=\(currentSong?.id ?? "none"); elapsed=\(String(format: "%.3f", liveTime()))s",
-            category: .playback
-        )
-        updateNowPlaying()
-        persistLastPlaybackSession()
     }
 
     func pause() {
@@ -703,24 +796,56 @@ final class AudioPlayer: ObservableObject {
         persistLastPlaybackSession()
     }
 
+    func clearActivePlaybackForRecovery() {
+        AppLogger.shared.logAlways(
+            "Developer recovery requested; songID=\(currentSong?.id ?? "none"); queueCount=\(queue.count); hasItem=\(currentPlayerItem != nil); deferred=\(deferredRestoredTime != nil)",
+            category: .playback,
+            level: .warning
+        )
+        stopAndClear()
+    }
+
     // Full stop for logout.
     func stopAndClear() {
         AppLogger.shared.log(
             "Playback stopped and queue cleared; songID=\(currentSong?.id ?? "none"); queueCount=\(queue.count)",
             category: .playback
         )
+        // Invalidate unstructured metadata warmups before clearing state so a
+        // late response cannot resurrect the track that was just removed.
+        playRequestID &+= 1
+        autoplayAppendTask?.cancel(); autoplayAppendTask = nil
         PlaybackCacheService.shared.cancelPrefetches()
         pauseAllPlayers()
         cancelTransitionPlayback(keepPaused: true)
+        resetPreparedTransitionPlan()
+        cancelSleepTimer(resumeGaplessPreload: false)
         artworkLoadTask?.cancel(); artworkLoadTask = nil
         durationLoadTask?.cancel(); durationLoadTask = nil
         startupDiagnosticsTask?.cancel(); startupDiagnosticsTask = nil
         warmStreamsTask?.cancel(); warmStreamsTask = nil
         gaplessPreloadTask?.cancel(); gaplessPreloadTask = nil
+        gaplessPreloadGeneration &+= 1
+        gaplessNextStatusObservation?.invalidate(); gaplessNextStatusObservation = nil
         gaplessTransitionMeasurementTask?.cancel(); gaplessTransitionMeasurementTask = nil
         currentAudioProcessingTask?.cancel(); currentAudioProcessingTask = nil
-        primaryPlayer.replaceCurrentItem(with: nil)
-        secondaryPlayer.replaceCurrentItem(with: nil)
+        playbackPreparationTask?.cancel(); playbackPreparationTask = nil
+        for item in primaryPlayer.items() + secondaryPlayer.items() {
+            releaseAudioPipeline(for: item)
+        }
+        primaryPlayer.removeAllItems()
+        secondaryPlayer.removeAllItems()
+        activePlayer = primaryPlayer
+        targetVolume = 1
+        primaryPlayer.volume = 1
+        secondaryPlayer.volume = 0
+        primaryPlayer.rate = 1
+        secondaryPlayer.rate = 1
+        primaryPlayer.automaticallyWaitsToMinimizeStalling = false
+        secondaryPlayer.automaticallyWaitsToMinimizeStalling = false
+        itemAudioProcessingModes.removeAllObjects()
+        itemAudioPipelines.removeAllObjects()
+        Task { await AutoMixAnalysisService.shared.cancelAll() }
         currentPlayerItem = nil
         currentPlaybackSource = nil
         currentPlaybackUsesTranscode = false
@@ -732,6 +857,8 @@ final class AudioPlayer: ObservableObject {
         gaplessNextUsesTranscode = false
         gaplessNextQueueIndex = nil
         gaplessReadinessLoggedItemID = nil
+        gaplessRetrySongID = nil
+        gaplessRetryCount = 0
         isPlaying = false
         hasActivePlaybackSession = false
         currentSong = nil
@@ -748,6 +875,10 @@ final class AudioPlayer: ObservableObject {
         queueSourcePlaylist = nil
         autoplayArtistName = nil
         autoplayArtistId = nil
+        infinitePlaySeed = []
+        loggedSongIDs.removeAll()
+        transitionSuppressedUntil = .distantPast
+        lastSessionAutosaveAt = .distantPast
         clearSavedPlaybackSession()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -774,6 +905,10 @@ final class AudioPlayer: ObservableObject {
         )
         updateNowPlayingTime()
         persistLastPlaybackSession()
+        if transitionMode != .off {
+            refreshAutoMixAnalysisWindow()
+            prepareTransitionPlanIfNeeded()
+        }
     }
 
     func liveTime() -> TimeInterval {
@@ -792,6 +927,8 @@ final class AudioPlayer: ObservableObject {
         invalidatePreloadedNext()
         scheduleGaplessPreload()
         clearPriming()
+        resetPreparedTransitionPlan()
+        prepareTransitionPlanIfNeeded()
     }
 
     func visualizerSnapshot() -> AudioVisualizerSnapshot {
@@ -839,9 +976,6 @@ final class AudioPlayer: ObservableObject {
     // and hand UI consumers one coherent sample.
     func playbackTimeSnapshot() -> PlaybackTimeSnapshot {
         let itemDuration = player.currentItem?.duration.seconds ?? .nan
-        // The server's reported duration is reliable; AVPlayer's item duration is a
-        // header-based estimate for streamed transcodes. It can under- or over-report
-        // depending on container/bitrate, especially for on-the-fly Opus streams.
         let metadataDuration = resolvedPlaybackDuration(avDuration: itemDuration)
 
         let playerTime = player.currentTime().seconds
@@ -863,22 +997,10 @@ final class AudioPlayer: ObservableObject {
         guard avDuration.isFinite, avDuration > 0 else {
             return max(0, storedDuration)
         }
-        if shouldPreferServerDuration(avDuration: avDuration, serverDuration: serverDuration) {
-            return serverDuration
-        }
+        // Some servers report a rounded or stale duration while the streamed
+        // item continues beyond it. Never let that shorter estimate put the
+        // scrubber at 0:00 before AVFoundation has actually reached its end.
         return max(storedDuration, avDuration)
-    }
-
-    private func shouldPreferServerDuration(
-        avDuration: TimeInterval,
-        serverDuration: TimeInterval,
-        source: PlaybackURLSource? = nil
-    ) -> Bool {
-        guard serverDuration > 0 else { return false }
-        let activeSource = source ?? currentPlaybackSource
-        guard activeSource == .stream || activeSource == .playbackCache else { return false }
-        let tolerance = max(3.0, serverDuration * 0.05)
-        return abs(avDuration - serverDuration) > tolerance
     }
 
     func persistLastPlaybackSession(synchronize: Bool = false) {
@@ -929,30 +1051,46 @@ final class AudioPlayer: ObservableObject {
             queueSourcePlaylist: nil
         )
 
-        let save = { @Sendable in
-            do {
-                let data = try JSONEncoder().encode(session)
-                UserDefaults.standard.set(data, forKey: SavedPlaybackSessionStore.key)
-                if synchronize { UserDefaults.standard.synchronize() }
-            } catch {
-                let message = error.localizedDescription
-                Task { @MainActor in
-                    AppLogger.shared.log(
-                        "Saved playback session failed: \(message)",
-                        category: .playback,
-                        level: .warning
-                    )
-                }
+        savedPlaybackSessionPersistenceGeneration &+= 1
+        let generation = savedPlaybackSessionPersistenceGeneration
+        let encode = { @Sendable () throws -> Data in
+            try JSONEncoder().encode(session)
+        }
+
+        let reportFailure: @Sendable (String) -> Void = { message in
+            _ = Task { @MainActor in
+                AppLogger.shared.log(
+                    "Saved playback session failed: \(message)",
+                    category: .playback,
+                    level: .warning
+                )
             }
         }
 
         lastSessionAutosaveAt = Date()
         if synchronize {
-            // App lifecycle persistence needs to finish before the caller
-            // returns; it is not part of the regular playback-time path.
-            save()
+            do {
+                let data = try encode()
+                UserDefaults.standard.set(data, forKey: SavedPlaybackSessionStore.key)
+                UserDefaults.standard.synchronize()
+            } catch {
+                reportFailure(error.localizedDescription)
+            }
         } else {
-            SavedPlaybackSessionStore.persistenceQueue.async(execute: save)
+            SavedPlaybackSessionStore.persistenceQueue.async { [weak self] in
+                do {
+                    let data = try encode()
+                    Task { @MainActor [weak self] in
+                        guard let self,
+                              self.savedPlaybackSessionPersistenceGeneration == generation,
+                              self.currentServerID == serverID,
+                              self.currentSong?.id == song.id else { return }
+                        UserDefaults.standard.set(data, forKey: SavedPlaybackSessionStore.key)
+                    }
+                } catch {
+                    reportFailure(error.localizedDescription)
+                }
+            }
         }
     }
 
@@ -960,6 +1098,8 @@ final class AudioPlayer: ObservableObject {
         guard !didAttemptSavedSessionRestore else { return }
         didAttemptSavedSessionRestore = true
         guard currentSong == nil, !hasActivePlaybackSession else { return }
+        playRequestID &+= 1
+        let restoreRequestID = playRequestID
         guard let serverID = currentServerID,
               let session = loadSavedPlaybackSession(),
               session.serverID == serverID else { return }
@@ -982,7 +1122,9 @@ final class AudioPlayer: ObservableObject {
             await client?.prepareForPlayback(song: song)
         }
 
-        guard currentSong == nil, !hasActivePlaybackSession else { return }
+        guard restoreRequestID == playRequestID,
+              currentSong == nil,
+              !hasActivePlaybackSession else { return }
         guard playbackURL(for: song) != nil else {
             AppLogger.shared.log(
                 "Saved playback session restore skipped: no stream URL for '\(song.title)'",
@@ -999,6 +1141,9 @@ final class AudioPlayer: ObservableObject {
         warmStreamsTask?.cancel(); warmStreamsTask = nil
         primaryPlayer.pause()
         secondaryPlayer.pause()
+        for item in primaryPlayer.items() + secondaryPlayer.items() {
+            releaseAudioPipeline(for: item)
+        }
         primaryPlayer.removeAllItems()
         secondaryPlayer.removeAllItems()
         activePlayer = primaryPlayer
@@ -1048,7 +1193,56 @@ final class AudioPlayer: ObservableObject {
 
         let item = makePlayerItem(playback: urlInfo)
         startupDiagnosticsTask?.cancel()
-        applyEqualizer(to: item)
+        playbackPreparationTask?.cancel()
+        playRequestID &+= 1
+        let requestToken = playRequestID
+        isPlaying = true
+        currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, elapsed))
+        updateNowPlaying()
+        persistLastPlaybackSession()
+
+        // Keep the not-yet-inserted item alive until preparation finishes.
+        // A weak capture here drops the only owner as soon as this method
+        // returns, so the task exits without ever materializing playback.
+        playbackPreparationTask = Task { @MainActor [weak self, item] in
+            guard let self else { return }
+            defer {
+                if requestToken == self.playRequestID {
+                    self.playbackPreparationTask = nil
+                }
+            }
+            let processingReady = await self.prepareAudioProcessing(for: item)
+            guard !Task.isCancelled,
+                  requestToken == self.playRequestID,
+                  self.currentPlayerItem == nil,
+                  self.currentSong?.id == song.id,
+                  let resumedElapsed = self.deferredRestoredTime else { return }
+            if !processingReady {
+                item.audioMix = nil
+                self.setAudioProcessingMode(.none, for: item)
+                AppLogger.shared.log(
+                    "Audio processing unavailable while restoring '\(song.title)'; playing unprocessed",
+                    category: .playback,
+                    level: .warning
+                )
+            }
+            self.materializeDeferredPlayback(
+                song: song,
+                item: item,
+                urlInfo: urlInfo,
+                elapsed: resumedElapsed
+            )
+        }
+        return true
+    }
+
+    private func materializeDeferredPlayback(
+        song: Song,
+        item: AVPlayerItem,
+        urlInfo: PlaybackURLInfo,
+        elapsed: TimeInterval
+    ) {
+        for existing in player.items() { releaseAudioPipeline(for: existing) }
         player.removeAllItems()
         player.insert(item, after: nil)
         currentPlayerItem = item
@@ -1056,8 +1250,6 @@ final class AudioPlayer: ObservableObject {
         currentPlaybackUsesTranscode = urlInfo.usesTranscode
         applyReplayGain(for: song)
         try? AVAudioSession.sharedInstance().setActive(true)
-        isPlaying = true
-        currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, elapsed))
 
         let beginPlayback = { [weak self, weak item] in
             guard let self, let item,
@@ -1095,7 +1287,6 @@ final class AudioPlayer: ObservableObject {
             "Restored playback materialized; title='\(song.title)'; elapsed=\(String(format: "%.3f", elapsed))s",
             category: .playback
         )
-        return true
     }
 
     private func autosaveLastPlaybackSessionIfNeeded() {
@@ -1123,6 +1314,9 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func clearSavedPlaybackSession() {
+        // Any older encode already queued on the persistence worker must not be
+        // allowed to recreate the session after a recovery clear or logout.
+        savedPlaybackSessionPersistenceGeneration &+= 1
         UserDefaults.standard.removeObject(forKey: SavedPlaybackSessionStore.key)
         UserDefaults.standard.synchronize()
     }
@@ -1130,6 +1324,7 @@ final class AudioPlayer: ObservableObject {
     // MARK: - Queue manipulation
 
     func moveQueueItem(from source: IndexSet, to dest: Int) {
+        cancelTransitionPlayback(keepPaused: !isPlaying)
         queue.move(fromOffsets: source, toOffset: dest)
         if let moved = source.first {
             if moved == currentIndex {
@@ -1157,6 +1352,7 @@ final class AudioPlayer: ObservableObject {
             AppLogger.shared.log("Queued next while idle: '\(song.title)'", category: .playback)
             return
         }
+        cancelTransitionPlayback(keepPaused: !isPlaying)
         invalidatePreloadedNext()
         insertSongsNext(queueWithTrackPairings([song]).songs)
         resetPreparedTransitionPlan()
@@ -1182,6 +1378,7 @@ final class AudioPlayer: ObservableObject {
             AppLogger.shared.log("Queued \(songs.count) next while idle", category: .playback)
             return
         }
+        cancelTransitionPlayback(keepPaused: !isPlaying)
         invalidatePreloadedNext()
         insertSongsNext(queueWithTrackPairings(songs).songs)
         resetPreparedTransitionPlan()
@@ -1274,6 +1471,7 @@ final class AudioPlayer: ObservableObject {
 
     func removeQueueItem(at index: Int) {
         guard index >= 0, index < queue.count else { return }
+        cancelTransitionPlayback(keepPaused: !isPlaying)
         if index == currentIndex + 1 { resetPreparedTransitionPlan() }
         queue.remove(at: index)
         if index < currentIndex {
@@ -1292,6 +1490,7 @@ final class AudioPlayer: ObservableObject {
     func toggleShuffle() {
         isShuffle.toggle()
         guard isShuffle else { return }
+        cancelTransitionPlayback(keepPaused: !isPlaying)
         shuffleUpcoming()
         // Rebuild the preloaded next item and transition for the new order.
         invalidatePreloadedNext()
@@ -1321,6 +1520,7 @@ final class AudioPlayer: ObservableObject {
     }
 
     func cycleRepeat() {
+        cancelTransitionPlayback(keepPaused: !isPlaying)
         switch repeatMode {
         case .off: repeatMode = .all
         case .all: repeatMode = .one
@@ -1350,16 +1550,22 @@ final class AudioPlayer: ObservableObject {
     }
     func setTransitionMode(_ mode: PlaybackTransitionMode) {
         let nextMode = (mode == .automix && !Self.canUseAutoMix) ? .crossfade : mode
+        if nextMode != transitionMode {
+            cancelTransitionPlayback(keepPaused: !isPlaying)
+        }
         transitionMode = nextMode
         UserDefaults.standard.set(nextMode.rawValue, forKey: "playbackTransitionMode")
         UserDefaults.standard.set(nextMode != .off, forKey: "crossfadeEnabled")
         resetPreparedTransitionPlan()
+        if let item = player.currentItem { applyEqualizer(to: item) }
         if nextMode == .off {
             cancelTransitionPlayback()
             scheduleGaplessPreload()
+            Task { await AutoMixAnalysisService.shared.cancelAll() }
         } else {
             invalidatePreloadedNext()
             clearPriming()
+            refreshAutoMixAnalysisWindow()
             prepareTransitionPlanIfNeeded()
         }
     }
@@ -1528,7 +1734,7 @@ final class AudioPlayer: ObservableObject {
             fresh = automixSmoothAutoplay(freshFrom(pool), current: currentSong)
         }
 
-        guard !fresh.isEmpty else { return }
+        guard !Task.isCancelled, !fresh.isEmpty else { return }
         queue.append(contentsOf: queueWithTrackPairings(Array(fresh.prefix(30))).songs)
         scheduleGaplessPreload()
     }
@@ -1615,16 +1821,16 @@ final class AudioPlayer: ObservableObject {
             !sameArtist.contains(song) && !sameGenre.contains(song)
         }.shuffled()
 
-        switch PlaybackTransitionSettings.style {
-        case "tight":
+        switch AutoMixStyle.current {
+        case .tight:
             let lead = Array(sameArtist.prefix(4)) + Array(sameGenre.prefix(12))
             let tail = Array(sameArtist.dropFirst(4)) + Array(sameGenre.dropFirst(12)) + rest
             return lead + tail.shuffled()
-        case "wide":
+        case .wide:
             let lead = Array(sameGenre.prefix(4)) + Array(rest.prefix(6))
             let tail = sameArtist + Array(sameGenre.dropFirst(4)) + Array(rest.dropFirst(6))
             return lead.shuffled() + tail.shuffled()
-        default:
+        case .balanced:
             let lead = Array(sameArtist.prefix(2)) + Array(sameGenre.prefix(8))
             let tail = Array(sameArtist.dropFirst(2)) + Array(sameGenre.dropFirst(8)) + rest
             return lead + tail.shuffled()
@@ -1660,6 +1866,7 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func loadPlaybackHistory(for serverID: String?) {
+        playbackHistoryPersistenceGeneration &+= 1
         guard let serverID else {
             playbackHistory = []
             return
@@ -1686,20 +1893,40 @@ final class AudioPlayer: ObservableObject {
 
     private func persistPlaybackHistory() {
         guard let currentServerID else { return }
-        do {
-            let data = try JSONEncoder().encode(Array(playbackHistory.prefix(PlaybackHistoryStore.maxCount)))
-            UserDefaults.standard.set(data, forKey: PlaybackHistoryStore.key(for: currentServerID))
-        } catch {
-            AppLogger.shared.log(
-                "Playback history save failed: \(error.localizedDescription)",
-                category: .playback,
-                level: .warning
-            )
+        playbackHistoryPersistenceGeneration &+= 1
+        let generation = playbackHistoryPersistenceGeneration
+        let songs = Array(playbackHistory.prefix(PlaybackHistoryStore.maxCount))
+        let key = PlaybackHistoryStore.key(for: currentServerID)
+        PlaybackHistoryStore.persistenceQueue.async { [weak self] in
+            do {
+                let data = try JSONEncoder().encode(songs)
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          self.playbackHistoryPersistenceGeneration == generation,
+                          self.currentServerID == currentServerID else { return }
+                    UserDefaults.standard.set(data, forKey: key)
+                }
+            } catch {
+                let message = error.localizedDescription
+                Task { @MainActor in
+                    AppLogger.shared.log(
+                        "Playback history save failed: \(message)",
+                        category: .playback,
+                        level: .warning
+                    )
+                }
+            }
         }
     }
 
     private func playCurrent() {
         guard !queue.isEmpty, currentIndex < queue.count else { return }
+        // Invalidate a launch-restored placeholder as soon as a concrete track
+        // request wins. Otherwise controls pressed while stream metadata warms
+        // can accidentally try to resume the old, item-less session.
+        playbackPreparationTask?.cancel()
+        playbackPreparationTask = nil
+        deferredRestoredTime = nil
         enforceTrackPairingChainAfterCurrent()
         let song = queue[currentIndex]
         playRequestID &+= 1
@@ -1765,10 +1992,23 @@ final class AudioPlayer: ObservableObject {
     // Best-effort metadata warmup for upcoming original streams.
     private func warmUpcomingStreams() {
         guard let client else { return }
-        var cacheCandidates = Array(queue.dropFirst(currentIndex + 1).prefix(5))
+        let gaplessMode = GaplessPlaybackMode.current
+        let reservedNextIndex = automaticNextQueueIndex().flatMap { index -> Int? in
+            guard gaplessMode.preparesSuccessor,
+                  queue.indices.contains(index),
+                  canUseGaplessForCurrentTransition(nextIndex: index) else { return nil }
+            return index
+        }
+        let reservedNextSongID = reservedNextIndex.map { queue[$0].id }
+        var cacheCandidates = Array(
+            queue.dropFirst(currentIndex + 1)
+                .filter { !gaplessMode.enqueuesSuccessor || $0.id != reservedNextSongID }
+                .prefix(5)
+        )
         if cacheCandidates.isEmpty,
            let nextIndex = automaticNextQueueIndex(),
-           queue.indices.contains(nextIndex) {
+           queue.indices.contains(nextIndex),
+           !gaplessMode.enqueuesSuccessor || nextIndex != reservedNextIndex {
             cacheCandidates = [queue[nextIndex]]
         }
         PlaybackCacheService.shared.prefetch(cacheCandidates, client: client)
@@ -1776,7 +2016,11 @@ final class AudioPlayer: ObservableObject {
         let upper = min(currentIndex + 3, queue.count)
         guard currentIndex + 1 < upper else { return }
         let songs = Array(queue[(currentIndex + 1)..<upper]
-            .filter { DownloadService.shared.localURL(for: $0) == nil && !client.streamMetadataReady(for: $0) })
+            .filter {
+                $0.id != reservedNextSongID
+                    && DownloadService.shared.localURL(for: $0) == nil
+                    && !client.streamMetadataReady(for: $0)
+            })
         guard !songs.isEmpty else { return }
         // Cancel the prior warmup so a skip burst doesn't flood the server.
         warmStreamsTask?.cancel()
@@ -1802,12 +2046,20 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func invalidatePreloadedNext() {
+        gaplessPreloadGeneration &+= 1
         gaplessPreloadTask?.cancel()
         gaplessPreloadTask = nil
+        gaplessNextStatusObservation?.invalidate()
+        gaplessNextStatusObservation = nil
         if let gaplessNextItem {
             if gaplessNextItem !== currentPlayerItem,
-               gaplessNextItem !== player.currentItem {
+               gaplessNextItem !== player.currentItem,
+               player.items().contains(where: { $0 === gaplessNextItem }) {
                 player.remove(gaplessNextItem)
+            }
+            if gaplessNextItem !== currentPlayerItem,
+               gaplessNextItem !== player.currentItem {
+                releaseAudioPipeline(for: gaplessNextItem)
             }
         }
         gaplessNextItem = nil
@@ -1821,13 +2073,63 @@ final class AudioPlayer: ObservableObject {
     private func startPlaying(song: Song) {
         cancelTransitionPlayback()
         resetPreparedTransitionPlan()
+        playbackPreparationTask?.cancel()
+        playbackPreparationTask = nil
         deferredRestoredTime = nil
         inactivePlayer.pause()
+        for item in inactivePlayer.items() { releaseAudioPipeline(for: item) }
         inactivePlayer.removeAllItems()
         guard let urlInfo = playbackURL(for: song) else {
             AppLogger.shared.log("Playback failed: no stream URL for '\(song.title)'", category: .playback, level: .error)
             return
         }
+        let reusableWeakItem: AVPlayerItem? = {
+            guard GaplessPlaybackMode.current == .weak,
+                  gaplessNextSongID == song.id,
+                  gaplessNextQueueIndex == currentIndex,
+                  let item = gaplessNextItem,
+                  let assetURL = (item.asset as? AVURLAsset)?.url,
+                  assetURL == urlInfo.url else { return nil }
+            return item
+        }()
+        invalidatePreloadedNext()
+        let item = reusableWeakItem ?? makePlayerItem(playback: urlInfo)
+        let requestToken = playRequestID
+        let desiredMode = desiredAudioProcessingMode
+        if desiredMode != audioProcessingMode(for: item) {
+            // The item is not player-owned yet, so the preparation task must
+            // hold it strongly until beginPlayback inserts it.
+            playbackPreparationTask = Task { @MainActor [weak self, item] in
+                guard let self else { return }
+                defer {
+                    if requestToken == self.playRequestID {
+                        self.playbackPreparationTask = nil
+                    }
+                }
+                let processingReady = await self.prepareAudioProcessing(for: item)
+                guard !Task.isCancelled,
+                      requestToken == self.playRequestID,
+                      self.queue.indices.contains(self.currentIndex),
+                      self.queue[self.currentIndex].id == song.id else { return }
+                if !processingReady {
+                    // Playback must remain available even if a tap cannot be
+                    // constructed for an unusual asset.
+                    item.audioMix = nil
+                    self.setAudioProcessingMode(.none, for: item)
+                    AppLogger.shared.log(
+                        "Audio processing unavailable; playing unprocessed audio for '\(song.title)'",
+                        category: .playback,
+                        level: .warning
+                    )
+                }
+                self.beginPlayback(song: song, item: item, urlInfo: urlInfo)
+            }
+            return
+        }
+        beginPlayback(song: song, item: item, urlInfo: urlInfo)
+    }
+
+    private func beginPlayback(song: Song, item: AVPlayerItem, urlInfo: PlaybackURLInfo) {
         startupDiagnosticsTask?.cancel()
         recordCurrentSongInHistory(unless: song.id)
         if urlInfo.source.isUserDownload { DownloadService.shared.markPlayed(song.id) }
@@ -1837,11 +2139,8 @@ final class AudioPlayer: ObservableObject {
             category: .playback
         )
 
-        invalidatePreloadedNext()
-        let item = makePlayerItem(playback: urlInfo)
-
-        applyEqualizer(to: item)
         player.pause()
+        for existing in player.items() { releaseAudioPipeline(for: existing) }
         player.removeAllItems()
         player.insert(item, after: nil)
         currentPlayerItem = item
@@ -1881,7 +2180,8 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func scheduleGaplessPreload() {
-        guard UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
+        let mode = GaplessPlaybackMode.current
+        guard mode.preparesSuccessor,
               !sleepEndsAtTrackEnd,
               let currentItem = player.currentItem,
               currentItem === currentPlayerItem,
@@ -1891,61 +2191,83 @@ final class AudioPlayer: ObservableObject {
             return
         }
         let nextSong = queue[nextIndex]
+        if gaplessRetrySongID != nextSong.id {
+            gaplessRetrySongID = nextSong.id
+            gaplessRetryCount = 0
+        }
+        guard gaplessRetryCount < 2 else { return }
 
         // Keep an already-buffering item, even if its cache download completes
         // later. Replacing it near the boundary would throw away useful data.
         if gaplessNextSongID == nextSong.id,
            let gaplessNextItem,
-           player.items().contains(where: { $0 === gaplessNextItem }) {
+           (mode == .weak || player.items().contains(where: { $0 === gaplessNextItem })) {
+            gaplessNextQueueIndex = nextIndex
+            return
+        }
+        if gaplessNextSongID == nextSong.id, gaplessPreloadTask != nil {
             gaplessNextQueueIndex = nextIndex
             return
         }
 
         invalidatePreloadedNext()
-        guard let urlInfo = playbackURL(for: nextSong) else {
-            AppLogger.shared.log(
-                "Gapless pre-buffer skipped: no stream URL for '\(nextSong.title)'",
-                category: .playback,
-                level: .warning
-            )
-            return
-        }
-        let nextItem = makePlayerItem(playback: urlInfo)
         gaplessNextSongID = nextSong.id
-        gaplessNextSource = urlInfo.source
-        gaplessNextUsesTranscode = urlInfo.usesTranscode
         gaplessNextQueueIndex = nextIndex
+        let generation = gaplessPreloadGeneration
 
-        if audioProcessingRequired {
-            gaplessPreloadTask = Task { @MainActor [weak self, weak currentItem, weak nextItem] in
-                guard let self, let currentItem, let nextItem else { return }
-                let processingReady = await self.prepareAudioProcessing(for: nextItem)
-                guard !Task.isCancelled, processingReady else {
-                    if !Task.isCancelled {
-                        AppLogger.shared.log(
-                            "Gapless pre-buffer skipped: audio processing was not ready for '\(nextSong.title)'",
-                            category: .playback,
-                            level: .warning
-                        )
-                        self.invalidatePreloadedNext()
-                    }
-                    return
-                }
-                self.insertPreparedGaplessItem(
-                    nextItem,
-                    after: currentItem,
-                    song: nextSong,
-                    index: nextIndex,
-                    source: urlInfo.source
-                )
+        // Resolve server-specific metadata (notably Plex's original-file part
+        // key) before choosing the URL. Resolving first prevents an accidental
+        // fallback transcode from changing the decoder format at the boundary.
+        gaplessPreloadTask = Task { @MainActor [weak self, weak currentItem] in
+            guard let self, let currentItem else { return }
+            if DownloadService.shared.localURL(for: nextSong) == nil,
+               let client = self.client,
+               !client.streamMetadataReady(for: nextSong) {
+                await client.prepareForPlayback(song: nextSong)
             }
-        } else {
-            insertPreparedGaplessItem(
+            guard !Task.isCancelled,
+                  generation == self.gaplessPreloadGeneration,
+                  self.gaplessNextSongID == nextSong.id,
+                  self.gaplessNextQueueIndex == nextIndex,
+                  self.player.currentItem === currentItem,
+                  self.currentPlayerItem === currentItem,
+                  GaplessPlaybackMode.current == mode else { return }
+
+            guard let urlInfo = self.playbackURL(for: nextSong) else {
+                AppLogger.shared.log(
+                    "Gapless pre-buffer skipped: no stream URL for '\(nextSong.title)'",
+                    category: .playback,
+                    level: .warning
+                )
+                self.invalidatePreloadedNext()
+                return
+            }
+            let nextItem = self.makePlayerItem(playback: urlInfo)
+            self.gaplessNextSource = urlInfo.source
+            self.gaplessNextUsesTranscode = urlInfo.usesTranscode
+
+            if self.audioProcessingRequired {
+                let processingReady = await self.prepareAudioProcessing(for: nextItem)
+                guard !Task.isCancelled else { return }
+                if !processingReady {
+                    nextItem.audioMix = nil
+                    self.setAudioProcessingMode(.none, for: nextItem)
+                    AppLogger.shared.log(
+                        "Gapless successor will play without audio processing; title='\(nextSong.title)'",
+                        category: .playback,
+                        level: .warning
+                    )
+                }
+            }
+            guard !Task.isCancelled, generation == self.gaplessPreloadGeneration else { return }
+            self.insertPreparedGaplessItem(
                 nextItem,
                 after: currentItem,
                 song: nextSong,
                 index: nextIndex,
-                source: urlInfo.source
+                source: urlInfo.source,
+                mode: mode,
+                generation: generation
             )
         }
     }
@@ -1955,14 +2277,22 @@ final class AudioPlayer: ObservableObject {
         guard transitionMode == .automix,
               queue.indices.contains(currentIndex),
               queue.indices.contains(nextIndex) else { return false }
-        return shouldBypassAutoMixForPairing(current: queue[currentIndex], next: queue[nextIndex])
+        return shouldPreserveIntendedHandoff(
+            current: queue[currentIndex],
+            next: queue[nextIndex]
+        )
     }
 
-    private func shouldBypassAutoMixForPairing(current: Song, next: Song) -> Bool {
-        guard transitionMode == .automix,
-              TrackPairingStore.bypassAutoMixEnabled,
+    private func isTrackPairing(current: Song, next: Song) -> Bool {
+        guard TrackPairingStore.bypassAutoMixEnabled,
               let paired = TrackPairingStore.shared.pairedSong(after: current) else { return false }
         return paired.id == next.id
+    }
+
+    private func shouldPreserveIntendedHandoff(current: Song, next: Song) -> Bool {
+        guard transitionMode == .automix else { return false }
+        if isTrackPairing(current: current, next: next) { return true }
+        return autoMixContext(for: current).isSequentialAlbumTrack(before: autoMixContext(for: next))
     }
 
     private func insertPreparedGaplessItem(
@@ -1970,10 +2300,14 @@ final class AudioPlayer: ObservableObject {
         after currentItem: AVPlayerItem,
         song: Song,
         index: Int,
-        source: PlaybackURLSource
+        source: PlaybackURLSource,
+        mode: GaplessPlaybackMode,
+        generation: UInt64
     ) {
         gaplessPreloadTask = nil
-        guard UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
+        guard mode.preparesSuccessor,
+              GaplessPlaybackMode.current == mode,
+              generation == gaplessPreloadGeneration,
               !sleepEndsAtTrackEnd,
               player.currentItem === currentItem,
               currentPlayerItem === currentItem,
@@ -1983,7 +2317,7 @@ final class AudioPlayer: ObservableObject {
               queue[index].id == song.id,
               gaplessNextSongID == song.id,
               gaplessNextQueueIndex == index else { return }
-        guard player.canInsert(nextItem, after: currentItem) else {
+        if mode.enqueuesSuccessor, !player.canInsert(nextItem, after: currentItem) {
             AppLogger.shared.log(
                 "Gapless pre-buffer skipped: AVQueuePlayer rejected next item for '\(song.title)'",
                 category: .playback,
@@ -1993,9 +2327,30 @@ final class AudioPlayer: ObservableObject {
             return
         }
         gaplessNextItem = nextItem
-        player.insert(nextItem, after: currentItem)
+        gaplessNextStatusObservation?.invalidate()
+        gaplessNextStatusObservation = nextItem.observe(\.status, options: [.new]) { [weak self, weak nextItem] _, _ in
+            Task { @MainActor in
+                guard let self, let nextItem,
+                      nextItem.status == .failed,
+                      self.gaplessNextItem === nextItem,
+                      self.gaplessNextSongID == song.id else { return }
+                self.gaplessRetryCount += 1
+                AppLogger.shared.log(
+                    "Gapless successor failed before handoff; title='\(song.title)'; error=\(nextItem.error?.localizedDescription ?? "unknown")",
+                    category: .playback,
+                    level: .warning
+                )
+                self.invalidatePreloadedNext()
+                self.scheduleGaplessPreload()
+            }
+        }
+        if mode.enqueuesSuccessor {
+            // Precise transitions must not add an automatic boundary wait.
+            player.automaticallyWaitsToMinimizeStalling = false
+            player.insert(nextItem, after: currentItem)
+        }
         AppLogger.shared.log(
-            "Gapless next item inserted; title='\(song.title)'; index=\(index); source=\(source.rawValue); effects=\(nextItem.audioMix == nil ? "off" : "prepared"); preferredBuffer=\(String(format: "%.0f", nextItem.preferredForwardBufferDuration))s",
+            "Gapless successor prepared; mode=\(mode.rawValue); enqueued=\(mode.enqueuesSuccessor); title='\(song.title)'; index=\(index); source=\(source.rawValue); effects=\(nextItem.audioMix == nil ? "off" : "prepared"); preferredBuffer=\(String(format: "%.0f", nextItem.preferredForwardBufferDuration))s",
             category: .playback
         )
     }
@@ -2003,8 +2358,8 @@ final class AudioPlayer: ObservableObject {
     private func completeQueuedGaplessHandoff(
         finishedItem: AVPlayerItem,
         outgoingEndedAt: TimeInterval
-    ) async -> Bool {
-        guard UserDefaults.standard.string(forKey: "gaplessPlayback") == "on",
+    ) -> Bool {
+        guard GaplessPlaybackMode.current.enqueuesSuccessor,
               let nextIndex = automaticNextQueueIndex(),
               canUseGaplessForCurrentTransition(nextIndex: nextIndex),
               let queuedItem = gaplessNextItem,
@@ -2021,19 +2376,8 @@ final class AudioPlayer: ObservableObject {
             return false
         }
 
-        var advancedAutomatically = player.currentItem === queuedItem
-        if !advancedAutomatically, player.currentItem === finishedItem {
-            // The end notification and AVQueuePlayer's internal queue mutation
-            // can arrive in the same run-loop turn. Give .advance a brief chance
-            // to finish before declaring it failed.
-            await Task.yield()
-            if player.currentItem === finishedItem {
-                try? await Task.sleep(nanoseconds: 50_000_000)
-            }
-            guard currentPlayerItem === finishedItem else { return true }
-            advancedAutomatically = player.currentItem === queuedItem
-        }
-
+        let advancedAutomatically = player.currentItem === queuedItem
+        var requiredFallback = false
         if !advancedAutomatically,
            player.currentItem === finishedItem,
            player.items().contains(where: { $0 === queuedItem }) {
@@ -2042,6 +2386,7 @@ final class AudioPlayer: ObservableObject {
                 category: .playback,
                 level: .warning
             )
+            requiredFallback = true
             player.advanceToNextItem()
         }
 
@@ -2056,7 +2401,7 @@ final class AudioPlayer: ObservableObject {
         }
 
         AppLogger.shared.log(
-            "Gapless handoff: AVQueuePlayer \(advancedAutomatically ? "advanced automatically" : "required fallback"); title='\(song.title)'",
+            "Gapless handoff: AVQueuePlayer \(requiredFallback ? "required fallback" : "advanced automatically"); title='\(song.title)'",
             category: .playback
         )
         recordCurrentSongInHistory(unless: song.id)
@@ -2068,12 +2413,16 @@ final class AudioPlayer: ObservableObject {
         currentPlaybackSource = activeSource
         currentPlaybackUsesTranscode = activeUsesTranscode
         prematureTranscodeEndRetries.removeValue(forKey: song.id)
+        gaplessNextStatusObservation?.invalidate()
+        gaplessNextStatusObservation = nil
         gaplessNextItem = nil
         gaplessNextSongID = nil
         gaplessNextSource = nil
         gaplessNextUsesTranscode = false
         gaplessNextQueueIndex = nil
         gaplessReadinessLoggedItemID = nil
+        gaplessRetrySongID = nil
+        gaplessRetryCount = 0
         if DownloadService.shared.localURL(for: song) != nil {
             DownloadService.shared.markPlayed(song.id)
         }
@@ -2111,12 +2460,12 @@ final class AudioPlayer: ObservableObject {
         }
         measureGaplessStartDelay(for: queuedItem, outgoingEndedAt: outgoingEndedAt)
         scheduleGaplessPreload()
+        refreshAutoMixAnalysisWindow()
+        prepareTransitionPlanIfNeeded()
         return true
     }
 
     private func prepareTransitionPlanIfNeeded() {
-        // Performance Mode "Simple Transitions" forces plain track changes (no
-        // crossfade/AutoMix dual-player work) without touching the user's setting
         guard !PerformanceMode.simpleTransitions else {
             resetPreparedTransitionPlan()
             return
@@ -2126,42 +2475,104 @@ final class AudioPlayer: ObservableObject {
             return
         }
         guard transitionMode != .off,
+              !isTransitioning,
               currentIndex + 1 < queue.count,
               let current = currentSong else {
             resetPreparedTransitionPlan()
             return
         }
         let next = queue[currentIndex + 1]
-        guard !shouldBypassAutoMixForPairing(current: current, next: next) else {
+        refreshAutoMixAnalysisWindow()
+        if shouldPreserveIntendedHandoff(current: current, next: next) {
             resetPreparedTransitionPlan()
+            scheduleGaplessPreload()
             return
         }
-        let key = "\(transitionMode.rawValue):\(current.id)->\(next.id)"
-        guard transitionPlanKey != key else { return }
 
-        if (primedSongID != nil && primedSongID != next.id)
-            || (primingSongID != nil && primingSongID != next.id) {
-            clearPriming()
-        }
+        let key = "\(transitionMode.rawValue):\(AutoMixStyle.current.rawValue):\(current.id)->\(next.id)"
+        guard transitionPlanKey != key else { return }
+        if primedSongID != nil && primedSongID != next.id { clearPriming() }
         resetPreparedTransitionPlan()
         transitionPlanKey = key
-        let fallback = PlaybackTransitionPlan.fallback(mode: transitionMode, current: current, next: next)
-        preparedTransitionPlan = fallback
 
-        guard transitionMode == .automix else { return }
+        let outgoing = autoMixContext(for: current)
+        let incoming = autoMixContext(for: next)
+        if transitionMode == .crossfade {
+            let plan = autoMixPlanner.fixedCrossfade(
+                outgoing: outgoing,
+                incoming: incoming,
+                currentTime: liveTime(),
+                duration: PlaybackTransitionSettings.crossfadeDuration(
+                    sameAlbum: current.albumId != nil && current.albumId == next.albumId
+                )
+            )
+            preparedTransitionPlan = plan
+            schedulePreparedTransition(plan, nextSong: next, key: key)
+            return
+        }
+
+        let outgoingRequest = autoMixAnalysisRequest(for: current)
+        let incomingRequest = autoMixAnalysisRequest(for: next)
         transitionPlanTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let plan = await self.makeAutoMixPlan(current: current, next: next, fallback: fallback)
-            guard !Task.isCancelled, self.transitionPlanKey == key else { return }
-            self.preparedTransitionPlan = plan
-            if abs(plan.oldRate - 1) >= 0.01 {
-                self.currentPlayerItem?.audioTimePitchAlgorithm = .timeDomain
-            }
-            AppLogger.shared.log(
-                "AutoMix plan: \(current.title) > \(next.title), \(String(format: "%.1f", plan.duration))s, lead \(String(format: "%.1f", plan.startLead))s, seek \(String(format: "%.1f", plan.nextStart))s [\(plan.reason)]",
-                category: .playback
+            async let outgoingAnalysis = AutoMixAnalysisService.shared.analysis(for: outgoingRequest)
+            async let incomingAnalysis = AutoMixAnalysisService.shared.analysis(for: incomingRequest)
+            let plan = self.autoMixPlanner.plan(
+                outgoing: outgoing,
+                incoming: incoming,
+                outgoingAnalysis: await outgoingAnalysis,
+                incomingAnalysis: await incomingAnalysis,
+                constraints: self.autoMixConstraints(current: current, next: next)
             )
+            guard !Task.isCancelled,
+                  self.transitionPlanKey == key,
+                  self.currentSong?.id == current.id,
+                  self.currentIndex + 1 < self.queue.count,
+                  self.queue[self.currentIndex + 1].id == next.id else { return }
+            self.transitionPlanTask = nil
+            self.preparedTransitionPlan = plan
+            if plan.type == .intendedGapless {
+                self.resetPreparedTransitionPlan()
+                self.scheduleGaplessPreload()
+            } else {
+                self.schedulePreparedTransition(plan, nextSong: next, key: key)
+            }
         }
+    }
+
+    private func schedulePreparedTransition(
+        _ plan: AutoMixTransitionPlan,
+        nextSong: Song,
+        key: String
+    ) {
+        guard !isTransitioning,
+              plan.usesDualPlayers,
+              activePlayer.currentItem === currentPlayerItem else { return }
+        let now = liveTime()
+        guard plan.outgoingCue > now - 0.15 else {
+            let duration = liveDuration()
+            guard let fallback = plan.readinessFallback(
+                outgoingNow: now + 0.1,
+                outgoingDuration: duration
+            ) else { return }
+            preparedTransitionPlan = fallback
+            schedulePreparedTransition(fallback, nextSong: nextSong, key: key)
+            return
+        }
+        let primeTime = max(now, plan.outgoingCue - max(8, min(16, plan.duration + 5)))
+        autoMixCoordinator.armOutgoing(
+            player: activePlayer,
+            primeTime: primeTime,
+            transitionTime: plan.outgoingCue,
+            onPrime: { [weak self] in
+                guard let self, self.transitionPlanKey == key else { return }
+                self.primeNext(nextSong, plan: plan)
+            },
+            onTransition: { [weak self] in
+                guard let self, self.transitionPlanKey == key else { return }
+                self.attemptPlannedTransition(plan, nextSong: nextSong)
+            }
+        )
     }
 
     private func resetPreparedTransitionPlan() {
@@ -2169,468 +2580,415 @@ final class AudioPlayer: ObservableObject {
         transitionPlanTask = nil
         transitionPlanKey = nil
         preparedTransitionPlan = nil
+        readinessRetryCount = 0
+        if !isTransitioning { autoMixCoordinator.cancel() }
     }
 
     private func suppressTransitionsBriefly() {
-        transitionSuppressedUntil = Date().addingTimeInterval(2.0)
+        transitionSuppressedUntil = Date().addingTimeInterval(2)
         resetPreparedTransitionPlan()
     }
 
-    private func makeAutoMixPlan(
-        current: Song,
-        next: Song,
-        fallback: PlaybackTransitionPlan
-    ) async -> PlaybackTransitionPlan {
-        let sameAlbum = current.albumId != nil && current.albumId == next.albumId
-
-        // One cached analysis per track.
-        let a = await AutoMixAudioAnalyzer.shared.analysis(
-            songID: current.id,
-            localURL: DownloadService.shared.localURL(for: current),
-            remoteURL: client?.originalStreamURL(id: current.id),
-            fileExtension: current.suffix,
-            taggedBPM: current.bpm.flatMap { $0 > 0 ? Double($0) : nil }
+    private func autoMixContext(for song: Song) -> AutoMixTrackContext {
+        AutoMixTrackContext(
+            id: song.id,
+            title: song.title,
+            albumID: song.albumId,
+            artistID: song.artistId,
+            genre: song.genre,
+            trackNumber: song.track,
+            discNumber: song.discNumber,
+            duration: Double(song.duration ?? 0),
+            hasReplayGain: song.replayGain != nil
         )
-        let b = await AutoMixAudioAnalyzer.shared.analysis(
-            songID: next.id,
-            localURL: DownloadService.shared.localURL(for: next),
-            remoteURL: client?.originalStreamURL(id: next.id),
-            fileExtension: next.suffix,
-            taggedBPM: next.bpm.flatMap { $0 > 0 ? Double($0) : nil }
+    }
+
+    private func autoMixConstraints(current: Song, next: Song) -> AutoMixPlaybackConstraints {
+        let replayGainMode = UserDefaults.standard.string(forKey: "replayGainMode") ?? "off"
+        return AutoMixPlaybackConstraints(
+            currentTime: liveTime(),
+            outgoingDuration: max(liveDuration(), Double(current.duration ?? 0)),
+            incomingReady: primedReady,
+            trackPairing: isTrackPairing(current: current, next: next),
+            replayGainModeEnabled: replayGainMode != "off",
+            style: AutoMixStyle.current,
+            maximumOverlap: PlaybackTransitionSettings.maxBlend,
+            minimumEndLead: PlaybackTransitionSettings.minimumEndLead
         )
+    }
 
-        var reasons: [String] = []
-        var duration = min(PlaybackTransitionSettings.maxBlend, sameAlbum ? min(fallback.duration, 4.0) : fallback.duration)
-        var nextStart: TimeInterval = 0
-        var startLead = max(1.5, duration)
-
-        // 1) Trim dead air on either side of the handoff.
-        let trailing = min(10, max(0, a.trailingSilence))
-        let trailingPad = PlaybackTransitionSettings.silenceTrimEnabled && trailing > 0.35 ? trailing - 0.1 : 0
-        if PlaybackTransitionSettings.silenceTrimEnabled {
-            let leading = min(8, max(0, b.leadingSilence))
-            if leading > 0.35 { nextStart = max(0, leading - 0.08); reasons.append("silence trim") }
-            else if trailing > 0.35 { reasons.append("silence trim") }
-        }
-
-        // 1b) Sequential album tracks get a near-gapless handoff.
-        let sequentialAlbum = sameAlbum
-            && current.track != nil && next.track != nil
-            && next.track == (current.track ?? 0) + 1
-            && (current.discNumber ?? 1) == (next.discNumber ?? 1)
-        if sequentialAlbum {
-            reasons.append("album handoff")
-            let handoff = min(duration, 1.2)
-            return PlaybackTransitionPlan(
-                mode: .automix,
-                duration: handoff,
-                startLead: max(0.9, handoff + trailingPad),
-                nextStart: nextStart,
-                reason: reasons.joined(separator: ", "),
-                oldRate: 1,
-                nextRate: 1
+    private func autoMixAnalysisRequest(for song: Song) -> AutoMixAnalysisRequest {
+        let source: AutoMixAudioSource
+        if let local = DownloadService.shared.localURL(for: song) {
+            source = .file(url: local, source: .download, complete: true)
+        } else if let client,
+                  let cached = PlaybackCacheService.shared.analysisURL(for: song, client: client) {
+            source = .file(url: cached, source: .playbackCache, complete: true)
+        } else if let client,
+                  let remote = client.originalStreamURL(id: song.id) ?? client.streamURL(for: song) {
+            let requestedSeconds: TimeInterval = 120
+            let bytesPerSecond: Double?
+            if let bitRate = song.bitRate, bitRate > 0 {
+                bytesPerSecond = Double(bitRate) * 125
+            } else if let size = song.size,
+                      let duration = song.duration,
+                      size > 0, duration > 0 {
+                bytesPerSecond = Double(size) / Double(duration)
+            } else {
+                bytesPerSecond = nil
+            }
+            let targetBytes = bytesPerSecond.map { Int(($0 * requestedSeconds).rounded(.up)) }
+                ?? 6 * 1_048_576
+            source = .remote(
+                url: remote,
+                headers: client.mediaRequestHeaders(),
+                fileExtension: song.suffix ?? "audio",
+                requestedSeconds: requestedSeconds,
+                maximumBytes: min(12 * 1_048_576, max(2 * 1_048_576, targetBytes))
             )
+        } else {
+            source = .unavailable
         }
-
-        // 1c) Cold endings cut tight.
-        if a.endsCold {
-            duration = min(duration, 3.2)
-            reasons.append("cold end")
-        }
-        // Two arrhythmic tracks get a longer wash.
-        else if a.grid == nil, b.grid == nil {
-            duration = min(PlaybackTransitionSettings.maxBlend, max(duration, 10))
-            reasons.append("long fade")
-        }
-
-        // 2) Harmonic match changes overlap length, not beat matching.
-        if PlaybackTransitionSettings.harmonicEnabled, let ka = a.key, let kb = b.key, !sameAlbum {
-            let compat = MusicalKey.compatibility(ka, kb)
-            if compat >= 0.8 { reasons.append("key \(ka.camelot)→\(kb.camelot)") }
-            else if compat >= 0.45 { duration = max(3, duration * 0.9); reasons.append("key \(ka.camelot)→\(kb.camelot)") }
-            else { duration = max(2.5, duration * 0.7); reasons.append("key \(ka.camelot)/\(kb.camelot) tight") }
-        }
-
-        // 3) Beat match when a small outgoing-track bend can lock the grids.
-        var oldRate: Float = 1
-        var beatAligned = false
-        var outPeriod: TimeInterval = 0, outPhase: TimeInterval = 0
-        var inPeriod: TimeInterval = 0, inPhase: TimeInterval = 0
-        if PlaybackTransitionSettings.tempoMatchEnabled, !sameAlbum,
-           let ga = a.grid, let gb = b.grid,
-           let r = AutoMixTempo.outgoingRate(currentBPM: ga.bpm, nextBPM: gb.bpm) {
-            oldRate = r.rate
-            reasons.append("BPM \(Int(r.currentBPM.rounded()))→\(Int(r.nextBPM.rounded()))")
-            if PlaybackTransitionSettings.beatAlignEnabled {
-                beatAligned = true
-                outPeriod = ga.period; outPhase = ga.phase
-                inPeriod = gb.period; inPhase = gb.phase
-                // Start the incoming on a strong downbeat, past sparse intro if needed.
-                var entryFloor = max(nextStart, gb.firstStrongBeat)
-                if PlaybackTransitionSettings.sweetSpotEnabled, b.mixInPoint > entryFloor + 1.0 {
-                    entryFloor = b.mixInPoint
-                    reasons.append(String(format: "intro +%.0fs", b.mixInPoint))
-                }
-                var entry = gb.downbeat(atOrAfter: entryFloor)
-                // Prefer a nearby 4-bar phrase boundary.
-                let bar = gb.period * 4
-                let phrase = bar * 4
-                let anchor = gb.downbeat(atOrAfter: gb.firstStrongBeat)
-                if phrase > 0, entry > anchor + 0.01 {
-                    let k = ((entry - anchor) / phrase).rounded(.up)
-                    let phraseEntry = anchor + k * phrase
-                    if phraseEntry - entry <= bar * 2 + 0.01 { entry = phraseEntry }
-                }
-                nextStart = entry
-                // Bar-counted blend length.
-                if bar > 0.5 {
-                    let bars = max(1, (duration / bar).rounded())
-                    duration = min(PlaybackTransitionSettings.maxBlend, max(2, bars * bar))
-                }
-                reasons.append("beat-locked")
-            }
-        }
-
-        // 4) Vocal guard: avoid stacking two vocal lines.
-        if a.duration > 0,
-           let vocalTail = a.vocalTailEnd, vocalTail > a.duration - 3,
-           let vocalIn = b.vocalIntroStart, vocalIn < nextStart + duration + 1 {
-            duration = min(duration, 4)
-            reasons.append("vocal guard")
-        }
-
-        // 5) Open point: blend length, silence pad, and optional outro skip.
-        startLead = min(PlaybackTransitionSettings.maxBlend + 8, max(1.5, duration + trailingPad))
-        if PlaybackTransitionSettings.sweetSpotEnabled, a.mixOutPoint > 0, a.duration > 0 {
-            var mixOut = a.mixOutPoint
-            if let vocalTail = a.vocalTailEnd, vocalTail > mixOut, vocalTail < a.duration - 2 {
-                mixOut = min(a.duration - 2, vocalTail + 0.3)
-            }
-            let lead = a.duration - mixOut
-            if lead > startLead + 1.5 {
-                startLead = min(45, lead)
-                reasons.append(String(format: "outro −%.0fs", lead - duration))
-            }
-        }
-        if beatAligned, outPeriod > 0 {
-            startLead = min(startLead + outPeriod * 4, max(startLead, PlaybackTransitionSettings.maxBlend + 8))
-        }
-
-        // 6) Loudness match when ReplayGain is not already handling it.
-        var volumeMatch: Float = 1
-        if PlaybackTransitionSettings.loudnessMatchEnabled, a.rms > 0, b.rms > 0 {
-            let rgMode = UserDefaults.standard.string(forKey: "replayGainMode") ?? "off"
-            let rgHandled = rgMode != "off" && next.replayGain != nil
-            let ratio = a.rms / b.rms
-            if !rgHandled, ratio < 0.95 {
-                volumeMatch = max(0.7, ratio)
-                reasons.append("level match")
-            }
-        }
-
-        if reasons.isEmpty { reasons.append("metadata") }
-        return PlaybackTransitionPlan(
-            mode: .automix,
-            duration: duration,
-            startLead: startLead,
-            nextStart: nextStart,
-            reason: reasons.joined(separator: ", "),
-            oldRate: oldRate,
-            nextRate: 1,
-            beatAligned: beatAligned,
-            beatsPerBar: 4,
-            outBeatPeriod: outPeriod,
-            outBeatPhase: outPhase,
-            inBeatPeriod: inPeriod,
-            inBeatPhase: inPhase,
-            volumeMatch: volumeMatch
+        return AutoMixAnalysisRequest(
+            trackID: song.id,
+            duration: Double(song.duration ?? 0),
+            fileSize: song.size,
+            bitrateKbps: song.bitRate,
+            metadataBPM: song.bpm.flatMap { $0 > 0 ? Double($0) : nil },
+            source: source
         )
     }
 
-    // BPM for a song, preferring OpenSubsonic/file metadata, then on-device audio
-    // analysis of a downloaded copy, and finally a best-effort analysis of a short
-    // prefix fetched from the server so streamed (un-downloaded) tracks still
-    // tempo-match. Results (including failures) are cached per song id.
-    private func tempoBPM(for song: Song) async -> Double? {
-        if let tagged = song.bpm, tagged > 0 { return Double(tagged) }
-        let local = DownloadService.shared.localURL(for: song)
-        let remote = client?.originalStreamURL(id: song.id)
-        return await AutoMixAudioAnalyzer.shared.bpm(
-            songID: song.id,
-            localURL: local,
-            remoteURL: remote,
-            fileExtension: song.suffix
-        )
+    private func refreshAutoMixAnalysisWindow() {
+        guard transitionMode == .automix else {
+            Task { await AutoMixAnalysisService.shared.cancelAll() }
+            return
+        }
+        let lower = max(0, currentIndex)
+        let upper = min(queue.count, lower + 3)
+        guard lower < upper else { return }
+        let requests = queue[lower..<upper].map(autoMixAnalysisRequest(for:))
+        Task { await AutoMixAnalysisService.shared.setUpcoming(requests) }
     }
 
-    // Public BPM lookup used by the AutoMix preview UI in Settings.
     func estimatedBPM(for song: Song) async -> Double? {
-        await tempoBPM(for: song)
+        await autoMixAnalysis(for: song).estimatedBPM
     }
 
-    // Full analysis for the Settings preview.
     func autoMixAnalysis(for song: Song) async -> AutoMixTrackAnalysis {
-        await AutoMixAudioAnalyzer.shared.analysis(
-            songID: song.id,
-            localURL: DownloadService.shared.localURL(for: song),
-            remoteURL: client?.originalStreamURL(id: song.id),
-            fileExtension: song.suffix,
-            taggedBPM: song.bpm.flatMap { $0 > 0 ? Double($0) : nil }
+        await AutoMixAnalysisService.shared.analysis(for: autoMixAnalysisRequest(for: song))
+    }
+
+    func autoMixPlan(current: Song, next: Song) async -> AutoMixTransitionPlan {
+        async let outgoing = AutoMixAnalysisService.shared.analysis(for: autoMixAnalysisRequest(for: current))
+        async let incoming = AutoMixAnalysisService.shared.analysis(for: autoMixAnalysisRequest(for: next))
+        return autoMixPlanner.plan(
+            outgoing: autoMixContext(for: current),
+            incoming: autoMixContext(for: next),
+            outgoingAnalysis: await outgoing,
+            incomingAnalysis: await incoming,
+            constraints: AutoMixPlaybackConstraints(
+                currentTime: 0,
+                outgoingDuration: Double(current.duration ?? 0),
+                incomingReady: true,
+                trackPairing: isTrackPairing(current: current, next: next),
+                replayGainModeEnabled: (UserDefaults.standard.string(forKey: "replayGainMode") ?? "off") != "off",
+                style: AutoMixStyle.current,
+                maximumOverlap: PlaybackTransitionSettings.maxBlend,
+                minimumEndLead: PlaybackTransitionSettings.minimumEndLead
+            )
         )
     }
 
-    private func checkScheduledTransition() {
-        guard transitionMode != .off,
-              isPlaying,
-              !isTransitioning,
-              !transitionArmed,
-              transitionTask == nil,
-              Date() >= transitionSuppressedUntil,
-              !sleepEndsAtTrackEnd,
-              repeatMode != .one,
-              currentIndex + 1 < queue.count,
-              let current = currentSong else { return }
+    func autoMixPreviewURL(for song: Song) -> URL? { playbackURL(for: song)?.url }
 
-        let next = queue[currentIndex + 1]
-        guard !shouldBypassAutoMixForPairing(current: current, next: next) else {
-            clearPriming()
-            return
-        }
-        prepareTransitionPlanIfNeeded()
-        let plan = preparedTransitionPlan ?? PlaybackTransitionPlan.fallback(
-            mode: transitionMode,
-            current: current,
-            next: next
-        )
-        let remaining = liveDuration() - liveTime()
-        guard remaining.isFinite, remaining > 0.25 else { return }
-        // Pre-buffer the next track before the blend opens.
-        let primeLead: TimeInterval = 6
-        if remaining <= plan.startLead + primeLead {
-            primeNext(next, plan: plan)
-        }
-        guard remaining <= plan.startLead else { return }
-        armTransition(plan, nextSong: next, remaining: remaining)
-    }
-
-    // For beat-locked plans, wait for the outgoing downbeat before starting.
-    private func armTransition(_ plan: PlaybackTransitionPlan, nextSong: Song, remaining: TimeInterval) {
-        guard !transitionArmed, !isTransitioning else { return }
-        guard plan.beatAligned, plan.outBeatPeriod > 0.2 else {
-            startPlannedTransition(plan, nextSong: nextSong)
-            return
-        }
-        let grid = AutoMixBeatGrid(bpm: 60.0 / plan.outBeatPeriod, phase: plan.outBeatPhase, firstStrongBeat: 0)
-        let now = liveTime()
-        // Need enough outgoing tail left after the wait.
-        let minOverlap = min(2.5, max(1.2, plan.duration * 0.25))
-        var target = grid.downbeat(atOrAfter: now + 0.05, beatsPerBar: plan.beatsPerBar)
-        if target - now > remaining - minOverlap {
-            target = grid.beat(atOrAfter: now + 0.05)   // settle for the next beat
-        }
-        let delay = target - now
-        guard delay > 0.06, delay < remaining - 0.5 else {
-            startPlannedTransition(plan, nextSong: nextSong)
-            return
-        }
-        transitionArmed = true
-        transitionArmTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard let self, !Task.isCancelled else { return }
-            self.transitionArmed = false
-            self.transitionArmTask = nil
-            guard !self.isTransitioning, self.isPlaying, self.transitionMode != .off,
-                  self.currentIndex + 1 < self.queue.count,
-                  self.queue[self.currentIndex + 1].id == nextSong.id else { return }
-            self.startPlannedTransition(plan, nextSong: nextSong)
-        }
-    }
-
-    // Muted pre-buffer on the inactive player.
-    private func primeNext(_ song: Song, plan: PlaybackTransitionPlan) {
+    private func primeNext(_ song: Song, plan: AutoMixTransitionPlan) {
         guard primedSongID != song.id,
               primingSongID != song.id,
               !isTransitioning,
               let urlInfo = playbackURL(for: song) else { return }
-        let p = inactivePlayer
+        let target = inactivePlayer
         let item = makePlayerItem(
             playback: urlInfo,
-            requiresTimePitchProcessing: abs(plan.nextRate - 1) >= 0.01
+            requiresTimePitchProcessing: abs(plan.incomingRate - 1) >= 0.001
         )
-        let needsProcessing = audioProcessingRequired
-        let needsBassSwap = bassSwapAvailable
-        if needsProcessing || needsBassSwap {
-            primingSongID = song.id
-            transitionPrimeTask = Task { @MainActor [weak self, weak p, weak item] in
-                guard let self, let p, let item else { return }
-                let processingReady = needsProcessing
-                    ? await self.prepareAudioProcessing(for: item)
-                    : true
-                let bassID = needsBassSwap
-                    ? await self.prepareBassSwap(for: item)
-                    : 0
-                guard !Task.isCancelled, processingReady else {
-                    if !Task.isCancelled {
-                        self.transitionPrimeTask = nil
-                        if self.primingSongID == song.id { self.primingSongID = nil }
-                        AppLogger.shared.log(
-                            "Transition pre-buffer skipped: audio processing was not ready for '\(song.title)'",
-                            category: .playback,
-                            level: .warning
-                        )
-                    }
-                    return
-                }
-                self.installPrimedItem(
-                    item,
-                    on: p,
-                    song: song,
-                    plan: plan,
-                    bassID: bassID,
-                    source: urlInfo.source,
-                    usesTranscode: urlInfo.usesTranscode
+        primingSongID = song.id
+        primedReady = false
+        transitionPrimeTask?.cancel()
+        transitionPrimeTask = Task { @MainActor [weak self, weak target, item] in
+            guard let self, let target else { return }
+            let filtersRequired = plan.filters != .bypass
+            if filtersRequired, let outgoingItem = self.currentPlayerItem {
+                let outgoingReady = await self.prepareAudioProcessing(
+                    for: outgoingItem,
+                    forceAutoMixDSP: true
                 )
+                guard outgoingReady else { return }
             }
-            return
+            let processingReady = await self.prepareAudioProcessing(
+                for: item,
+                forceAutoMixDSP: filtersRequired
+            )
+            guard !Task.isCancelled, processingReady else {
+                if self.primingSongID == song.id { self.primingSongID = nil }
+                self.transitionPrimeTask = nil
+                AppLogger.shared.log(
+                    "AutoMix priming failed: processing pipeline unavailable; songID=\(song.id)",
+                    category: .playback,
+                    level: .warning
+                )
+                return
+            }
+            self.installPrimedItem(
+                item,
+                on: target,
+                song: song,
+                plan: plan,
+                source: urlInfo.source,
+                usesTranscode: urlInfo.usesTranscode
+            )
         }
-        installPrimedItem(
-            item,
-            on: p,
-            song: song,
-            plan: plan,
-            bassID: 0,
-            source: urlInfo.source,
-            usesTranscode: urlInfo.usesTranscode
-        )
     }
 
     private func installPrimedItem(
         _ item: AVPlayerItem,
-        on p: AVQueuePlayer,
+        on target: AVQueuePlayer,
         song: Song,
-        plan: PlaybackTransitionPlan,
-        bassID: UInt64,
+        plan: AutoMixTransitionPlan,
         source: PlaybackURLSource,
         usesTranscode: Bool
     ) {
         transitionPrimeTask = nil
         guard !isTransitioning,
               transitionMode != .off,
-              inactivePlayer === p,
+              inactivePlayer === target,
               currentIndex + 1 < queue.count,
               queue[currentIndex + 1].id == song.id,
-              primingSongID == nil || primingSongID == song.id else {
+              primingSongID == song.id else {
             if primingSongID == song.id { primingSongID = nil }
+            releaseAudioPipeline(for: item)
             return
         }
         primingSongID = nil
-        primedSongUsesTranscode = usesTranscode
-        primedBassID = bassID
-        p.pause()
-        p.removeAllItems()
-        p.insert(item, after: nil)
-        p.volume = 0
-        p.automaticallyWaitsToMinimizeStalling = sourceNeedsNetworkBuffer(source: source, usesTranscode: usesTranscode)
-        if plan.nextStart > 0 {
-            let tol = CMTime(seconds: 0.05, preferredTimescale: 600)
-            p.seek(to: CMTime(seconds: plan.nextStart, preferredTimescale: 600), toleranceBefore: tol, toleranceAfter: tol)
-        }
-        p.play()   // muted warmup
         primedSongID = song.id
-        AppLogger.shared.log(
-            "Priming next track: '\(song.title)'; effects=\(item.audioMix == nil ? "off" : "prepared")",
-            category: .playback
+        primedSongUsesTranscode = usesTranscode
+        primedPlaybackSource = source
+        primedReady = false
+        target.pause()
+        for existing in target.items() { releaseAudioPipeline(for: existing) }
+        target.removeAllItems()
+        target.insert(item, after: nil)
+        target.volume = 0
+        target.automaticallyWaitsToMinimizeStalling = sourceNeedsNetworkBuffer(
+            source: source,
+            usesTranscode: usesTranscode
         )
-        checkScheduledTransition()
+        let seekTime = CMTime(seconds: plan.incomingCue, preferredTimescale: 600)
+        let tolerance = CMTime(seconds: 0.012, preferredTimescale: 600)
+        target.seek(to: seekTime, toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self, weak target, weak item] finished in
+            guard finished else { return }
+            Task { @MainActor [weak self, weak target, weak item] in
+                guard let self, let target, let item else { return }
+                self.transitionPrimeTask?.cancel()
+                self.transitionPrimeTask = Task { @MainActor [weak self, weak target, weak item] in
+                    guard let self, let target, let item else { return }
+                    for _ in 0..<80 {
+                        guard !Task.isCancelled,
+                              self.primedSongID == song.id,
+                              target.currentItem === item else { return }
+                        if item.status == .readyToPlay {
+                            self.primedReady = true
+                            break
+                        }
+                        if item.status == .failed { break }
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                    }
+                    self.transitionPrimeTask = nil
+                    AppLogger.shared.log(
+                        "AutoMix primed: songID=\(song.id); source=\(source.rawValue); ready=\(self.primedReady); buffered=\(Self.bufferedRangeSummary(item))",
+                        category: .playback,
+                        level: self.primedReady ? .info : .warning
+                    )
+                }
+            }
+        }
     }
 
     private func clearPriming() {
-        guard primedSongID != nil || primingSongID != nil else { return }
         transitionPrimeTask?.cancel()
         transitionPrimeTask = nil
         primingSongID = nil
         primedSongID = nil
         primedSongUsesTranscode = false
-        if primedBassID != 0 { AutoMixBassSwap.shared.deactivate(primedBassID); primedBassID = 0 }
-        if !isTransitioning {
-            inactivePlayer.pause()
-            inactivePlayer.removeAllItems()
-            inactivePlayer.volume = 0
-        }
+        primedPlaybackSource = nil
+        primedReady = false
+        guard !isTransitioning else { return }
+        let target = inactivePlayer
+        target.pause()
+        for item in target.items() { releaseAudioPipeline(for: item) }
+        target.removeAllItems()
+        target.volume = 0
+        target.rate = 1
     }
 
-    private func startPlannedTransition(_ plan: PlaybackTransitionPlan, nextSong: Song) {
+    private func attemptPlannedTransition(_ plan: AutoMixTransitionPlan, nextSong: Song) {
         guard !isTransitioning,
               currentIndex + 1 < queue.count,
-              let urlInfo = playbackURL(for: nextSong) else { return }
+              queue[currentIndex + 1].id == nextSong.id else { return }
+        if primedSongID != nextSong.id { primeNext(nextSong, plan: plan) }
 
-        if primedSongID != nextSong.id {
-            primeNext(nextSong, plan: plan)
+        guard primedSongID == nextSong.id,
+              primedItemIsReady(for: plan) else {
+            let remaining = liveDuration() - liveTime()
+            if remaining > 1.4, readinessRetryCount < 8 {
+                readinessRetryCount += 1
+                let retryAt = liveTime() + 0.35
+                autoMixCoordinator.armOutgoing(
+                    player: activePlayer,
+                    primeTime: liveTime(),
+                    transitionTime: retryAt,
+                    onPrime: {},
+                    onTransition: { [weak self] in
+                        self?.attemptPlannedTransition(plan, nextSong: nextSong)
+                    }
+                )
+            } else {
+                AutoMixDiagnostics.logFallback(
+                    planned: plan.type,
+                    actual: nil,
+                    reason: "incomingNotReady"
+                )
+                clearPriming()
+                resetPreparedTransitionPlan()
+            }
+            return
         }
-        guard primedSongID == nextSong.id else { return }
+
+        let actualPlan: AutoMixTransitionPlan
+        if readinessRetryCount > 0,
+           let fallback = plan.readinessFallback(
+                outgoingNow: liveTime(),
+                outgoingDuration: liveDuration()
+           ) {
+            actualPlan = fallback
+            AutoMixDiagnostics.logFallback(
+                planned: plan.type,
+                actual: fallback.type,
+                reason: "incomingReadyLate"
+            )
+        } else {
+            actualPlan = plan
+        }
+        startPlannedTransition(actualPlan, nextSong: nextSong)
+    }
+
+    private func primedItemIsReady(for plan: AutoMixTransitionPlan) -> Bool {
+        guard primedReady,
+              let item = inactivePlayer.currentItem,
+              item.status == .readyToPlay else { return false }
+        guard primedPlaybackSource == .stream else { return true }
+        let cue = plan.incomingCue
+        let bufferedEnd = item.loadedTimeRanges
+            .map(\.timeRangeValue.end.seconds)
+            .filter(\.isFinite)
+            .max() ?? 0
+        let required = min(12, plan.incomingMediaDuration + 1)
+        return bufferedEnd - cue >= required && item.isPlaybackLikelyToKeepUp
+    }
+
+    private func startPlannedTransition(_ plan: AutoMixTransitionPlan, nextSong: Song) {
+        guard !isTransitioning,
+              currentIndex + 1 < queue.count,
+              queue[currentIndex + 1].id == nextSong.id,
+              let nextItem = inactivePlayer.currentItem,
+              let outgoingItem = activePlayer.currentItem,
+              primedSongID == nextSong.id,
+              primedItemIsReady(for: plan) else { return }
 
         let oldPlayer = activePlayer
         let newPlayer = inactivePlayer
-        // Non-unity rate means tempo bend; do not switch pitch algorithms mid-play.
-        let tempoActive = abs(plan.oldRate - 1) >= 0.01 || abs(plan.nextRate - 1) >= 0.01
-        if abs(plan.oldRate - 1) >= 0.01 {
-            oldPlayer.currentItem?.audioTimePitchAlgorithm = .timeDomain
+        guard installTransitionEnvelope(on: outgoingItem, plan: plan, outgoing: true),
+              installTransitionEnvelope(on: nextItem, plan: plan, outgoing: false) else {
+            AutoMixDiagnostics.logFallback(
+                planned: plan.type,
+                actual: nil,
+                reason: "audioPipelineUnavailable"
+            )
+            clearPriming()
+            return
         }
+        configureTransitionFilters(
+            outgoingItem: outgoingItem,
+            incomingItem: nextItem,
+            plan: plan
+        )
 
-        guard let nextItem = newPlayer.currentItem else { return }
-        var incomingStart = plan.nextStart
-        // Pre-compensate the tiny drift before the tempo bend engages.
-        let lockShift = beatLockSeekShift(plan: plan)
-        let inGrid: AutoMixBeatGrid? = (plan.beatAligned && plan.inBeatPeriod > 0.2)
-            ? AutoMixBeatGrid(bpm: 60.0 / plan.inBeatPeriod, phase: plan.inBeatPhase, firstStrongBeat: 0)
-            : nil
-        newPlayer.volume = 0
-        currentBassID = primedBassID
-        primedBassID = 0
-        // Nudge the muted primed track onto its next downbeat.
-        if let inGrid {
-            let pIn = newPlayer.currentTime().seconds
-            if pIn.isFinite {
-                let db = max(0, inGrid.downbeat(atOrAfter: pIn + 0.02, beatsPerBar: plan.beatsPerBar) + lockShift)
-                let tol = CMTime(seconds: 0.012, preferredTimescale: 600)
-                newPlayer.seek(to: CMTime(seconds: db, preferredTimescale: 600), toleranceBefore: tol, toleranceAfter: tol)
-                incomingStart = db
-            }
-        }
-        let activeUsesTranscode = primedSongUsesTranscode
+        transitionOutgoingPlayer = oldPlayer
+        transitionIncomingPlayer = newPlayer
+        transitionNextSong = nextSong
+        activeTransitionPlan = plan
+        transitionIncomingSource = primedPlaybackSource
+        transitionIncomingUsesTranscode = primedSongUsesTranscode
+        transitionPromoted = false
+        isTransitioning = true
+        isMixing = true
         primedSongID = nil
+        primedPlaybackSource = nil
         primedSongUsesTranscode = false
-        AutoMixBassSwap.shared.activate(currentBassID)
+        primedReady = false
+        transitionPlanTask?.cancel()
+        transitionPlanTask = nil
+        preparedTransitionPlan = nil
 
-        if urlInfo.source.isUserDownload { DownloadService.shared.markPlayed(nextSong.id) }
-        let oldStartVolume = oldPlayer.volume
-        // plan.volumeMatch ducks a hotter incoming master to the outgoing's level
-        // (Sound Check-style); 1.0 whenever ReplayGain already normalizes it.
-        let newTargetVolume = replayGainVolume(for: nextSong) * plan.volumeMatch
+        oldPlayer.volume = targetVolume
+        newPlayer.volume = replayGainVolume(for: nextSong)
+        newPlayer.playImmediately(atRate: plan.incomingRate)
+        autoMixCoordinator.armHandoff(
+            incomingPlayer: newPlayer,
+            incomingCue: plan.incomingCue,
+            incomingMediaDuration: plan.incomingMediaDuration,
+            onPromote: { [weak self] in self?.promoteActiveTransition() },
+            onComplete: { [weak self] in self?.completeActiveTransition() }
+        )
+        AppLogger.shared.log(
+            "AutoMix transition started: songID=\(nextSong.id); type=\(plan.type.rawValue); duration=\(String(format: "%.3f", plan.duration)); incomingRate=\(String(format: "%.4f", plan.incomingRate))",
+            category: .playback
+        )
+    }
 
+    private func promoteActiveTransition() {
+        guard isTransitioning,
+              !transitionPromoted,
+              let newPlayer = transitionIncomingPlayer,
+              let nextItem = newPlayer.currentItem,
+              let nextSong = transitionNextSong,
+              currentIndex + 1 < queue.count,
+              queue[currentIndex + 1].id == nextSong.id else { return }
+        transitionPromoted = true
         recordCurrentSongInHistory(unless: nextSong.id)
+        if transitionIncomingSource?.isUserDownload == true {
+            DownloadService.shared.markPlayed(nextSong.id)
+        }
         activePlayer = newPlayer
         currentPlayerItem = nextItem
-        targetVolume = newTargetVolume
-        startupDiagnosticsTask?.cancel()
+        currentIndex += 1
+        currentPlaybackSource = transitionIncomingSource
+        currentPlaybackUsesTranscode = transitionIncomingUsesTranscode
+        targetVolume = replayGainVolume(for: nextSong)
         currentArtwork = nil
         currentAnimatedArtwork = nil
         currentLiveArtwork = nil
-        currentIndex += 1
         hasActivePlaybackSession = true
         currentSong = nextSong
-        currentPlaybackSource = urlInfo.source
-        currentPlaybackUsesTranscode = activeUsesTranscode
-        currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, incomingStart))
-        isPlaying = true
-        currentTime = incomingStart
+        let incomingTime = nextItem.currentTime().seconds
+        let offset = incomingTime.isFinite ? max(0, incomingTime) : 0
+        currentSongStartedAt = Date(timeIntervalSinceNow: -offset)
+        currentTime = offset
         duration = Double(nextSong.duration ?? 0)
         loggedSongIDs.remove(nextSong.id)
         if nextSong.starred != nil { starredIDs.insert(nextSong.id) }
-        resetPreparedTransitionPlan()
+        transitionPlanKey = nil
 
-        // Incoming stays at true tempo.
-        newPlayer.play()
         updateNowPlaying()
         notifyNowPlaying(for: nextSong)
         persistLastPlaybackSession()
@@ -2638,72 +2996,72 @@ final class AudioPlayer: ObservableObject {
         artworkLoadTask = Task { [weak self] in await self?.loadArtwork(for: nextSong) }
         durationLoadTask?.cancel()
         durationLoadTask = Task { [weak self] in await self?.loadDuration(from: nextItem) }
-        monitorStartup(for: nextItem, song: nextSong, source: urlInfo.source)
-        ensureAutoplayPreloadedIfNeeded()
-        prepareTransitionPlanIfNeeded()
-
-        isTransitioning = true
-        isMixing = true
-        let fadeDuration = max(0.75, plan.duration)
-        AppLogger.shared.log("\(plan.mode.settingsLabel) transition: '\(nextSong.title)' over \(String(format: "%.1f", fadeDuration))s [\(plan.reason)]", category: .playback)
-        transitionTask = Task { @MainActor [weak self, weak oldPlayer, weak newPlayer] in
-            guard let self, let oldPlayer, let newPlayer else { return }
-
-            // Keep the outgoing audible while the incoming starts rolling.
-            let warmDeadline = Date().addingTimeInterval(3.0)
-            while Date() < warmDeadline {
-                if Task.isCancelled { return }
-                oldPlayer.volume = oldStartVolume
-                newPlayer.volume = 0
-                let item = newPlayer.currentItem
-                let ready = item?.status == .readyToPlay
-                    && (item?.isPlaybackLikelyToKeepUp ?? false)
-                    && newPlayer.timeControlStatus == .playing
-                if ready { break }
-                let oldDur = oldPlayer.currentItem?.duration.seconds ?? 0
-                let oldNow = oldPlayer.currentTime().seconds
-                if oldDur.isFinite, oldNow.isFinite, oldDur - oldNow <= 0.4 { break }
-                try? await Task.sleep(nanoseconds: 30_000_000)
-            }
-
-            let steps = max(12, Int(fadeDuration * 30))
-            var bentOutgoing = false
-            for step in 0...steps {
-                if Task.isCancelled { return }
-                let x = Double(step) / Double(steps)
-                // Equal-power curve; AutoMix differs by shape and analysis extras.
-                let phase = plan.mode == .crossfade ? x : x * x * (3 - 2 * x)
-                let theta = phase * (Double.pi / 2)
-                oldPlayer.volume = oldStartVolume * Float(cos(theta))
-                newPlayer.volume = newTargetVolume * Float(sin(theta))
-                // Bend the outgoing once after it is already ducking.
-                if tempoActive, !bentOutgoing, x >= 0.15 {
-                    bentOutgoing = true
-                    oldPlayer.rate = plan.oldRate
-                }
-                // Open incoming bass as it takes over.
-                if self.currentBassID != 0 {
-                    AutoMixBassSwap.shared.setCutoff(self.bassSwapCutoff(at: x), id: self.currentBassID)
-                }
-                try? await Task.sleep(nanoseconds: 33_000_000)
-            }
-            guard self.player === newPlayer else { return }
-            oldPlayer.pause()
-            oldPlayer.removeAllItems()
-            oldPlayer.rate = 1
-            oldPlayer.volume = 0
-            newPlayer.rate = 1
-            newPlayer.volume = newTargetVolume
-            if self.currentBassID != 0 {
-                AutoMixBassSwap.shared.deactivate(self.currentBassID)
-                self.currentBassID = 0
-            }
-            self.isTransitioning = false
-            self.isMixing = false
-            self.transitionTask = nil
-            self.scheduleGaplessPreload()
-            self.prepareTransitionPlanIfNeeded()
+        if let source = transitionIncomingSource {
+            monitorStartup(for: nextItem, song: nextSong, source: source)
         }
+        ensureAutoplayPreloadedIfNeeded()
+        warmUpcomingStreams()
+    }
+
+    private func completeActiveTransition() {
+        guard isTransitioning,
+              let oldPlayer = transitionOutgoingPlayer,
+              let newPlayer = transitionIncomingPlayer,
+              let plan = activeTransitionPlan else { return }
+        if !transitionPromoted { promoteActiveTransition() }
+        guard activePlayer === newPlayer else {
+            cancelTransitionPlayback()
+            return
+        }
+
+        if let oldItem = oldPlayer.currentItem {
+            resetTransitionEnvelope(on: oldItem, at: oldItem.currentTime().seconds)
+            releaseAudioPipeline(for: oldItem)
+        }
+        oldPlayer.pause()
+        oldPlayer.removeAllItems()
+        oldPlayer.rate = 1
+        oldPlayer.volume = 0
+        if let newItem = newPlayer.currentItem {
+            resetTransitionEnvelope(on: newItem, at: newItem.currentTime().seconds)
+        }
+        newPlayer.volume = targetVolume
+        isMixing = false
+
+        if abs(plan.incomingRate - 1) >= 0.001, plan.restoreRateDuration > 0 {
+            let restorationStart = newPlayer.currentTime().seconds
+            autoMixCoordinator.restoreRate(
+                player: newPlayer,
+                from: plan.incomingRate,
+                startingAt: restorationStart,
+                duration: plan.restoreRateDuration
+            ) { [weak self] in
+                self?.finishTransitionCleanup()
+            }
+        } else {
+            newPlayer.rate = 1
+            finishTransitionCleanup()
+        }
+    }
+
+    private func finishTransitionCleanup() {
+        guard isTransitioning else { return }
+        transitionIncomingPlayer?.rate = isPlaying ? 1 : 0
+        autoMixCoordinator.cancel()
+        isTransitioning = false
+        isMixing = false
+        transitionOutgoingPlayer = nil
+        transitionIncomingPlayer = nil
+        transitionNextSong = nil
+        activeTransitionPlan = nil
+        transitionIncomingSource = nil
+        transitionIncomingUsesTranscode = false
+        transitionPromoted = false
+        readinessRetryCount = 0
+        if let item = player.currentItem { applyEqualizer(to: item) }
+        scheduleGaplessPreload()
+        refreshAutoMixAnalysisWindow()
+        prepareTransitionPlanIfNeeded()
     }
 
     private func playbackURL(for song: Song) -> PlaybackURLInfo? {
@@ -2752,26 +3110,44 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func cancelTransitionPlayback(keepPaused: Bool = false) {
-        transitionArmTask?.cancel()
-        transitionArmTask = nil
-        transitionArmed = false
-        transitionTask?.cancel()
-        transitionTask = nil
-        isTransitioning = false
-        isMixing = false
-        if currentBassID != 0 { AutoMixBassSwap.shared.deactivate(currentBassID); currentBassID = 0 }
-        if primedBassID != 0 { AutoMixBassSwap.shared.deactivate(primedBassID); primedBassID = 0 }
+        autoMixCoordinator.cancel()
+        transitionPlanTask?.cancel()
+        transitionPlanTask = nil
+        transitionPlanKey = nil
+        preparedTransitionPlan = nil
         transitionPrimeTask?.cancel()
         transitionPrimeTask = nil
         primingSongID = nil
         primedSongID = nil
+        primedReady = false
+        primedPlaybackSource = nil
+        primedSongUsesTranscode = false
+        let authoritativePlayer = activePlayer
+        let discardedPlayer = authoritativePlayer === primaryPlayer ? secondaryPlayer : primaryPlayer
+        if let item = authoritativePlayer.currentItem {
+            resetTransitionEnvelope(on: item, at: item.currentTime().seconds)
+        }
+        for item in discardedPlayer.items() { releaseAudioPipeline(for: item) }
         let shouldKeepPaused = keepPaused || !isPlaying
         primaryPlayer.rate = shouldKeepPaused ? 0 : 1
         secondaryPlayer.rate = shouldKeepPaused ? 0 : 1
-        inactivePlayer.pause()
-        inactivePlayer.removeAllItems()
-        inactivePlayer.volume = 0
-        player.volume = targetVolume
+        discardedPlayer.pause()
+        discardedPlayer.removeAllItems()
+        discardedPlayer.volume = 0
+        authoritativePlayer.volume = targetVolume
+        isTransitioning = false
+        isMixing = false
+        transitionOutgoingPlayer = nil
+        transitionIncomingPlayer = nil
+        transitionNextSong = nil
+        activeTransitionPlan = nil
+        transitionIncomingSource = nil
+        transitionIncomingUsesTranscode = false
+        transitionPromoted = false
+        readinessRetryCount = 0
+        if let item = authoritativePlayer.currentItem, transitionMode != .off {
+            applyEqualizer(to: item)
+        }
         if shouldKeepPaused { pauseAllPlayers() }
     }
 
@@ -2782,8 +3158,7 @@ final class AudioPlayer: ObservableObject {
 
     private func loadArtwork(for song: Song) async {
         let started = ProcessInfo.processInfo.systemUptime
-        let url = client?.coverArtURL(id: song.coverArt, size: 600)
-        async let staticImage = ArtworkLoader.shared.image(for: url, maxPixelSize: 600)
+        async let staticImage = loadStaticArtwork(for: song)
         async let liveResult = resolveVisualLiveArtwork(for: song)
 
         let image = await staticImage
@@ -2843,6 +3218,38 @@ final class AudioPlayer: ObservableObject {
         if videoReady?.videoURL != nil {
             scheduleAnimatedArtworkReattach(for: song)
         }
+    }
+
+    private func loadStaticArtwork(for song: Song) async -> UIImage? {
+        // Match the library artwork path. In Offline Mode `client` is nil, so
+        // a URL-only lookup left Now Playing empty even when a downloaded
+        // album's pinned (or embedded) cover was available locally.
+        let coverArtID = song.coverArt?.nonBlank ?? song.albumId?.nonBlank
+        if let url = client?.coverArtURL(id: coverArtID, size: 600),
+           let image = await ArtworkLoader.shared.image(for: url, maxPixelSize: 600) {
+            return image
+        }
+        if let image = await ArtworkLoader.shared.image(
+            forCoverArtID: coverArtID,
+            serverID: currentServerID,
+            maxPixelSize: 600
+        ) {
+            return image
+        }
+        if let source = DownloadService.shared.localArtworkSource(
+            forCoverArtID: coverArtID,
+            serverID: currentServerID
+        ) {
+            return await ArtworkLoader.shared.image(
+                fromEmbeddedArtworkAt: source.url,
+                coverArtID: coverArtID,
+                serverID: source.serverID,
+                groupID: source.groupID,
+                owner: source.owner,
+                maxPixelSize: 600
+            )
+        }
+        return nil
     }
 
     private func resolveVisualLiveArtwork(for song: Song) async -> (LiveArtworkAsset?, URL?) {
@@ -2927,16 +3334,16 @@ final class AudioPlayer: ObservableObject {
     private func loadDuration(from item: AVPlayerItem) async {
         let started = ProcessInfo.processInfo.systemUptime
         for attempt in 0..<30 {
-            if Task.isCancelled { return }
+            if Task.isCancelled || item !== currentPlayerItem { return }
             let d = item.duration
             if d.isNumeric, d.seconds > 0 {
+                guard item === currentPlayerItem else { return }
                 let serverDuration = Double(currentSong?.duration ?? 0)
-                let corrected = shouldPreferServerDuration(avDuration: d.seconds, serverDuration: serverDuration)
-                let effectiveDuration = corrected ? serverDuration : d.seconds
+                let effectiveDuration = max(serverDuration, d.seconds)
                 duration = effectiveDuration
-                if corrected {
+                if d.seconds > serverDuration + 0.5 {
                     AppLogger.shared.log(
-                        "Playback duration corrected from stream estimate; av=\(String(format: "%.4f", d.seconds))s; server=\(String(format: "%.4f", serverDuration))s; source=\(currentPlaybackSource?.rawValue ?? "unknown"); attempts=\(attempt + 1); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
+                        "Playback duration extended beyond server metadata; av=\(String(format: "%.4f", d.seconds))s; server=\(String(format: "%.4f", serverDuration))s; source=\(currentPlaybackSource?.rawValue ?? "unknown"); attempts=\(attempt + 1); elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - started) * 1000))",
                         category: .playback,
                         level: .warning
                     )
@@ -2947,6 +3354,10 @@ final class AudioPlayer: ObservableObject {
                     )
                 }
                 updateNowPlayingTime()
+                if transitionMode != .off, !isTransitioning {
+                    resetPreparedTransitionPlan()
+                    prepareTransitionPlanIfNeeded()
+                }
                 return
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
@@ -3065,7 +3476,6 @@ final class AudioPlayer: ObservableObject {
                 self.currentTime = self.player.currentTime().seconds
                 self.checkLogPlay()
                 self.logGaplessReadinessIfNeeded()
-                self.checkScheduledTransition()
                 self.autosaveLastPlaybackSessionIfNeeded()
             }
         }
@@ -3076,10 +3486,37 @@ final class AudioPlayer: ObservableObject {
                 self.currentTime = self.player.currentTime().seconds
                 self.checkLogPlay()
                 self.logGaplessReadinessIfNeeded()
-                self.checkScheduledTransition()
                 self.autosaveLastPlaybackSessionIfNeeded()
             }
         }
+    }
+
+    private func addCurrentItemObservers() {
+        primaryCurrentItemObservation = primaryPlayer.observe(\.currentItem, options: [.new]) { [weak self] observed, change in
+            guard let nextItem = change.newValue ?? nil else { return }
+            Task { @MainActor [weak self, weak observed, weak nextItem] in
+                guard let self, let observed, let nextItem else { return }
+                self.handleCurrentItemChange(player: observed, item: nextItem)
+            }
+        }
+        secondaryCurrentItemObservation = secondaryPlayer.observe(\.currentItem, options: [.new]) { [weak self] observed, change in
+            guard let nextItem = change.newValue ?? nil else { return }
+            Task { @MainActor [weak self, weak observed, weak nextItem] in
+                guard let self, let observed, let nextItem else { return }
+                self.handleCurrentItemChange(player: observed, item: nextItem)
+            }
+        }
+    }
+
+    private func handleCurrentItemChange(player observedPlayer: AVQueuePlayer, item: AVPlayerItem) {
+        guard observedPlayer === activePlayer,
+              item === gaplessNextItem,
+              item !== currentPlayerItem,
+              let outgoingItem = currentPlayerItem else { return }
+        _ = completeQueuedGaplessHandoff(
+            finishedItem: outgoingItem,
+            outgoingEndedAt: ProcessInfo.processInfo.systemUptime
+        )
     }
 
     private func checkLogPlay() {
@@ -3132,7 +3569,7 @@ final class AudioPlayer: ObservableObject {
                     self.updateNowPlaying()
                     return
                 }
-                if await self.completeQueuedGaplessHandoff(
+                if self.completeQueuedGaplessHandoff(
                     finishedItem: finishedItem,
                     outgoingEndedAt: outgoingEndedAt
                 ) {
@@ -3197,8 +3634,48 @@ final class AudioPlayer: ObservableObject {
 
         let item = makePlayerItem(playback: urlInfo)
         startupDiagnosticsTask?.cancel()
-        applyEqualizer(to: item)
+        playbackPreparationTask?.cancel()
+        playRequestID &+= 1
+        let requestToken = playRequestID
+        let expectedItem = currentPlayerItem
+        playbackPreparationTask = Task { @MainActor [weak self, item, weak expectedItem] in
+            guard let self else { return }
+            defer {
+                if requestToken == self.playRequestID {
+                    self.playbackPreparationTask = nil
+                }
+            }
+            let processingReady = await self.prepareAudioProcessing(for: item)
+            guard !Task.isCancelled,
+                  requestToken == self.playRequestID,
+                  self.currentPlayerItem === expectedItem,
+                  self.currentSong?.id == song.id else { return }
+            if !processingReady {
+                item.audioMix = nil
+                self.setAudioProcessingMode(.none, for: item)
+                AppLogger.shared.log(
+                    "Audio processing unavailable during stream retry for '\(song.title)'; playing unprocessed",
+                    category: .playback,
+                    level: .warning
+                )
+            }
+            self.materializeRestartedStream(
+                song: song,
+                item: item,
+                urlInfo: urlInfo,
+                elapsed: elapsed
+            )
+        }
+    }
+
+    private func materializeRestartedStream(
+        song: Song,
+        item: AVPlayerItem,
+        urlInfo: PlaybackURLInfo,
+        elapsed: TimeInterval
+    ) {
         player.pause()
+        for existing in player.items() { releaseAudioPipeline(for: existing) }
         player.removeAllItems()
         player.insert(item, after: nil)
         currentPlayerItem = item
@@ -3242,7 +3719,9 @@ final class AudioPlayer: ObservableObject {
                       let type = AVAudioSession.InterruptionType(rawValue: rawType) else { return }
                 switch type {
                 case .began:
+                    self.pauseAllPlayers()
                     self.isPlaying = false
+                    self.cancelTransitionPlayback(keepPaused: true)
                     self.updateNowPlaying()
                 case .ended:
                     let resumePref = UserDefaults.standard.object(forKey: "resumeAfterInterruption") as? Bool ?? true
@@ -3252,12 +3731,7 @@ final class AudioPlayer: ObservableObject {
                     } else {
                         shouldResume = false
                     }
-                    if shouldResume, self.player.rate == 0, self.currentSong != nil {
-                        try? AVAudioSession.sharedInstance().setActive(true)
-                        self.player.play()
-                        self.isPlaying = true
-                        self.updateNowPlaying()
-                    }
+                    if shouldResume { self.resume() }
                 @unknown default:
                     break
                 }
@@ -3277,7 +3751,9 @@ final class AudioPlayer: ObservableObject {
                       let reason = AVAudioSession.RouteChangeReason(rawValue: rawReason) else { return }
                 if reason == .oldDeviceUnavailable {
                     // System automatically pauses audio when headphones are unplugged; sync state.
+                    self.pauseAllPlayers()
                     self.isPlaying = false
+                    self.cancelTransitionPlayback(keepPaused: true)
                     self.updateNowPlaying()
                 }
             }
@@ -3292,8 +3768,17 @@ final class AudioPlayer: ObservableObject {
         ) { [weak self] note in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                guard self.isPlaying, let stalledItem = note.object as? AVPlayerItem,
-                      stalledItem === self.player.currentItem else { return }
+                guard self.isPlaying, let stalledItem = note.object as? AVPlayerItem else { return }
+                if self.isTransitioning,
+                   stalledItem === self.transitionIncomingPlayer?.currentItem {
+                    AutoMixDiagnostics.logFallback(
+                        planned: self.activeTransitionPlan?.type ?? .adaptiveCrossfade,
+                        actual: nil,
+                        reason: "incomingStalled"
+                    )
+                    self.cancelTransitionPlayback()
+                }
+                guard stalledItem === self.player.currentItem else { return }
                 // Re-activate the session and nudge the player out of a stall so
                 // background streaming (e.g. after a brief network drop) recovers.
                 try? AVAudioSession.sharedInstance().setActive(true)
@@ -3338,10 +3823,51 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func resume() {
-        guard currentSong != nil, !isPlaying else { return }
-        player.play()
+        guard let song = currentSong else { return }
+
+        // Restored sessions carry queue/position metadata but deliberately do
+        // not allocate an AVPlayerItem at launch. Remote play must take the
+        // same materialization path as the in-app play button.
+        if currentPlayerItem == nil {
+            if deferredRestoredTime != nil {
+                if playbackPreparationTask == nil {
+                    _ = resumeDeferredSessionIfNeeded()
+                }
+            } else if playbackPreparationTask == nil,
+                      queue.indices.contains(currentIndex) {
+                playCurrent()
+            }
+            return
+        }
+
+        guard !isPlaying,
+              activateAudioSessionForPlayback() else { return }
+        let resumeTime = playbackTimeSnapshot().elapsed
+        if currentPlayerItem?.status == .failed {
+            AppLogger.shared.log(
+                "Playback resume rebuilding failed item; title='\(song.title)'; elapsed=\(String(format: "%.3f", resumeTime))s",
+                category: .playback,
+                level: .warning
+            )
+            isPlaying = true
+            updateNowPlaying()
+            restartCurrentStream(song: song, at: resumeTime)
+            return
+        }
+        if let currentPlaybackSource {
+            startPlayer(player, source: currentPlaybackSource, usesTranscode: currentPlaybackUsesTranscode)
+        } else {
+            player.play()
+        }
         isPlaying = true
+        if currentSongStartedAt == nil {
+            currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, currentTime))
+        }
+        if let song = currentSong { notifyNowPlaying(for: song) }
         updateNowPlaying()
+        persistLastPlaybackSession()
+        refreshAutoMixAnalysisWindow()
+        prepareTransitionPlanIfNeeded()
     }
 
     // MARK: - Now Playing
@@ -3422,425 +3948,5 @@ final class AudioPlayer: ObservableObject {
         let effectiveDuration = resolvedPlaybackDuration(avDuration: player.currentItem?.duration.seconds ?? .nan)
         if effectiveDuration > 0 { info[MPMediaItemPropertyPlaybackDuration] = effectiveDuration }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-    }
-}
-
-// On-device analyser behind AutoMix. Results are cached per song id.
-private actor AutoMixAudioAnalyzer {
-    static let shared = AutoMixAudioAnalyzer()
-
-    private var analysisByID: [String: AutoMixTrackAnalysis] = [:]
-    private let silenceThreshold: Float = 0.003
-    // beat grid only trusts the first couple of minutes (phase smears over longer
-    // spans); the structure pass (mix-in/out, RMS) wants the whole track
-    private let gridCapSeconds: TimeInterval = 120
-    private let envelopeCapSeconds: TimeInterval = 1200
-    private let chromaCapSeconds: TimeInterval = 90
-
-    private static var harmonicEnabled: Bool {
-        if UserDefaults.standard.object(forKey: "automixHarmonic") == nil { return true }
-        return UserDefaults.standard.bool(forKey: "automixHarmonic")
-    }
-
-    private static var sweetSpotEnabled: Bool {
-        if UserDefaults.standard.object(forKey: "automixSweetSpot") == nil { return true }
-        return UserDefaults.standard.bool(forKey: "automixSweetSpot")
-    }
-
-    // MARK: Public
-
-    // Full per-track analysis, cached per song id. `taggedBPM` is the server/library
-    // tempo when known; it's trusted for the grid's tempo while phase still comes
-    // from the audio.
-    func analysis(songID: String, localURL: URL?, remoteURL: URL?, fileExtension: String?, taggedBPM: Double?) async -> AutoMixTrackAnalysis {
-        if let cached = analysisByID[songID] { return cached }
-
-        var fileURL: URL?
-        var isPrefix = false
-        var tempToDelete: URL?
-        if let localURL, localURL.isFileURL {
-            fileURL = localURL
-        } else if let remoteURL, let temp = await downloadPrefix(remoteURL, fileExtension: fileExtension) {
-            fileURL = temp; isPrefix = true; tempToDelete = temp
-        }
-        guard let fileURL else {
-            analysisByID[songID] = .zero
-            return .zero
-        }
-        defer { if let tempToDelete { try? FileManager.default.removeItem(at: tempToDelete) } }
-
-        let env = await decodeEnergyEnvelope(url: fileURL, isPrefix: isPrefix)
-        var result = AutoMixTrackAnalysis()
-        result.leadingSilence = env.silence.leadingSilence
-        result.trailingSilence = env.silence.trailingSilence
-        var effectiveTag = taggedBPM
-        if effectiveTag == nil { effectiveTag = await readBPMMetadata(url: fileURL) }
-        let gridEnergy = env.energy.last.map { $0.time > gridCapSeconds } == true
-            ? Array(env.energy.prefix(while: { $0.time <= gridCapSeconds }))
-            : env.energy
-        result.grid = AutoMixDSP.beatGrid(energy: gridEnergy, taggedBPM: effectiveTag)
-
-        // Structure: loudness + sweet-spot mix points. A streamed prefix has no
-        // tail, so only the entry point (and a loudness estimate) applies there.
-        if !env.energy.isEmpty {
-            result.rms = env.energy.reduce(Float(0)) { $0 + $1.value } / Float(env.energy.count)
-            let analysedSpan = isPrefix ? (env.energy.last?.time ?? 0) : env.duration
-            result.mixInPoint = AutoMixDSP.mixInPoint(energy: env.energy, duration: analysedSpan)
-            if !isPrefix {
-                result.duration = env.duration
-                result.mixOutPoint = AutoMixDSP.mixOutPoint(energy: env.energy, duration: env.duration)
-                result.endsCold = AutoMixDSP.endsCold(
-                    energy: env.energy,
-                    duration: env.duration,
-                    trailingSilence: env.silence.trailingSilence
-                )
-            }
-        }
-        // Head FFT covers key/vocals; local files get a short tail pass too.
-        if Self.harmonicEnabled || Self.sweetSpotEnabled {
-            let head = await decodeSpectral(
-                url: fileURL,
-                capSeconds: chromaCapSeconds,
-                includeChroma: Self.harmonicEnabled
-            )
-            if let chroma = head.chroma {
-                result.key = AutoMixDSP.estimateKey(chroma: chroma)
-            }
-            if Self.sweetSpotEnabled {
-                result.vocalIntroStart = AutoMixDSP.firstVocalActivity(frames: head.frames)
-                if !isPrefix, result.duration > 50 {
-                    let tail = await decodeSpectral(
-                        url: fileURL,
-                        startingAt: max(0, result.duration - 40),
-                        capSeconds: 45,
-                        includeChroma: false
-                    )
-                    result.vocalTailEnd = AutoMixDSP.lastVocalActivity(frames: tail.frames)
-                }
-            }
-        }
-
-        analysisByID[songID] = result
-        return result
-    }
-
-    // BPM for a song id (used by the Settings preview). Reuses the cached analysis.
-    func bpm(songID: String, localURL: URL?, remoteURL: URL?, fileExtension: String?) async -> Double? {
-        let a = await analysis(songID: songID, localURL: localURL, remoteURL: remoteURL, fileExtension: fileExtension, taggedBPM: nil)
-        return a.grid?.bpm
-    }
-
-    // MARK: Decode
-
-    // Download the first few MB of a remote track to a temp file. A truncated
-    // stream is still readable from the start, which is all the analyser needs.
-    private func downloadPrefix(_ url: URL, fileExtension: String?) async -> URL? {
-        let prefixBytes = 3 * 1024 * 1024  // ~3 MB: enough audio for tempo + key
-        var request = URLRequest(url: url)
-        request.setValue("bytes=0-\(prefixBytes - 1)", forHTTPHeaderField: "Range")
-        request.timeoutInterval = 20
-
-        let data: Data
-        do {
-            let (payload, _) = try await URLSession.shared.data(for: request)
-            data = payload
-        } catch {
-            return nil
-        }
-        guard data.count > 64 * 1024 else { return nil }
-
-        let ext = (fileExtension?.isEmpty == false) ? fileExtension! : "mp3"
-        let temp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("automix-\(UUID().uuidString)")
-            .appendingPathExtension(ext)
-        do {
-            try data.write(to: temp, options: .atomic)
-        } catch {
-            return nil
-        }
-        return temp
-    }
-
-    // Energy envelope plus leading/trailing silence from one decode pass.
-    private func decodeEnergyEnvelope(url: URL, isPrefix: Bool) async -> (energy: [AutoMixEnergyPoint], silence: AudioSilenceProfile, duration: TimeInterval) {
-        let asset = AVURLAsset(url: url)
-        let durationSeconds = (try? await asset.load(.duration))?.seconds ?? 0
-        guard let track = try? await asset.loadTracks(withMediaType: .audio).first else { return ([], .zero, 0) }
-        let threshold = silenceThreshold
-        let cap = envelopeCapSeconds
-        return await DeveloperExperiments.runBlocking(qos: .userInitiated) {
-            Self.decodeEnergyEnvelopeSync(
-                asset: asset,
-                track: track,
-                isPrefix: isPrefix,
-                durationSeconds: durationSeconds,
-                silenceThreshold: threshold,
-                envelopeCapSeconds: cap
-            )
-        }
-    }
-
-    private nonisolated static func decodeEnergyEnvelopeSync(
-        asset: AVURLAsset,
-        track: AVAssetTrack,
-        isPrefix: Bool,
-        durationSeconds: TimeInterval,
-        silenceThreshold: Float,
-        envelopeCapSeconds: TimeInterval
-    ) -> (energy: [AutoMixEnergyPoint], silence: AudioSilenceProfile, duration: TimeInterval) {
-        guard let reader = try? AVAssetReader(asset: asset) else { return ([], .zero, 0) }
-
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVLinearPCMIsFloatKey: true,
-            AVLinearPCMBitDepthKey: 32,
-            AVLinearPCMIsNonInterleaved: false
-        ]
-        let output = AVAssetReaderTrackOutput(track: track, outputSettings: settings)
-        output.alwaysCopiesSampleData = false
-        guard reader.canAdd(output) else { return ([], .zero, 0) }
-        reader.add(output)
-        guard reader.startReading() else { return ([], .zero, 0) }
-
-        var energy: [AutoMixEnergyPoint] = []
-        var firstAudible: TimeInterval?
-        var lastAudible: TimeInterval?
-
-        while !Task.isCancelled, let sampleBuffer = output.copyNextSampleBuffer() {
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
-            guard let block = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
-            var length = 0
-            var rawPointer: UnsafeMutablePointer<Int8>?
-            let status = CMBlockBufferGetDataPointer(
-                block, atOffset: 0, lengthAtOffsetOut: nil,
-                totalLengthOut: &length, dataPointerOut: &rawPointer
-            )
-            guard status == kCMBlockBufferNoErr,
-                  let rawPointer,
-                  length >= MemoryLayout<Float>.size else { continue }
-
-            let sampleCount = length / MemoryLayout<Float>.size
-            let stride = max(1, sampleCount / 4096)
-            let measured = rawPointer.withMemoryRebound(to: Float.self, capacity: sampleCount) { samples -> (mean: Float, peak: Float) in
-                var sum: Float = 0, peak: Float = 0, count = 0, index = 0
-                while index < sampleCount {
-                    let v = abs(samples[index])
-                    sum += min(1, v)
-                    peak = max(peak, v)
-                    count += 1
-                    index += stride
-                }
-                return (count > 0 ? sum / Float(count) : 0, peak)
-            }
-
-            guard pts.isFinite else { continue }
-            let sampleDuration = CMSampleBufferGetDuration(sampleBuffer).seconds
-            if pts <= envelopeCapSeconds {
-                let midpoint = pts + (sampleDuration.isFinite ? sampleDuration / 2 : 0)
-                energy.append(AutoMixEnergyPoint(time: midpoint, value: measured.mean))
-            }
-            if measured.peak >= silenceThreshold {
-                let end = sampleDuration.isFinite ? pts + sampleDuration : pts
-                if firstAudible == nil { firstAudible = pts }
-                lastAudible = max(lastAudible ?? end, end)
-            }
-        }
-
-        let silence: AudioSilenceProfile
-        if let firstAudible, let lastAudible {
-            let leading = min(12, max(0, firstAudible))
-            let trailing = isPrefix ? 0 : min(12, max(0, durationSeconds - lastAudible))
-            silence = AudioSilenceProfile(leadingSilence: leading, trailingSilence: trailing)
-        } else {
-            silence = .zero
-        }
-        return (energy, silence, durationSeconds.isFinite ? max(0, durationSeconds) : 0)
-    }
-
-    // Downsampled FFT for chroma and vocal-band frames.
-    private func decodeSpectral(
-        url: URL,
-        startingAt: TimeInterval? = nil,
-        capSeconds: TimeInterval,
-        includeChroma: Bool
-    ) async -> (chroma: [Double]?, frames: [AutoMixSpectralFrame]) {
-        let asset = AVURLAsset(url: url)
-        guard let track = try? await asset.loadTracks(withMediaType: .audio).first else { return (nil, []) }
-        return await DeveloperExperiments.runBlocking(qos: .userInitiated) {
-            Self.decodeSpectralSync(
-                asset: asset,
-                track: track,
-                startingAt: startingAt,
-                capSeconds: capSeconds,
-                includeChroma: includeChroma
-            )
-        }
-    }
-
-    private nonisolated static func decodeSpectralSync(
-        asset: AVURLAsset,
-        track: AVAssetTrack,
-        startingAt: TimeInterval?,
-        capSeconds: TimeInterval,
-        includeChroma: Bool
-    ) -> (chroma: [Double]?, frames: [AutoMixSpectralFrame]) {
-        guard let reader = try? AVAssetReader(asset: asset) else { return (nil, []) }
-        if let startingAt, startingAt > 0 {
-            reader.timeRange = CMTimeRange(
-                start: CMTime(seconds: startingAt, preferredTimescale: 600),
-                duration: .positiveInfinity
-            )
-        }
-
-        let sampleRate = 22_050.0
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVLinearPCMIsFloatKey: true,
-            AVLinearPCMBitDepthKey: 32,
-            AVLinearPCMIsNonInterleaved: false,
-            AVNumberOfChannelsKey: 1,
-            AVSampleRateKey: sampleRate
-        ]
-        let output = AVAssetReaderTrackOutput(track: track, outputSettings: settings)
-        output.alwaysCopiesSampleData = false
-        guard reader.canAdd(output) else { return (nil, []) }
-        reader.add(output)
-        guard reader.startReading() else { return (nil, []) }
-
-        let n = 8192
-        let half = n / 2
-        let log2n = vDSP_Length(13)
-        guard let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return (nil, []) }
-        defer { vDSP_destroy_fftsetup(setup) }
-
-        var window = [Float](repeating: 0, count: n)
-        vDSP_hann_window(&window, vDSP_Length(n), Int32(vDSP_HANN_NORM))
-
-        // Pitch-class bins, restricted to the range useful for key finding.
-        var binPitch = [Int](repeating: -1, count: half)
-        var isMid = [Bool](repeating: false, count: half)
-        var isAudible = [Bool](repeating: false, count: half)
-        for k in 1..<half {
-            let f = Double(k) * sampleRate / Double(n)
-            isMid[k] = f >= 280 && f <= 3800
-            isAudible[k] = f >= 65 && f <= 8000
-            guard f >= 65, f <= 2100 else { continue }
-            let midi = 69 + 12 * log2(f / 440)
-            binPitch[k] = ((Int(midi.rounded()) % 12) + 12) % 12
-        }
-
-        var chroma = [Double](repeating: 0, count: 12)
-        var frameChroma = [Double](repeating: 0, count: 12)
-        var realp = [Float](repeating: 0, count: half)
-        var imagp = [Float](repeating: 0, count: half)
-        var mags = [Float](repeating: 0, count: half)
-        var windowed = [Float](repeating: 0, count: n)
-        var ring = [Float]()
-        ring.reserveCapacity(n * 2)
-        let hop = n / 2
-        let maxSamples = Int(capSeconds * sampleRate)
-        var consumed = 0
-        var frames: [AutoMixSpectralFrame] = []
-        let baseTime = startingAt ?? 0
-        var frameIndex = 0
-
-        func processFrame() {
-            ring.withUnsafeBufferPointer { rb in
-                vDSP_vmul(rb.baseAddress!, 1, window, 1, &windowed, 1, vDSP_Length(n))
-            }
-            realp.withUnsafeMutableBufferPointer { rp in
-                imagp.withUnsafeMutableBufferPointer { ip in
-                    var split = DSPSplitComplex(realp: rp.baseAddress!, imagp: ip.baseAddress!)
-                    windowed.withUnsafeBufferPointer { wb in
-                        wb.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: half) { typed in
-                            vDSP_ctoz(typed, 2, &split, 1, vDSP_Length(half))
-                        }
-                    }
-                    vDSP_fft_zrip(setup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
-                    vDSP_zvabs(&split, 1, &mags, 1, vDSP_Length(half))
-                }
-            }
-            // Vocal-band share for the heuristic.
-            var midSum: Float = 0, totalSum: Float = 0
-            for k in 1..<half where isAudible[k] {
-                totalSum += mags[k]
-                if isMid[k] { midSum += mags[k] }
-            }
-            let time = baseTime + (Double(frameIndex) * Double(hop) + Double(n) / 2) / sampleRate
-            frames.append(AutoMixSpectralFrame(
-                time: time,
-                energy: totalSum,
-                midRatio: totalSum > 0 ? midSum / totalSum : 0
-            ))
-            frameIndex += 1
-
-            guard includeChroma else { return }
-            // Normalize per-frame chroma so loud sections do not dominate.
-            for i in 0..<12 { frameChroma[i] = 0 }
-            for k in 1..<half where binPitch[k] >= 0 {
-                frameChroma[binPitch[k]] += log1p(Double(mags[k]))
-            }
-            let frameSum = frameChroma.reduce(0, +)
-            if frameSum > 0 {
-                for i in 0..<12 { chroma[i] += frameChroma[i] / frameSum }
-            }
-        }
-
-        while !Task.isCancelled, consumed < maxSamples, let sampleBuffer = output.copyNextSampleBuffer() {
-            guard let block = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
-            var length = 0
-            var rawPointer: UnsafeMutablePointer<Int8>?
-            let status = CMBlockBufferGetDataPointer(
-                block, atOffset: 0, lengthAtOffsetOut: nil,
-                totalLengthOut: &length, dataPointerOut: &rawPointer
-            )
-            guard status == kCMBlockBufferNoErr,
-                  let rawPointer,
-                  length >= MemoryLayout<Float>.size else { continue }
-            let count = length / MemoryLayout<Float>.size
-            rawPointer.withMemoryRebound(to: Float.self, capacity: count) { samples in
-                ring.append(contentsOf: UnsafeBufferPointer(start: samples, count: count))
-            }
-            consumed += count
-            while ring.count >= n {
-                processFrame()
-                ring.removeFirst(hop)
-            }
-        }
-
-        return (includeChroma && chroma.reduce(0, +) > 0 ? chroma : nil, frames)
-    }
-
-    // Embedded BPM tag (ID3 TBPM / iTunes tmpo) for local files, as a fallback when
-    // the library/server didn't carry a tempo.
-    private func readBPMMetadata(url: URL) async -> Double? {
-        let asset = AVURLAsset(url: url)
-        let metadata = (try? await asset.load(.metadata)) ?? []
-        for item in metadata {
-            let keyText = [
-                item.identifier?.rawValue,
-                item.commonKey?.rawValue,
-                item.keySpace?.rawValue,
-                item.key.map { "\($0)" }
-            ]
-            .compactMap { $0 }
-            .joined(separator: " ")
-            .lowercased()
-            guard keyText.contains("bpm")
-                    || keyText.contains("beatsper")
-                    || keyText.contains("tbpm")
-                    || keyText.contains("tmpo") else { continue }
-
-            if let number = try? await item.load(.numberValue), number.doubleValue > 0 {
-                return number.doubleValue
-            }
-            if let text = try? await item.load(.stringValue) {
-                let cleaned = text.replacingOccurrences(of: ",", with: ".")
-                if let value = Double(cleaned.filter { $0.isNumber || $0 == "." }), value > 0 {
-                    return value
-                }
-            }
-        }
-        return nil
     }
 }

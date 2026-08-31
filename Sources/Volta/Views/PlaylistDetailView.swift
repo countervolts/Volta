@@ -29,7 +29,11 @@ struct PlaylistDetailView: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var pickedCover: UIImage?
     @AppStorage("showTrackArtwork") private var showTrackArtwork = true
+    @AppStorage("stylizedPlaylistCover") private var stylizedPlaylistCover = true
     @Environment(\.horizontalSizeClass) private var sizeClass
+#if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+#endif
     @State private var iPadPanel: iPadDetailPanel = .songs
 
     init(playlist: Playlist) {
@@ -40,10 +44,20 @@ struct PlaylistDetailView: View {
         Color(ColorExtractor.backgroundVariant(of: vm.dominantColor))
     }
 
+    private var usesLandscapePhoneLayout: Bool {
+#if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone && verticalSizeClass == .compact
+#else
+        false
+#endif
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             bg.ignoresSafeArea()
-            if sizeClass == .regular {
+            if usesLandscapePhoneLayout {
+                phoneLandscapeLayout
+            } else if sizeClass == .regular {
                 iPadLayout
             } else {
                 phoneScrollView
@@ -65,13 +79,23 @@ struct PlaylistDetailView: View {
         .sheet(item: $activeSheet) { sheet in
             sheetContent(sheet)
         }
-        .task { if let c = appState.client { await vm.load(client: c) } }
+        .task(id: "\(appState.currentServer?.id ?? "none")|\(appState.isOfflineMode)") {
+            if appState.isOfflineMode || appState.client == nil {
+                vm.loadOffline(serverID: appState.currentServer?.id)
+            } else if let client = appState.client {
+                await vm.load(client: client)
+            }
+        }
     }
 
     private var phoneScrollView: some View {
         ScrollView {
             VStack(spacing: 0) {
-                artworkSection
+                if stylizedPlaylistCover {
+                    artworkSection
+                } else {
+                    normalArtworkSection
+                }
                 infoSection
                 actionRow
                 descriptionSection
@@ -141,6 +165,45 @@ struct PlaylistDetailView: View {
                 }
             }
             .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var phoneLandscapeLayout: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    iPadArtworkSection
+                    infoSection
+                    actionRow
+                    descriptionSection
+                    footer
+                    Color.clear.frame(height: 32)
+                }
+            }
+            .scrollIndicators(.hidden)
+            .frame(width: 300)
+
+            Rectangle()
+                .fill(.white.opacity(0.10))
+                .frame(width: 0.5)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(L(.media_songs))
+                    .font(.title3.bold())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+
+                Divider().overlay(.white.opacity(0.12))
+
+                ScrollView {
+                    trackList
+                    Color.clear.frame(height: 96)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -301,6 +364,18 @@ struct PlaylistDetailView: View {
                 }
         }
         .aspectRatio(1, contentMode: .fit)
+    }
+
+    private var normalArtworkSection: some View {
+        PlaylistCover(playlist: vm.playlist, size: 800, cornerRadius: 14,
+                      onImageLoaded: { image in
+                          let color = ColorExtractor.dominantColor(from: image)
+                          vm.setDominantColor(color)
+                      })
+            .aspectRatio(1, contentMode: .fit)
+            .padding(.horizontal, 36)
+            .shadow(color: .black.opacity(0.45), radius: 28, x: 0, y: 10)
+            .padding(.top, 32)
     }
 
     private var infoSection: some View {

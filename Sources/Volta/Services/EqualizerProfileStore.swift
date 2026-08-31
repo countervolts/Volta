@@ -35,7 +35,7 @@ struct EqualizerProfile: Identifiable, Hashable, Codable, Sendable {
         self.id = id
         self.name = name
         self.gains = Self.normalizedGains(gains)
-        self.preampDB = min(0, max(-24, preampDB))
+        self.preampDB = EqualizerBiquadDesigner.sanitizedPreampDB(preampDB)
         self.kind = kind
         self.createdAt = createdAt
     }
@@ -49,7 +49,9 @@ struct EqualizerProfile: Identifiable, Hashable, Codable, Sendable {
         id = try values.decode(String.self, forKey: .id)
         name = try values.decode(String.self, forKey: .name)
         gains = Self.normalizedGains(try values.decode([Double].self, forKey: .gains))
-        preampDB = min(0, max(-24, try values.decodeIfPresent(Double.self, forKey: .preampDB) ?? 0))
+        preampDB = EqualizerBiquadDesigner.sanitizedPreampDB(
+            try values.decodeIfPresent(Double.self, forKey: .preampDB) ?? 0
+        )
         kind = try values.decode(EqualizerProfileKind.self, forKey: .kind)
         createdAt = try values.decode(Date.self, forKey: .createdAt)
     }
@@ -66,9 +68,7 @@ struct EqualizerProfile: Identifiable, Hashable, Codable, Sendable {
 
     static func normalizedGains(_ values: [Double]) -> [Double] {
         let padded = values + [Double](repeating: 0, count: max(0, EqualizerEngine.bandCount - values.count))
-        return Array(padded.prefix(EqualizerEngine.bandCount)).map {
-            min(EqualizerEngine.range.upperBound, max(EqualizerEngine.range.lowerBound, $0))
-        }
+        return Array(padded.prefix(EqualizerEngine.bandCount)).map(EqualizerBiquadDesigner.sanitizedGain)
     }
 }
 
@@ -106,13 +106,35 @@ enum AutoEQTenBandPasteImporter {
                 continue
             }
 
-            let values = line.split(whereSeparator: { $0.isWhitespace || $0 == "," })
-            guard values.count >= 2,
-                  let frequency = Double(values[0]),
-                  let gain = Double(values[1]),
-                  let index = frequencies.firstIndex(where: { abs($0 - frequency) <= 1 }) else {
-                continue
+            let frequency: Double
+            let gain: Double
+            if let labeledFrequency = labeledNumber(after: "fc", in: line),
+               let labeledGain = labeledNumber(after: "gain", in: line) {
+                // Equalizer APO / AutoEQ FixedBandEQ:
+                // Filter 1: ON PK Fc 31 Hz Gain -2.3 dB Q 1.41
+                frequency = labeledFrequency
+                gain = labeledGain
+            } else {
+                // Plain rows and Markdown tables. A leading band number is also
+                // accepted, for example: | 1 | 31 Hz | -2.3 dB |
+                let numbers = allNumbers(in: line)
+                if numbers.count >= 3,
+                   (1...frequencies.count).contains(Int(numbers[0])),
+                   frequencies.contains(where: { abs($0 - numbers[1]) <= 1 }) {
+                    frequency = numbers[1]
+                    // AutoEQ's official table is # / Type / Fc / Q / Gain,
+                    // while simpler tables omit Q. Gain is the final number.
+                    gain = numbers.last ?? 0
+                } else if numbers.count >= 2 {
+                    frequency = numbers[0]
+                    gain = numbers[1]
+                } else {
+                    continue
+                }
             }
+            guard frequency.isFinite,
+                  gain.isFinite,
+                  let index = frequencies.firstIndex(where: { abs($0 - frequency) <= 1 }) else { continue }
             guard gains[index] == nil else { throw ImportError.unsupportedFormat }
             gains[index] = gain
         }
@@ -129,11 +151,28 @@ enum AutoEQTenBandPasteImporter {
     }
 
     private static func firstNumber(in text: String) -> Double? {
-        guard let range = text.range(
-            of: #"[-+]?\d+(?:[.,]\d+)?"#,
-            options: .regularExpression
-        ) else { return nil }
-        return Double(text[range].replacingOccurrences(of: ",", with: "."))
+        allNumbers(in: text).first
+    }
+
+    private static func allNumbers(in text: String) -> [Double] {
+        let pattern = #"[-+]?\d+(?:[.,]\d+)?"#
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return expression.matches(in: text, range: range).compactMap { match in
+            guard let swiftRange = Range(match.range, in: text) else { return nil }
+            return Double(text[swiftRange].replacingOccurrences(of: ",", with: "."))
+        }
+    }
+
+    private static func labeledNumber(after label: String, in text: String) -> Double? {
+        let escaped = NSRegularExpression.escapedPattern(for: label)
+        let pattern = #"(?i)\b"# + escaped + #"\s*[:=]?\s*([-+]?\d+(?:[.,]\d+)?)"#
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let searchRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = expression.firstMatch(in: text, range: searchRange),
+              match.numberOfRanges > 1,
+              let valueRange = Range(match.range(at: 1), in: text) else { return nil }
+        return Double(text[valueRange].replacingOccurrences(of: ",", with: "."))
     }
 }
 

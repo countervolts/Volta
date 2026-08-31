@@ -227,6 +227,7 @@ struct Playlist: Codable, Identifiable, Hashable, Sendable {
     let entry: [Song]?
 
     var playedDate: Date? { ISO8601DateParser.date(from: played) }
+    var createdDate: Date? { ISO8601DateParser.date(from: created) }
     var changedDate: Date? { ISO8601DateParser.date(from: changed) }
 }
 

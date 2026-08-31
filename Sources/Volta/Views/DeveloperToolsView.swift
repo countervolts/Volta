@@ -127,6 +127,9 @@ struct DeveloperToolsView: View {
                 Label("Log Playback State", systemImage: "waveform")
             }
             .foregroundStyle(Theme.primaryText)
+            diagnosticButton("Send Test Crash Report", "paperplane") {
+                await sendTestCrashReport()
+            }
         } header: {
             Text("Diagnostics")
         }
@@ -329,6 +332,14 @@ struct DeveloperToolsView: View {
         lines.append("Estimated fade: \(String(format: "%.1f", duration))s")
         lines.append("Playback writes: 0")
         finishReport(lines, category: .playback)
+    }
+
+    private func sendTestCrashReport() async {
+        if CrashReportingService.shared.sendTestEvent() {
+            report = "Privacy-safe test event queued. Check GlitchTip shortly."
+        } else {
+            report = "Enable Share Anonymous Crash Reports in Privacy first."
+        }
     }
 
     private func measure(_ label: String, _ operation: () async throws -> String) async -> String {
