@@ -5,13 +5,25 @@ struct HorizontalMediaRow: View {
     let items: [MediaItem]
     var onSelect: (MediaItem) -> Void = { _ in }
 
+#if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+#endif
+
+    private var usesLandscapeCardLayout: Bool {
+#if os(iOS)
+        verticalSizeClass == .compact
+#else
+        false
+#endif
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: Theme.Layout.gridSpacing) {
                 ForEach(items) { item in
                     let card = MediaCard(item: item)
                         .containerRelativeFrameCompat(
-                            count: 5,
+                            count: usesLandscapeCardLayout ? 8 : 5,
                             span: 2,
                             spacing: Theme.Layout.gridSpacing
                         )
@@ -39,6 +51,25 @@ struct HorizontalPickRow: View {
     var isSavingMix: (MusicMix) -> Bool = { _ in false }
 
     @Environment(\.horizontalSizeClass) private var sizeClass
+#if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+#endif
+
+    private var usesLandscapeCardLayout: Bool {
+#if os(iOS)
+        verticalSizeClass == .compact
+#else
+        false
+#endif
+    }
+
+    private var cardFrameCount: Int {
+        usesLandscapeCardLayout ? 8 : (sizeClass == .regular ? 10 : 5)
+    }
+
+    private var cardFrameSpan: Int {
+        usesLandscapeCardLayout ? 2 : (sizeClass == .regular ? 2 : 3)
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -65,8 +96,8 @@ struct HorizontalPickRow: View {
                         }
                     }
                     .containerRelativeFrameCompat(
-                        count: sizeClass == .regular ? 10 : 5,
-                        span: sizeClass == .regular ? 2 : 3,
+                        count: cardFrameCount,
+                        span: cardFrameSpan,
                         spacing: Theme.Layout.gridSpacing
                     )
                 }

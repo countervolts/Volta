@@ -10,6 +10,7 @@ struct EqualizerView: View {
 
     @AppStorage("equalizerEnabled") private var enabled = false
     @State private var gains: [Double] = EqualizerEngine.shared.gains
+    @State private var processingMode = EqualizerEngine.shared.processingMode
     @StateObject private var profiles = EqualizerProfileStore.shared
     @StateObject private var route = OutputRouteMonitor.shared
     @State private var profileName = ""
@@ -38,6 +39,8 @@ struct EqualizerView: View {
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
+
+                    processingModeSection
 
                     profilesSection
 
@@ -91,12 +94,64 @@ struct EqualizerView: View {
         .background(SwipeBackEnabler())
         .onAppear {
             syncGainsFromEqualizer()
+            processingMode = EqualizerEngine.shared.processingMode
         }
         .onChangeCompat(of: profiles.selectedProfileID) { _, _ in
             // A device-profile assignment can be applied after an audio route
             // changes while this view is still visible. Keep the graph in sync
             // with the EQ engine instead of waiting for the view to reappear.
             syncGainsFromEqualizer()
+        }
+    }
+
+    private var processingModeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(L(.equalizer_processing_model), systemImage: "cpu")
+                .font(.headline)
+                .foregroundStyle(Theme.primaryText)
+
+            Picker(L(.equalizer_processing_model), selection: $processingMode) {
+                ForEach(EqualizerProcessingMode.allCases) { mode in
+                    Text(pickerTitle(for: mode)).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChangeCompat(of: processingMode) { _, mode in
+                EqualizerEngine.shared.setProcessingMode(mode)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(EqualizerProcessingMode.allCases) { mode in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: mode == processingMode ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(mode == processingMode ? Theme.accent : Theme.secondaryText)
+                        Text("\(modeTitle(for: mode)): \(modeDetail(for: mode))")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private func pickerTitle(for mode: EqualizerProcessingMode) -> String {
+        modeTitle(for: mode)
+    }
+
+    private func modeTitle(for mode: EqualizerProcessingMode) -> String {
+        switch mode {
+        case .accurate: return L(.equalizer_processing_accurate)
+        case .efficient: return L(.equalizer_processing_efficient)
+        case .batterySaver: return L(.equalizer_processing_battery_saver)
+        }
+    }
+
+    private func modeDetail(for mode: EqualizerProcessingMode) -> String {
+        switch mode {
+        case .accurate: return L(.equalizer_processing_accurate_detail)
+        case .efficient: return L(.equalizer_processing_efficient_detail)
+        case .batterySaver: return L(.equalizer_processing_battery_saver_detail)
         }
     }
 

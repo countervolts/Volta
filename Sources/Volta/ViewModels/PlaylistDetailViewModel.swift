@@ -22,13 +22,21 @@ final class PlaylistDetailViewModel: ObservableObject {
         if let loaded = try? await client.playlist(id: playlist.id) {
             playlist = loaded
             songs = loaded.entry ?? []
+            PlaylistOfflineCache.shared.cache(loaded, serverID: AppState.shared.currentServer?.id)
         }
+    }
+
+    func loadOffline(serverID: String?) {
+        guard let cached = PlaylistOfflineCache.shared.playlist(id: playlist.id, serverID: serverID) else { return }
+        playlist = cached
+        songs = cached.entry ?? []
     }
 
     func removeSong(at index: Int, client: any MusicService) async {
         guard index >= 0, index < songs.count else { return }
         songs.remove(at: index)
         try? await client.removeFromPlaylist(playlistID: playlist.id, index: index)
+        cacheCurrentPlaylist()
         await PlaylistBackupStore.shared.backup(playlistID: playlist.id, client: client)
     }
 
@@ -60,4 +68,21 @@ final class PlaylistDetailViewModel: ObservableObject {
 
     func setDominantColor(_ color: UIColor) { dominantColor = color }
     func toggleDescription() { isDescriptionExpanded.toggle() }
+
+    private func cacheCurrentPlaylist() {
+        playlist = Playlist(
+            id: playlist.id,
+            name: playlist.name,
+            comment: playlist.comment,
+            owner: playlist.owner,
+            songCount: songs.count,
+            duration: songs.compactMap(\.duration).reduce(0, +),
+            created: playlist.created,
+            changed: playlist.changed,
+            played: playlist.played,
+            coverArt: playlist.coverArt,
+            entry: songs
+        )
+        PlaylistOfflineCache.shared.cache(playlist, serverID: AppState.shared.currentServer?.id)
+    }
 }

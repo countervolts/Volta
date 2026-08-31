@@ -14,6 +14,7 @@ final class ArtworkLibraryDownloader: ObservableObject {
 
     private var task: Task<Void, Never>?
     private var catalogRefreshTask: Task<Void, Never>?
+    private var activeServerID: String?
 
     var fraction: Double {
         guard total > 0 else { return 0 }
@@ -31,6 +32,7 @@ final class ArtworkLibraryDownloader: ObservableObject {
         total = 0
         failed = 0
         statusText = "Loading artwork library…"
+        activeServerID = AppState.shared.currentServer?.id
         task = Task { await run(client: client) }
     }
 
@@ -39,6 +41,8 @@ final class ArtworkLibraryDownloader: ObservableObject {
     }
 
     private func run(client: any MusicService) async {
+        let serverID = activeServerID
+        let owner = "local-artwork-library:\(serverID ?? "legacy")"
         let albums: [Album]
         let artists: [Artist]
         if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
@@ -60,15 +64,14 @@ final class ArtworkLibraryDownloader: ObservableObject {
             }
             return values.sorted { $0.key < $1.key }
         }
-        let sizes: [Int?] = [nil, 300, 600]
-        let coverRequests = coverAlbums.flatMap { cover, albumName in
-            sizes.map {
-                ArtworkLibraryRequest(
-                    url: client.coverArtURL(id: cover, size: $0),
-                    label: albumName,
-                    groupID: "album-cover:\(cover)"
-                )
-            }
+        let coverRequests = coverAlbums.map { cover, albumName in
+            ArtworkLibraryRequest(
+                url: client.coverArtURL(id: cover, size: 1024) ?? client.coverArtURL(id: cover),
+                label: albumName,
+                groupID: "server:\(serverID ?? "legacy")|album-cover:\(cover)",
+                lookupID: ArtworkLoader.coverArtLookupID(cover, serverID: serverID),
+                owner: owner
+            )
         }
         total = coverRequests.count + artists.count
         statusText = "Downloading album covers…"
@@ -79,7 +82,7 @@ final class ArtworkLibraryDownloader: ObservableObject {
         statusText = "Downloading artist photos…"
         for artist in artists {
             guard !Task.isCancelled else { finish(cancelled: true); return }
-            record(await Self.persistArtist(artist, client: client))
+            record(await Self.persistArtist(artist, client: client, serverID: serverID, owner: owner))
         }
         finish(cancelled: false)
     }
@@ -95,7 +98,9 @@ final class ArtworkLibraryDownloader: ObservableObject {
                     request.url,
                     label: request.label,
                     kind: "Album Cover",
-                    groupID: request.groupID
+                    groupID: request.groupID,
+                    lookupID: request.lookupID,
+                    owner: request.owner
                 )
             }
             for result in results { record(result) }
@@ -115,7 +120,9 @@ final class ArtworkLibraryDownloader: ObservableObject {
         catalogRefreshTask?.cancel()
         catalogRefreshTask = nil
         revision &+= 1
-        UserDefaults.standard.set(completed > failed, forKey: "localArtworkLibraryDownloaded")
+        let complete = !cancelled && total > 0 && completed == total && failed == 0
+        UserDefaults.standard.set(complete, forKey: "localArtworkLibraryDownloaded")
+        activeServerID = nil
         statusText = cancelled
             ? "Stopped · \(completed) of \(total) checked"
             : "Done · \(completed - failed) saved · \(failed) failed"
@@ -152,17 +159,22 @@ final class ArtworkLibraryDownloader: ObservableObject {
 
     private nonisolated static func persistArtist(
         _ artist: Artist,
-        client: any MusicService
+        client: any MusicService,
+        serverID: String?,
+        owner: String
     ) async -> Bool {
-        if await ArtworkLoader.shared.pinnedArtistImage(id: artist.id) != nil { return true }
+        if await ArtworkLoader.shared.retainOwnership(
+            lookupID: ArtworkLoader.artistLookupID(artist.id, serverID: serverID),
+            owner: owner
+        ) { return true }
         if let directURL = artist.artistImageUrl.flatMap(URL.init(string:)),
-           await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: directURL, label: artist.name) { return true }
+           await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: directURL, label: artist.name, serverID: serverID, owner: owner) { return true }
         if let info = try? await client.artistInfo(id: artist.id),
            let value = info.bestImageUrl,
            let url = URL(string: value),
-           await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: url, label: artist.name) { return true }
+           await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: url, label: artist.name, serverID: serverID, owner: owner) { return true }
         if let fallback = client.coverArtURL(id: artist.coverArt, size: 600) {
-            return await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: fallback, label: artist.name)
+            return await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: fallback, label: artist.name, serverID: serverID, owner: owner)
         }
         return false
     }
@@ -172,4 +184,6 @@ private struct ArtworkLibraryRequest: Sendable {
     let url: URL?
     let label: String
     let groupID: String
+    let lookupID: String
+    let owner: String
 }

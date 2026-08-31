@@ -24,6 +24,21 @@ struct PlaylistCover: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in
+            coverContent
+                .frame(width: geometry.size.width, height: geometry.size.width)
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .task(id: playlist.id) { await reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .playlistCoverChanged)) { note in
+            if note.object as? String == playlist.id { Task { await reload() } }
+        }
+    }
+
+    @ViewBuilder
+    private var coverContent: some View {
         Group {
             if let custom {
                 ZStack {
@@ -42,10 +57,6 @@ struct PlaylistCover: View {
                 ArtworkView(coverArtID: playlist.coverArt, size: size,
                             cornerRadius: cornerRadius, onImageLoaded: onImageLoaded)
             }
-        }
-        .task(id: playlist.id) { await reload() }
-        .onReceive(NotificationCenter.default.publisher(for: .playlistCoverChanged)) { note in
-            if note.object as? String == playlist.id { Task { await reload() } }
         }
     }
 

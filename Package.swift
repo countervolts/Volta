@@ -18,6 +18,9 @@ let package = Package(
             targets: ["VoltaLiveLyricsWidget"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.26.0"),
+    ],
     targets: [
         .target(
             name: "VoltaLiveActivitySupport",
@@ -27,7 +30,10 @@ let package = Package(
         ),
         .target(
             name: "Volta",
-            dependencies: ["VoltaLiveActivitySupport"],
+            dependencies: [
+                "VoltaLiveActivitySupport",
+                .product(name: "Sentry-Dynamic", package: "sentry-cocoa"),
+            ],
             resources: [
                 .process("Resources"),
             ],

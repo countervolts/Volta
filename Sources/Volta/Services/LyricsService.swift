@@ -38,7 +38,7 @@ actor LyricsService {
     static let shared = LyricsService()
 
     private var cache: [String: [LyricLine]] = [:]
-    private let directory: URL
+    private var directory: URL
 
     // Kept decode-compatible so existing installations can migrate their old
     // parsed-lines JSON cache to real .lrc/.txt files on first read.
@@ -63,9 +63,16 @@ actor LyricsService {
     }
 
     private init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        directory = support.appendingPathComponent("Volta/Lyrics", isDirectory: true)
+        directory = DownloadStorageLocation.current.lyricsDirectory()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    /// Called only by DownloadStorageManager while no lyric transfer can write.
+    func migrateStorage(to location: DownloadStorageLocation, method: DownloadStorageTransferMethod) throws {
+        let destination = location.lyricsDirectory()
+        try DownloadStorageTransfer.transfer(from: directory, to: destination, method: method)
+        directory = destination
+        cache.removeAll()
     }
 
     func lyrics(
@@ -151,7 +158,12 @@ actor LyricsService {
             return parsed.lines
         }
 
-        AppLogger.shared.log("Lyrics not found; song='\(song.title)'; requestedSource=\(downloadSource?.displayName ?? "automatic")", category: .lyrics, level: .warning)
+        // Missing lyrics is an expected empty state rendered by LyricsView, not
+        // an actionable warning that should interrupt playback with a toast.
+        AppLogger.shared.log(
+            "Lyrics not found; song='\(song.title)'; requestedSource=\(downloadSource?.displayName ?? "automatic")",
+            category: .lyrics
+        )
         return []
     }
 

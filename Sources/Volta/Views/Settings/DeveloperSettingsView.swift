@@ -24,7 +24,7 @@ extension SettingsView {
         // Stays fully hidden (even from search) until unlocked via 7 taps on
         // the Version/Build row in About.
         if developerUnlocked,
-           sectionVisible(s, [["developer tools", "simulation", "simulate", "slow server", "expired session", "no network", "profiling", "ram", "automix", "autoplay"], ["experiments", "raw animated artwork", "disable ram optimizations", "app worker limit", "workers", "threads", "concurrency"], ["enhanced caching", "playback cache", "cache performance", "prefetch", "force cache mode", "seamless", "buffer"], ["hangs", "crashes", "crash reports", "hang reports", "reliability", "send report", ".ips"], ["performance overlay", "overlay", "fps", "ram", "frame pacing", "metrics"], ["notifications", "toast", "warning", "preview"], ["verbose logging", "logging"], ["log device specs", "device", "specs", "ios", "liquid glass", "diagnostics"], ["dump app files", "export app data", "zip", "all files"], ["export all logs"], ["clear all logs"], ["force refresh home"], ["logged play events"], ["queue length"], ["developer"]]) {
+           sectionVisible(s, [["developer tools", "simulation", "simulate", "slow server", "expired session", "no network", "profiling", "ram", "automix", "autoplay"], ["experiments", "raw animated artwork", "disable ram optimizations", "app worker limit", "workers", "threads", "concurrency", "reset library preview", "library first open", "clear library choice", "clear active playback", "playback recovery", "stuck playback"], ["enhanced caching", "playback cache", "cache performance", "prefetch", "force cache mode", "seamless", "buffer"], ["hangs", "crashes", "crash reports", "hang reports", "reliability", "send report", ".ips"], ["performance overlay", "overlay", "fps", "ram", "frame pacing", "metrics"], ["notifications", "toast", "warning", "preview"], ["verbose logging", "logging"], ["log device specs", "device", "specs", "ios", "liquid glass", "diagnostics"], ["dump app files", "export app data", "zip", "all files"], ["export all logs"], ["clear all logs"], ["force refresh home"], ["logged play events"], ["queue length"], ["developer"]]) {
         Section {
             SettingsDetailNavigationLink(.developerTools) {
                 Label("Developer Tools", systemImage: "hammer")
@@ -234,12 +234,15 @@ extension SettingsView {
 }
 
 struct DeveloperExperimentsView: View {
+    @EnvironmentObject private var appState: AppState
     @AppStorage(LiveArtworkSettings.rawAnimatedArtworkKey) private var rawAnimatedArtwork = false
     @AppStorage(DeveloperExperiments.disableRAMOptimizationsKey) private var disableRAMOptimizations = false
     @AppStorage(DeveloperExperiments.appWorkerLimitKey) private var appWorkerLimit = 0
     @AppStorage(DeveloperExperiments.preciseTimestampsKey) private var preciseTimestamps = false
     @AppStorage(DeveloperExperiments.fakeListeningStatsKey) private var fakeListeningStats = false
     @AppStorage(DeveloperExperiments.instantScrobblingKey) private var instantScrobbling = false
+    @AppStorage(DeveloperExperiments.allowStorageTransferDuringOfflinePlaybackKey) private var allowStorageTransferDuringOfflinePlayback = false
+    @State private var showingClearPlaybackConfirmation = false
 
     var body: some View {
         ZStack {
@@ -289,6 +292,11 @@ struct DeveloperExperimentsView: View {
                 .listRowBackground(Theme.secondaryBackground)
 
                 Section {
+                    Toggle(isOn: $allowStorageTransferDuringOfflinePlayback) {
+                        Label("Allow Storage Transfer During Offline Playback", systemImage: "externaldrive.badge.exclamationmark")
+                    }
+                    .tint(Theme.accent)
+
                     Toggle(isOn: $instantScrobbling) {
                         Label("Instant Scrobbling", systemImage: "bolt.badge.clock")
                     }
@@ -299,7 +307,36 @@ struct DeveloperExperimentsView: View {
                     }
                     .tint(Theme.accent)
                 } footer: {
-                    Text("Instant Scrobbling records local stats and sends third-party scrobbles 1 second into each song for debugging. Fake Listening Stats replaces the Listening tab in Stats with generated screenshot data; your real play history is kept separately.")
+                    Text("Storage transfer bypass permits moving downloaded files while offline audio plays and can interrupt playback. Instant Scrobbling records local stats and sends third-party scrobbles 1 second into each song for debugging. Fake Listening Stats replaces the Listening tab in Stats with generated screenshot data; your real play history is kept separately.")
+                }
+                .listRowBackground(Theme.secondaryBackground)
+
+                Section {
+                    Button {
+                        UserDefaults.standard.removeObject(forKey: LibraryDesign.storageKey)
+                        VoltaNotificationCenter.shared.post(
+                            "Library first-open preview reset. Reopen Library to test it.",
+                            tone: .success
+                        )
+                    } label: {
+                        Label("Reset Library First-Open Preview", systemImage: "rectangle.on.rectangle")
+                    }
+                    .foregroundStyle(Theme.primaryText)
+                } footer: {
+                    Text("Clears only your Modern or Legacy choice. Your Library section settings stay unchanged.")
+                }
+                .listRowBackground(Theme.secondaryBackground)
+
+                Section {
+                    Button(role: .destructive) {
+                        showingClearPlaybackConfirmation = true
+                    } label: {
+                        Label("Clear Active Playback", systemImage: "waveform.slash")
+                    }
+                } header: {
+                    Text("Playback Recovery")
+                } footer: {
+                    Text("Stops both audio players and clears the current song, queue, pending playback work, and saved playback session. Your server, downloads, playlists, and listening history are not removed.")
                 }
                 .listRowBackground(Theme.secondaryBackground)
 
@@ -356,6 +393,18 @@ struct DeveloperExperimentsView: View {
             ToolbarItem(placement: .topBarLeading) { GlassBackButton() }
         }
         .preferredColorScheme(Theme.colorScheme)
+        .alert("Clear active playback?", isPresented: $showingClearPlaybackConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear Playback", role: .destructive) {
+                appState.audioPlayer.clearActivePlaybackForRecovery()
+                VoltaNotificationCenter.shared.post(
+                    "Active playback cleared. Choose a song to start a fresh session.",
+                    tone: .success
+                )
+            }
+        } message: {
+            Text("This removes the stuck current song and queue, but keeps your account, downloads, playlists, and listening history.")
+        }
         .onChangeCompat(of: rawAnimatedArtwork) { _, enabled in
             AppLogger.shared.logAlways("Developer experiment: raw animated artwork \(enabled ? "enabled" : "disabled")", category: .settings)
         }

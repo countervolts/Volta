@@ -19,7 +19,7 @@ enum LibraryFilter: String, CaseIterable, Identifiable {
     }
 }
 
-enum LibrarySource: String, CaseIterable, Identifiable {
+enum LibrarySource: String, CaseIterable, Identifiable, Hashable {
     case server = "Server"
     case downloaded = "Downloaded"
     var id: String { rawValue }
@@ -166,20 +166,26 @@ final class LibraryViewModel: ObservableObject {
 
     private var sourceAlbums: [Album] {
         guard source == .downloaded else { return HiddenAlbumStore.shared.visibleAlbums(albums) }
-        let ids = Set(sourceSongs.compactMap { $0.albumId })
-        let known = albums.filter { ids.contains($0.id) }
-        let knownIDs = Set(known.map { $0.id })
-        let synthesized = synthesizedDownloadedAlbums(missing: ids.subtracting(knownIDs))
-        return HiddenAlbumStore.shared.visibleAlbums((known + synthesized).sorted { $0.name < $1.name })
+        // The download manifest is the offline source of truth. A number of
+        // servers omit `albumId` from song payloads, so grouping only by that
+        // field made a fully downloaded library appear to have no albums.
+        let localAlbums = synthesizedDownloadedAlbums(from: sourceSongs)
+        return HiddenAlbumStore.shared.visibleAlbums(
+            localAlbums.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        )
     }
 
     private var sourceArtists: [Artist] {
         guard source == .downloaded else { return collapsingComboArtists(HiddenAlbumStore.shared.visibleArtists(artists)) }
-        let ids = Set(sourceSongs.compactMap { $0.primaryArtistID })
-        let known = artists.filter { ids.contains($0.id) }
-        let knownIDs = Set(known.map { $0.id })
-        let synthesized = synthesizedDownloadedArtists(missing: ids.subtracting(knownIDs))
-        return collapsingComboArtists((known + synthesized).sorted { $0.name < $1.name })
+        // Build from the downloaded tracks just like offline albums. Some
+        // servers omit artist IDs from downloaded-song metadata; those artists
+        // still need a selectable offline profile.
+        return collapsingComboArtists(
+            HiddenAlbumStore.shared.visibleArtists(
+                synthesizedDownloadedArtists(from: sourceSongs)
+                    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            )
+        )
     }
 
     // Hide combo artists when both parts exist separately.
@@ -315,32 +321,80 @@ final class LibraryViewModel: ObservableObject {
 
     // MARK: - Synthesizing offline album/artist objects from song metadata
 
-    private func synthesizedDownloadedAlbums(missing ids: Set<String>) -> [Album] {
-        guard !ids.isEmpty else { return [] }
-        var byID: [String: Album] = [:]
-        for song in sourceSongs {
-            guard let aid = song.albumId, ids.contains(aid), byID[aid] == nil else { continue }
-            byID[aid] = Album(
-                id: aid, name: song.album ?? "Unknown Album", artist: song.primaryArtistName,
-                artistId: song.primaryArtistID, coverArt: song.coverArt, songCount: nil,
-                duration: nil, playCount: nil, created: nil, year: song.year,
-                genre: song.genre, starred: nil, comment: nil, recordLabel: nil, song: nil
+    private func synthesizedDownloadedAlbums(from songs: [Song]) -> [Album] {
+        var groups: [String: [Song]] = [:]
+        for song in songs {
+            guard let key = Self.downloadedAlbumKey(for: song) else { continue }
+            groups[key, default: []].append(song)
+        }
+
+        return groups.compactMap { key, tracks in
+            guard let first = tracks.first else { return nil }
+            let representative = tracks.first(where: { $0.coverArt?.isEmpty == false }) ?? first
+            let sortedTracks = tracks.sorted {
+                let lhsDisc = $0.discNumber ?? 1
+                let rhsDisc = $1.discNumber ?? 1
+                if lhsDisc != rhsDisc { return lhsDisc < rhsDisc }
+                return ($0.track ?? 0) < ($1.track ?? 0)
+            }
+            return Album(
+                id: Self.downloadedAlbumID(for: key),
+                name: first.album?.nonBlank ?? "Unknown Album",
+                artist: first.albumArtist?.nonBlank ?? first.artist?.nonBlank ?? first.primaryArtistName,
+                artistId: first.albumArtistId ?? first.primaryArtistID,
+                coverArt: representative.coverArt?.nonBlank ?? first.albumId?.nonBlank,
+                songCount: tracks.count,
+                duration: tracks.compactMap(\.duration).reduce(0, +),
+                playCount: tracks.compactMap(\.playCount).reduce(0, +),
+                created: nil,
+                year: first.year,
+                genre: first.genre,
+                starred: nil,
+                comment: nil,
+                recordLabel: nil,
+                song: sortedTracks
             )
         }
-        return Array(byID.values)
     }
 
-    private func synthesizedDownloadedArtists(missing ids: Set<String>) -> [Artist] {
-        guard !ids.isEmpty else { return [] }
-        var byID: [String: Artist] = [:]
-        for song in sourceSongs {
-            guard let aid = song.primaryArtistID, ids.contains(aid), byID[aid] == nil else { continue }
-            byID[aid] = Artist(
-                id: aid, name: song.primaryArtistName, coverArt: song.coverArt,
-                albumCount: nil, artistImageUrl: nil, starred: nil, album: nil
+    private static func downloadedAlbumKey(for song: Song) -> String? {
+        if let albumID = song.albumId?.nonBlank {
+            return "id:\(albumID)"
+        }
+        guard let album = song.album?.nonBlank else { return nil }
+        let artist = song.albumArtist?.nonBlank ?? song.artist?.nonBlank ?? song.primaryArtistName
+        let normalizedAlbum = album.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let normalizedArtist = artist.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        return "metadata:\(normalizedArtist)|\(normalizedAlbum)|\(song.year ?? 0)"
+    }
+
+    private static func downloadedAlbumID(for key: String) -> String {
+        if key.hasPrefix("id:") { return String(key.dropFirst(3)) }
+        return "offline-album-\(Crypto.md5Hex(key))"
+    }
+
+    private func synthesizedDownloadedArtists(from songs: [Song]) -> [Artist] {
+        let groups = Dictionary(grouping: songs) { song in
+            song.primaryArtistID?.nonBlank.map { "id:\($0)" }
+                ?? "metadata:\(song.offlineArtistKey)"
+        }
+        return groups.compactMap { key, tracks in
+            guard let first = tracks.first else { return nil }
+            let artistID = key.hasPrefix("id:")
+                ? String(key.dropFirst(3))
+                : "offline-artist-\(Crypto.md5Hex(key))"
+            let albumCount = Set(tracks.compactMap(Self.downloadedAlbumKey(for:))).count
+            let representative = tracks.first(where: { $0.coverArt?.nonBlank != nil }) ?? first
+            return Artist(
+                id: artistID,
+                name: first.primaryArtistName,
+                coverArt: representative.coverArt?.nonBlank ?? representative.albumId?.nonBlank,
+                albumCount: albumCount,
+                artistImageUrl: nil,
+                starred: nil,
+                album: nil
             )
         }
-        return Array(byID.values)
     }
 
     func load(client: any MusicService) async {

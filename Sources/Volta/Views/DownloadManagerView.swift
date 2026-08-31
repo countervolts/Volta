@@ -5,6 +5,7 @@ struct DownloadManagerView: View {
     @StateObject private var downloadService = DownloadService.shared
     @StateObject private var lyricsDownloader = LyricsBulkDownloader.shared
     @StateObject private var artworkDownloader = ArtworkLibraryDownloader.shared
+    @StateObject private var storageManager = DownloadStorageManager.shared
 
     @AppStorage(DownloadService.concurrentDownloadLimitKey) private var concurrentDownloads = 2
     @AppStorage("downloadBitrate") private var downloadBitrate = 0
@@ -29,6 +30,9 @@ struct DownloadManagerView: View {
     @State private var showCustomCap = false
     @State private var customSpeedText = ""
     @State private var customCapText = ""
+    @State private var pendingStorageLocation: DownloadStorageLocation?
+    @State private var showStorageMethod = false
+    @State private var showStorageError = false
 
     var body: some View {
         ZStack {
@@ -38,6 +42,7 @@ struct DownloadManagerView: View {
                 activeTransfers
                 companionLyricsTransfers
                 downloadedLibrary
+                storageLocation
                 libraryDownloads
                 downloadControls
             }
@@ -93,6 +98,21 @@ struct DownloadManagerView: View {
             }
         } message: {
             Text("Enter 0 for unlimited, or a maximum size in GB.")
+        }
+        .confirmationDialog("Migrate Downloaded Data", isPresented: $showStorageMethod, titleVisibility: .visible) {
+            Button("Move") { startStorageMigration(method: .move) }
+            Button("Copy, then delete original") { startStorageMigration(method: .copyThenDelete) }
+            Button("Cancel", role: .cancel) { pendingStorageLocation = nil }
+        } message: {
+            Text(storageMigrationMessage)
+        }
+        .alert("Storage Migration Stopped", isPresented: $showStorageError) {
+            Button("OK", role: .cancel) { storageManager.clearError() }
+        } message: {
+            Text(storageManager.errorMessage ?? "Unknown error")
+        }
+        .onChangeCompat(of: storageManager.errorMessage) { _, value in
+            showStorageError = value != nil
         }
     }
 
@@ -248,6 +268,39 @@ struct DownloadManagerView: View {
                 Text("\(catalog.totalCount) items · \(downloadByteString(catalog.totalBytes)) total")
             } else {
                 Text("Calculating…")
+            }
+        }
+        .listRowBackground(Theme.secondaryBackground)
+    }
+
+    private var storageLocation: some View {
+        Section("Download Storage") {
+            LabeledContent("Location") {
+                Text(storageManager.location.displayName)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            Text(storageManager.location.detail)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+
+            if storageManager.isMigrating {
+                VStack(alignment: .leading, spacing: 7) {
+                    ProgressView(value: storageManager.progress).tint(Theme.accent)
+                    Text(storageManager.status)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            } else {
+                Button(storageManager.location == .filesApp ? "Move to Private Storage" : "Move to Files App") {
+                    pendingStorageLocation = storageManager.location == .filesApp ? .privateStorage : .filesApp
+                    showStorageMethod = true
+                }
+                .disabled(!storageManager.canMigrate)
+                if !storageManager.canMigrate {
+                    Text("Stop all music, artwork, and lyrics downloads before migrating.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
             }
         }
         .listRowBackground(Theme.secondaryBackground)
@@ -478,6 +531,21 @@ struct DownloadManagerView: View {
         catalogRevision &+= 1
     }
 
+    private var storageMigrationMessage: String {
+        guard let pendingStorageLocation else { return "" }
+        let destination = pendingStorageLocation == .filesApp
+            ? "On My iPhone > Volta"
+            : "Volta private storage"
+        return "Music, artwork, and lyrics will move to \(destination). Do not edit Volta files in Files while migration runs."
+    }
+
+    private func startStorageMigration(method: DownloadStorageTransferMethod) {
+        guard let pendingStorageLocation else { return }
+        storageManager.migrate(to: pendingStorageLocation, method: method)
+        self.pendingStorageLocation = nil
+        catalogRevision &+= 1
+    }
+
     private func reloadCatalog() async {
         let showCalculation = !isLibraryDownloadRunning
         catalogCalculating = showCalculation ? Set(DownloadCatalogComponent.allCases) : []
@@ -506,7 +574,8 @@ struct DownloadManagerView: View {
     }
 
     private var isLibraryDownloadRunning: Bool {
-        !downloadService.transfers.isEmpty
+        storageManager.isMigrating
+            || !downloadService.transfers.isEmpty
             || downloadService.bulkProgress.isRunning
             || lyricsDownloader.isRunning
             || !lyricsDownloader.companionTransfers.isEmpty
@@ -538,15 +607,16 @@ struct DownloadManagerView: View {
                 .union(downloadService.transfers.map(\.id))
             let result = await DeveloperExperiments.runSync {
                 let pending = songs.filter { !unavailableIDs.contains($0.id) }
-                return (pending, pending.reduce(0) { $0 + ($1.size ?? 0) })
+                return (pending, DownloadService.estimatedBulkBytes(pending))
             }
             pendingMissingSongs = result.0
             pendingMissingBytes = result.1
-            availableBytes = Self.availableCapacityBytes()
+            let capacity = DeviceStorageCapacity.current()
+            availableBytes = Int(clamping: capacity.importantAvailableBytes)
 
             if pendingMissingSongs.isEmpty {
                 VoltaNotificationCenter.shared.post(L(.notif_everything_downloaded), tone: .success)
-            } else if pendingMissingBytes + 250_000_000 > availableBytes {
+            } else if !capacity.allowsDownload(expectedBytes: pendingMissingBytes) {
                 showInsufficientStorage = true
             } else if hasConfirmedDownloadAllMissingSongs {
                 startMissingSongDownloads()
@@ -611,11 +681,6 @@ struct DownloadManagerView: View {
         }
     }
 
-    private nonisolated static func availableCapacityBytes() -> Int {
-        let home = URL(fileURLWithPath: NSHomeDirectory())
-        let values = try? home.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return Int(values?.volumeAvailableCapacityForImportantUsage ?? 0)
-    }
 }
 
 private struct DownloadCatalogKey: Hashable {

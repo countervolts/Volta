@@ -5,6 +5,7 @@ struct ArtistDetailView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm: ArtistDetailViewModel
     @StateObject private var hiddenAlbums = HiddenAlbumStore.shared
+    @StateObject private var downloads = DownloadService.shared
     @State private var drillAlbum: Album?
     @State private var addToPlaylistSong: Song? = nil
     @State private var toastMessage: String? = nil
@@ -12,6 +13,9 @@ struct ArtistDetailView: View {
     // Local profile-photo mirror.
     @State private var profileImage: UIImage? = nil
     @StateObject private var scrollState = ArtistProfileScrollState()
+#if os(iOS)
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+#endif
 
     init(artist: Artist) {
         _vm = StateObject(wrappedValue: ArtistDetailViewModel(artist: artist))
@@ -33,7 +37,11 @@ struct ArtistDetailView: View {
     var body: some View {
         GeometryReader { proxy in
             let width = proxy.size.width
-            let headerHeight = Self.headerHeight + proxy.safeAreaInsets.top
+            let compactLandscape = width > proxy.size.height
+            let baseHeaderHeight = compactLandscape
+                ? min(Self.headerHeight, max(180, proxy.size.height * 0.52))
+                : Self.headerHeight
+            let headerHeight = baseHeaderHeight + proxy.safeAreaInsets.top
 
             ZStack(alignment: .top) {
                 bg.ignoresSafeArea()
@@ -120,9 +128,19 @@ struct ArtistDetailView: View {
                 biography: vm.biography ?? ""
             )
         }
-        .task { if let c = appState.client { await vm.load(client: c) } }
+        .task(id: "\(appState.isOfflineMode)|\(appState.client == nil)|\(downloads.downloadedRevision)") {
+            await loadProfile()
+        }
         .onChangeCompat(of: hiddenAlbums.revision) { _, _ in
-            Task { if let c = appState.client { await vm.load(client: c) } }
+            Task { await loadProfile() }
+        }
+    }
+
+    private func loadProfile() async {
+        if appState.isOfflineMode || appState.client == nil {
+            await vm.loadOffline()
+        } else if let client = appState.client {
+            await vm.load(client: client)
         }
     }
 
@@ -252,6 +270,14 @@ struct ArtistDetailView: View {
     private static let rowHeight: CGFloat = 52
     private static let pageSize = 5
 
+    private var usesLandscapeLayout: Bool {
+#if os(iOS)
+        verticalSizeClass == .compact
+#else
+        false
+#endif
+    }
+
     @ViewBuilder
     private var topSongsSection: some View {
         if !vm.topSongs.isEmpty {
@@ -282,8 +308,8 @@ struct ArtistDetailView: View {
                             }
                             .frame(height: pageH, alignment: .top)
                             .containerRelativeFrameCompat(
-                                count: multi ? 8 : 1,
-                                span: multi ? 7 : 1,
+                                count: usesLandscapeLayout ? 8 : (multi ? 8 : 1),
+                                span: usesLandscapeLayout ? 5 : (multi ? 7 : 1),
                                 spacing: 12
                             )
                         }
@@ -393,7 +419,12 @@ struct ArtistDetailView: View {
                         ForEach(vm.albumReleases) { album in
                             Button { drillAlbum = album } label: {
                                 VStack(alignment: .leading, spacing: 6) {
-                                    ArtworkView(coverArtID: album.coverArt, size: 300, cornerRadius: 8)
+                                    ArtworkView(
+                                        coverArtID: album.coverArt,
+                                        size: 300,
+                                        cornerRadius: 8,
+                                        cropsImageToSquare: true
+                                    )
                                         .frame(width: 130, height: 130)
 
                                     Text(album.name)
@@ -433,7 +464,12 @@ struct ArtistDetailView: View {
                         ForEach(vm.singles) { album in
                             Button { drillAlbum = album } label: {
                                 VStack(alignment: .leading, spacing: 6) {
-                                    ArtworkView(coverArtID: album.coverArt, size: 300, cornerRadius: 8)
+                                    ArtworkView(
+                                        coverArtID: album.coverArt,
+                                        size: 300,
+                                        cornerRadius: 8,
+                                        cropsImageToSquare: true
+                                    )
                                         .frame(width: 130, height: 130)
 
                                     Text(album.name)
@@ -517,7 +553,7 @@ struct ArtistDetailView: View {
                         ForEach(vm.similarArtists) { artist in
                             NavigationLink(destination: ArtistDetailView(artist: artist)) {
                                 VStack(spacing: 8) {
-                                    ArtworkView(coverArtID: artist.coverArt, size: 200, cornerRadius: 50)
+                                    ArtworkView(coverArtID: artist.coverArt, artistID: artist.id, size: 200, cornerRadius: 50)
                                         .frame(width: 80, height: 80)
                                         .clipShape(Circle())
                                     Text(artist.name)

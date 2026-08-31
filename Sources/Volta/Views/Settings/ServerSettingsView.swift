@@ -9,7 +9,7 @@ extension SettingsView {
         if sectionVisible(s, [["connected to", "server url", "cellular url", "data", "wifi", "username", "edit connection", "test connection", "log out", "logout", "sign out"], ["server health & speed test", "speed test", "server health", "latency", "connection"]]) {
         Section(sectionTitle(s)) {
             if let server = appState.currentServer {
-                LabeledContent("Connected to", value: server.displayName)
+                LabeledContent("Connected to", value: appState.activeServerURLString ?? server.urlString)
                     .foregroundStyle(Theme.primaryText)
                 LabeledContent("Server URL", value: server.urlString)
                     .foregroundStyle(Theme.primaryText)
@@ -84,7 +84,7 @@ extension SettingsView {
                 addCurrentWiFiSSID()
             } label: {
                 HStack {
-                    Label("Only Wi-Fi Login on This SSID", systemImage: "wifi.badge.checkmark")
+                    Label("Use Main Server on This Wi-Fi", systemImage: "wifi.badge.checkmark")
                     Spacer()
                     if isReadingCurrentSSID {
                         ProgressView().controlSize(.small).tint(Theme.accent)
@@ -98,7 +98,7 @@ extension SettingsView {
             )
 
             if allowedWiFiLoginSSIDs.isEmpty {
-                Text("Automatic Wi-Fi login is currently allowed on every network.")
+                Text("The main server is used on Wi-Fi, and the alternate connection is used on cellular.")
                     .font(.caption)
                     .foregroundStyle(Theme.secondaryText)
             } else {
@@ -123,9 +123,9 @@ extension SettingsView {
                     .foregroundStyle(Theme.secondaryText)
             }
         } header: {
-            Text("Wi-Fi Login Networks")
+            Text("Preferred Server Wi-Fi")
         } footer: {
-            Text("When this list has entries, Volta only connects to your server over Wi-Fi on an approved SSID. Cellular login is unchanged. Reading the SSID requires Location permission.")
+            Text("When this list has entries, Volta uses the main server only on these exact Wi-Fi networks. On cellular, other Wi-Fi networks, or when the Wi-Fi name is unavailable, it uses the alternate connection. Reading the Wi-Fi name requires Location permission.")
         }
         .listRowBackground(Theme.secondaryBackground)
         }
@@ -209,7 +209,7 @@ struct EditConnectionView: View {
                 } header: {
                     Text("Cellular")
                 } footer: {
-                    Text("Used automatically when off Wi-Fi. Leave cellular login blank to keep using the main username and password.")
+                    Text("Used automatically on cellular and, when preferred Wi-Fi networks are set, anywhere outside those networks. Leave alternate login blank to keep using the main username and password.")
                 }
                 .listRowBackground(Theme.secondaryBackground)
 

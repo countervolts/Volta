@@ -70,6 +70,7 @@ private struct ChangelogEntry: Identifiable {
     let hash: String
     let title: String
     let changes: [String]
+    let date: Date?
 
     var id: String { hash }
 }
@@ -140,9 +141,15 @@ struct ChangelogSettingsView: View {
                                         .foregroundStyle(Theme.primaryText)
                                         .lineLimit(3)
                                         .fixedSize(horizontal: false, vertical: true)
-                                    Text(entry.hash)
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(Theme.secondaryText)
+                                    HStack(spacing: 6) {
+                                        if let date = entry.date {
+                                            Text(date.formatted(date: .abbreviated, time: .omitted))
+                                        }
+                                        Text(entry.hash)
+                                            .font(.caption.monospaced())
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.secondaryText)
                                 }
                             }
                             .tint(Theme.accent)
@@ -201,7 +208,8 @@ private enum GitHubChangelogFetcher {
             return ChangelogEntry(
                 hash: response.shortHash,
                 title: title,
-                changes: changes(from: message, title: title)
+                changes: changes(from: message, title: title),
+                date: response.committerDate
             )
         }
     }
@@ -301,8 +309,20 @@ private struct GitHubCommitResponse: Decodable {
     let commit: GitHubCommit
 
     var shortHash: String { String(sha.prefix(7)) }
+
+    var committerDate: Date? {
+        let dateString = commit.committer?.date ?? commit.author?.date
+        guard let dateString else { return nil }
+        return ISO8601DateFormatter().date(from: dateString)
+    }
 }
 
 private struct GitHubCommit: Decodable {
     let message: String
+    let author: GitHubCommitPerson?
+    let committer: GitHubCommitPerson?
+}
+
+private struct GitHubCommitPerson: Decodable {
+    let date: String?
 }

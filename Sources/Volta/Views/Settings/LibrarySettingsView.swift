@@ -6,8 +6,12 @@ extension SettingsView {
     @ViewBuilder
     var librarySection: some View {
         let s = "Library"
-        if sectionVisible(s, [["home", "home tab", "customize home", "sections", "section order"], ["custom sorting", "saved sorts", "saved views", "smart filters", "library views", "albums", "songs", "sort", "group", "filters"], ["rating", "ratings", "stars", "favorite", "favourite", "love"]]) {
+        if sectionVisible(s, [["library design", "library layout", "modern library", "legacy library", "library appearance"], ["home", "home tab", "customize home", "sections", "section order"], ["custom sorting", "saved sorts", "saved views", "smart filters", "library views", "albums", "songs", "sort", "group", "filters"], ["rating", "ratings", "stars", "favorite", "favourite", "love"]]) {
             Section {
+                if rowVisible(s, ["library design", "library layout", "modern library", "legacy library", "library appearance"]) {
+                    LibraryDesignSettingsRow()
+                }
+
                 if rowVisible(s, ["home", "home tab", "customize home", "sections", "section order"]) {
                     SettingsDetailNavigationLink(.homeCustomization) {
                         Label(L(.home_customize), systemImage: "rectangle.3.group")
@@ -33,6 +37,19 @@ extension SettingsView {
                     .listRowBackground(Theme.secondaryBackground)
             }
         }
+    }
+}
+
+private struct LibraryDesignSettingsRow: View {
+    @AppStorage(LibraryDesign.storageKey) private var designRaw = ""
+
+    var body: some View {
+        Picker("Library Design", selection: $designRaw) {
+            ForEach(LibraryDesign.allCases) { design in
+                Text(design.settingsLabel).tag(design.rawValue)
+            }
+        }
+        .tint(Theme.accent)
     }
 }
 

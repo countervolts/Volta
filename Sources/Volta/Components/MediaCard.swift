@@ -3,21 +3,28 @@ import SwiftUI
 struct MediaCard: View {
     let item: MediaItem
     var width: CGFloat?
+    var heroSourceID: String?
 
-    init(item: MediaItem, width: CGFloat? = nil) {
+    init(item: MediaItem, width: CGFloat? = nil, heroSourceID: String? = nil) {
         self.item = item
         self.width = width
+        self.heroSourceID = heroSourceID
     }
 
-    init(album: Album, width: CGFloat? = nil) {
-        self.init(item: MediaItem(album: album), width: width)
+    init(album: Album, width: CGFloat? = nil, heroSourceID: String? = nil) {
+        self.init(item: MediaItem(album: album), width: width, heroSourceID: heroSourceID)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ArtworkView(coverArtID: item.coverArt, size: 400)
-                .aspectRatio(1, contentMode: .fit)
-                .heroSource(id: item.id)
+            GeometryReader { geometry in
+                ArtworkView(coverArtID: item.coverArt, size: 400)
+                    .frame(width: geometry.size.width, height: geometry.size.width)
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Layout.cardCorner, style: .continuous))
+            .heroSource(id: heroSourceID ?? item.id)
 
             Text(item.title)
                 .font(.subheadline.weight(.medium))

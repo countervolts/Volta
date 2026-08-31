@@ -6,6 +6,7 @@ enum DeveloperExperiments {
     static let preciseTimestampsKey = "preciseTimestamps"
     static let fakeListeningStatsKey = "fakeListeningStats"
     static let instantScrobblingKey = "instantScrobbling"
+    static let allowStorageTransferDuringOfflinePlaybackKey = "allowStorageTransferDuringOfflinePlayback"
     private static let legacySingleThreadedModeKey = "singleThreadedMode"
 
     static var fakeListeningStats: Bool {
@@ -22,6 +23,10 @@ enum DeveloperExperiments {
 
     static var instantScrobbling: Bool {
         UserDefaults.standard.object(forKey: instantScrobblingKey) as? Bool ?? false
+    }
+
+    static var allowStorageTransferDuringOfflinePlayback: Bool {
+        UserDefaults.standard.bool(forKey: allowStorageTransferDuringOfflinePlaybackKey)
     }
 
     static var appWorkerLimit: Int {

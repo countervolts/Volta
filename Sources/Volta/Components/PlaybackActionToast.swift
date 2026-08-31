@@ -108,6 +108,10 @@ final class VoltaNotificationCenter: ObservableObject {
 
     func postLog(_ entry: LogEntry) {
         guard entry.level != .info else { return }
+        if entry.category == .lyrics,
+           entry.message.localizedCaseInsensitiveContains("lyrics not found") {
+            return
+        }
         if entry.level == .error,
            Self.isOfflineMessage(entry.message),
            !(UserDefaults.standard.object(forKey: "showOfflineErrorNotifications") as? Bool ?? false) {
@@ -148,6 +152,7 @@ final class VoltaNotificationCenter: ObservableObject {
             || lower.contains("network connection was lost")
             || lower.contains("could not reach")
             || lower.contains("connection test failed")
+            || lower.contains("server activation failed")
     }
 }
 

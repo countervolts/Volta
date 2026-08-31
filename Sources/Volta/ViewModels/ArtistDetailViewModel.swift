@@ -36,9 +36,8 @@ final class ArtistDetailViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        if let img = await ArtworkLoader.shared.pinnedArtistImage(id: seedArtist.id) {
-            artistImage = img
-            dominantColor = ColorExtractor.dominantColor(from: img)
+        if let img = await ArtworkLoader.shared.pinnedArtistImage(id: seedArtist.id, serverID: AppState.shared.currentServer?.id) {
+            setArtistImage(img)
         } else {
             await applyImage(from: seedArtist.artistImageUrl)
         }
@@ -73,9 +72,8 @@ final class ArtistDetailViewModel: ObservableObject {
                 if await applyImage(from: urlStr) { break }
             }
         }
-        if artistImage == nil, let img = await ArtworkLoader.shared.pinnedArtistImage(id: seedArtist.id) {
-            artistImage = img
-            dominantColor = ColorExtractor.dominantColor(from: img)
+        if artistImage == nil, let img = await ArtworkLoader.shared.pinnedArtistImage(id: seedArtist.id, serverID: AppState.shared.currentServer?.id) {
+            setArtistImage(img)
         }
         artworkResolved = true
 
@@ -85,6 +83,34 @@ final class ArtistDetailViewModel: ObservableObject {
             HiddenAlbumStore.shared.register(albums: found)
             appearsOn = HiddenAlbumStore.shared.visibleAlbums(found).filter { !ownAlbumIDs.contains($0.id) && $0.artistId != ownID }
         }
+    }
+
+    func loadOffline() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        // Do not retain server-only sections after the user enters Offline
+        // Mode. The profile remains structurally the same, but every song and
+        // album below comes from the download manifest.
+        fullArtist = nil
+        albums = []
+        topSongs = []
+        allSongs = []
+        info = nil
+        biography = nil
+        appearsOn = []
+
+        if let image = await ArtworkLoader.shared.pinnedArtistImage(id: seedArtist.id, serverID: AppState.shared.currentServer?.id) {
+            setArtistImage(image)
+        }
+
+        applyDownloadedFallbackIfNeeded()
+        applyHiddenAlbumFilters()
+        artworkResolved = true
+        AppLogger.shared.log(
+            "Artist profile loaded offline; artistID=\(seedArtist.id); albums=\(albums.count); songs=\(allSongs.count)",
+            category: .library
+        )
     }
 
     private func applyHiddenAlbumFilters() {
@@ -149,7 +175,7 @@ final class ArtistDetailViewModel: ObservableObject {
                 name: first.album ?? "Unknown Album",
                 artist: artist.name,
                 artistId: artist.id,
-                coverArt: first.coverArt,
+                coverArt: first.coverArt?.nonBlank ?? first.albumId?.nonBlank,
                 songCount: sorted.count,
                 duration: sorted.compactMap(\.duration).reduce(0, +),
                 playCount: nil,
@@ -172,9 +198,32 @@ final class ArtistDetailViewModel: ObservableObject {
         guard let urlStr, !urlStr.isEmpty, !urlStr.hasSuffix("/"),
               let url = URL(string: urlStr),
               let img = await ArtworkLoader.shared.image(for: url, maxPixelSize: 900) else { return false }
-        artistImage = img
-        dominantColor = ColorExtractor.dominantColor(from: img)
+        setArtistImage(img)
         return true
+    }
+
+    private func setArtistImage(_ image: UIImage) {
+        let square = Self.squareCrop(image)
+        artistImage = square
+        dominantColor = ColorExtractor.dominantColor(from: square)
+    }
+
+    private static func squareCrop(_ image: UIImage) -> UIImage {
+        let size = image.size
+        let side = min(size.width, size.height)
+        guard side > 0, abs(size.width - size.height) > 0.5 else { return image }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+            image.draw(in: CGRect(
+                x: (side - size.width) / 2,
+                y: (side - size.height) / 2,
+                width: size.width,
+                height: size.height
+            ))
+        }
     }
 
     func setDominantColor(_ color: UIColor) { dominantColor = color }

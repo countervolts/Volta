@@ -18,6 +18,7 @@ struct HomeView: View {
     @StateObject private var networkMonitor = NetworkMonitor.shared
     @StateObject private var homeSectionPreferences = HomeSectionPreferencesStore.shared
     @Namespace private var heroNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let pad = Theme.Layout.screenPadding
 
@@ -34,6 +35,9 @@ struct HomeView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 homeBody
+                    .id(homeContentKey)
+                    .transition(.opacity)
+                    .animation(contentTransitionAnimation, value: homeContentKey)
             }
             .background(Theme.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
@@ -92,8 +96,23 @@ struct HomeView: View {
         vm.newReleases.isEmpty && vm.topArtists.isEmpty
     }
 
+    private var contentTransitionAnimation: Animation {
+        reduceMotion || PerformanceMode.reduceAnimations
+            ? .linear(duration: 0.01)
+            : .easeInOut(duration: 0.22)
+    }
+
+    private var homeContentKey: String {
+        if isServerUnavailable { return downloadedSongs.isEmpty ? "offline-empty" : "offline" }
+        if vm.isLoading && !vm.hasLoaded { return "loading" }
+        return isEmpty ? "empty" : "content"
+    }
+
     private var isServerUnavailable: Bool {
-        networkMonitor.connection == .none || vm.serverUnavailable
+        networkMonitor.connection == .none
+            || vm.serverUnavailable
+            || appState.isOfflineMode
+            || appState.client == nil
     }
 
     @ViewBuilder
@@ -507,7 +526,7 @@ struct HomeView: View {
                     ForEach(artists) { artist in
                         Button { onTap(artist) } label: {
                             VStack(spacing: 8) {
-                                ArtworkView(coverArtID: artist.coverArt, size: 200, cornerRadius: 44)
+                                ArtworkView(coverArtID: artist.coverArt, artistID: artist.id, size: 200, cornerRadius: 44)
                                     .frame(width: 80, height: 80)
                                     .clipShape(Circle())
                                     .overlay(Circle().strokeBorder(.white.opacity(0.08), lineWidth: 1))
@@ -558,7 +577,11 @@ struct HomeView: View {
                 .foregroundStyle(Theme.secondaryText)
                 .multilineTextAlignment(.center)
             Button {
-                Task { await vm.load(appState: appState, force: true) }
+                if appState.client == nil {
+                    appState.retryConnection()
+                } else {
+                    Task { await vm.load(appState: appState, force: true) }
+                }
             } label: {
                 Label(L(.action_retry_connection), systemImage: "arrow.clockwise")
                     .font(.subheadline.weight(.semibold))

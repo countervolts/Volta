@@ -87,8 +87,7 @@ enum SettingsBackupManager {
     private static let keys: Set<String> = [
         "gaplessPlayback", "replayGainMode", "crossfadeDurationSeconds", RatingMode.storageKey,
         "enhancedPlaybackCaching", LiveLyricsPreferences.enabledKey, "developerPlaybackCacheMode",
-        "automixStyle", "automixMaxBlendSeconds", "automixSilenceTrim",
-        "automixTempoMatch", "autoplayEnabled", "playbackTransitionMode",
+        "automixStyle", "automixMinimumEndLeadSeconds", "autoplayEnabled", "playbackTransitionMode",
         "crossfadeEnabled", "streamingBitrate", "streamingBitrateCell",
         "downloadBitrate", "transcodingFormat", "transcodingEnabled",
         "transcodingSettingsMode", "transcodingCellularOnly", "transcodingRulesEnabled", "transcodeFileTypeRules",

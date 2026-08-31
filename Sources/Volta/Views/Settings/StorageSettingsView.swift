@@ -1,5 +1,37 @@
 import SwiftUI
 
+struct DeviceStorageCapacity: Sendable {
+    let totalBytes: Int64
+    let importantAvailableBytes: Int64
+
+    var reserveBytes: Int64 { totalBytes / 20 }
+
+    func allowsDownload(expectedBytes: Int) -> Bool {
+        let expected = Int64(max(0, expectedBytes))
+        guard totalBytes > 0, importantAvailableBytes >= reserveBytes else { return false }
+        return expected <= importantAvailableBytes - reserveBytes
+    }
+
+    static func current() -> DeviceStorageCapacity {
+        let root = URL(fileURLWithPath: NSHomeDirectory())
+        let keys: Set<URLResourceKey> = [
+            .volumeTotalCapacityKey,
+            .volumeAvailableCapacityKey,
+            .volumeAvailableCapacityForImportantUsageKey
+        ]
+        let values = try? root.resourceValues(forKeys: keys)
+        let attributes = try? FileManager.default.attributesOfFileSystem(forPath: root.path)
+        let total = values?.volumeTotalCapacity.map(Int64.init)
+            ?? (attributes?[.systemSize] as? NSNumber)?.int64Value
+            ?? 0
+        let available = values?.volumeAvailableCapacityForImportantUsage
+            ?? values?.volumeAvailableCapacity.map(Int64.init)
+            ?? (attributes?[.systemFreeSize] as? NSNumber)?.int64Value
+            ?? 0
+        return DeviceStorageCapacity(totalBytes: max(0, total), importantAvailableBytes: max(0, available))
+    }
+}
+
 extension SettingsView {
     // formatted current download-speed limit for the menu label
     var speedLimitLabel: String {
@@ -101,15 +133,63 @@ extension SettingsView {
                 }
             }
 
+            Picker("Download Location", selection: $selectedDownloadStorage) {
+                Text("Private Storage").tag(DownloadStorageLocation.privateStorage)
+                Text("Files App").tag(DownloadStorageLocation.filesApp)
+            }
+            .tint(Theme.accent)
+            .disabled(storageManager.isMigrating)
+
+            Text(selectedDownloadStorage.detail)
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+
+            if storageManager.isMigrating {
+                VStack(alignment: .leading, spacing: 7) {
+                    ProgressView(value: storageManager.progress).tint(Theme.accent)
+                    Text(storageManager.status)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            } else {
+                Button("Transfer Downloaded Data") {
+                    showStorageTransferMethod = true
+                }
+                .disabled(selectedDownloadStorage == storageManager.location || !storageManager.canMigrate)
+
+                if let reason = storageManager.migrationBlockReason {
+                    Text(reason)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+
+            Button("Open Volta Folder in Files") {
+                FilesFolderBrowser.presentVoltaFolder()
+            }
+            .disabled(storageManager.isMigrating)
+
+            LabeledContent("Downloaded Music", value: downloadsSize)
+                .foregroundStyle(Theme.primaryText)
             LabeledContent("Playback Cache", value: playbackCacheSize)
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("Artwork Cache", value: artworkSize)
                 .foregroundStyle(Theme.primaryText)
-            LabeledContent("Logged Play Events", value: playEventsSize)
+            LabeledContent("Live Artwork Cache", value: liveArtworkCacheSize)
                 .foregroundStyle(Theme.primaryText)
-            LabeledContent("Logs", value: logsSize)
+            LabeledContent("Offline Artwork", value: localArtworkSize)
                 .foregroundStyle(Theme.primaryText)
-            LabeledContent("App Data", value: dataSize)
+            LabeledContent("Downloaded Lyrics", value: lyricsSize)
+                .foregroundStyle(Theme.primaryText)
+            LabeledContent("Listening History", value: playEventsSize)
+                .foregroundStyle(Theme.primaryText)
+            LabeledContent("API/Data Cache", value: apiCacheSize)
+                .foregroundStyle(Theme.primaryText)
+            LabeledContent("Playlist/User Data", value: playlistDataSize)
+                .foregroundStyle(Theme.primaryText)
+            LabeledContent("Diagnostics", value: diagnosticsSize)
+                .foregroundStyle(Theme.primaryText)
+            LabeledContent("Other App Data", value: dataSize)
                 .foregroundStyle(Theme.primaryText)
             LabeledContent("Total", value: totalCacheSize)
                 .foregroundStyle(Theme.secondaryText)
@@ -122,7 +202,22 @@ extension SettingsView {
             Button(role: .destructive) {
                 showClearArtworkAlert = true
             } label: {
-                Label("Clear Artwork & Data Cache", systemImage: "photo.stack")
+                Label("Clear Artwork Cache", systemImage: "photo.stack")
+            }
+            Button(role: .destructive) {
+                showClearLiveArtworkAlert = true
+            } label: {
+                Label("Clear Live Artwork Cache", systemImage: "sparkles.tv")
+            }
+            Button(role: .destructive) {
+                showClearAPIDataAlert = true
+            } label: {
+                Label("Clear API/Data Cache", systemImage: "tray.and.arrow.down")
+            }
+            Button(role: .destructive) {
+                showClearLocalArtworkAlert = true
+            } label: {
+                Label("Clear Offline Artwork", systemImage: "externaldrive.badge.xmark")
             }
             Button(role: .destructive) {
                 showClearPlayEventsFirstAlert = true
@@ -132,7 +227,7 @@ extension SettingsView {
         } header: {
             Text(sectionTitle(s))
         } footer: {
-            Text("Downloaded media is managed in Download Manager. Playback and artwork caches rebuild automatically.")
+            Text("Private Storage stays inside Volta. Files App stores downloads in On My iPhone > Volta, where editing files can break offline playback. Cache clears never remove downloaded music.")
         }
         .listRowBackground(Theme.secondaryBackground)
         }
@@ -316,8 +411,9 @@ extension SettingsView {
             let albums = hiddenAlbums.visibleAlbums(allAlbums)
             let allSongs = await loadAllSongs(client: client, albums: albums)
             let pending = allSongs.filter { DownloadService.shared.state(for: $0) == .notDownloaded }
-            let bytes = pending.reduce(0) { $0 + ($1.size ?? 0) }
-            let free = SettingsView.availableCapacityBytes()
+            let bytes = DownloadService.estimatedBulkBytes(pending)
+            let capacity = DeviceStorageCapacity.current()
+            let free = Int(clamping: capacity.importantAvailableBytes)
 
             downloadAllSongs = pending
             downloadAllBytes = bytes
@@ -326,7 +422,7 @@ extension SettingsView {
 
             if pending.isEmpty {
                 VoltaNotificationCenter.shared.post(L(.notif_everything_downloaded), tone: .success)
-            } else if bytes + 250_000_000 > free {   // keep ~250 MB headroom for the OS
+            } else if !capacity.allowsDownload(expectedBytes: bytes) {
                 showDownloadAllNoSpace = true
             } else if hasConfirmedDownloadAllMissingSongs {
                 startDownloadAll()
@@ -389,9 +485,7 @@ extension SettingsView {
     }
 
     nonisolated static func availableCapacityBytes() -> Int {
-        let url = URL(fileURLWithPath: NSHomeDirectory())
-        let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return Int(values?.volumeAvailableCapacityForImportantUsage ?? 0)
+        Int(clamping: DeviceStorageCapacity.current().importantAvailableBytes)
     }
 
     // MARK: - Local artwork library
@@ -418,9 +512,10 @@ extension SettingsView {
                 albums = await albumsRequest
                 artists = (try? await artistsRequest) ?? []
             }
+            let serverID = appState.currentServer?.id
+            let owner = "local-artwork-library:\(serverID ?? "legacy")"
             let coverIDs = Array(Set(albums.compactMap(\.coverArt))).sorted()
-            let artworkSizes: [Int?] = [nil, 300, 600]
-            let total = coverIDs.count * artworkSizes.count + artists.count
+            let total = coverIDs.count + artists.count
 
             artworkPrefetchProgress = ArtworkPrefetchProgress(
                 completed: 0,
@@ -429,21 +524,26 @@ extension SettingsView {
                 current: "Downloading album covers…"
             )
 
-            let coverURLs = coverIDs.flatMap { coverID in
-                artworkSizes.map { client.coverArtURL(id: coverID, size: $0) }
-            }
-            await persistArtworkURLs(coverURLs, current: "Downloading album covers…")
+            await persistArtworkCovers(
+                coverIDs,
+                client: client,
+                serverID: serverID,
+                owner: owner,
+                current: "Downloading album covers…"
+            )
 
             if !artists.isEmpty {
                 artworkPrefetchProgress.current = "Downloading artist photos…"
             }
             for artist in artists {
-                let ok = await persistArtistArtwork(artist, client: client)
+                let ok = await persistArtistArtwork(artist, client: client, serverID: serverID, owner: owner)
                 recordArtworkPrefetchStep(ok: ok, current: "Downloading artist photos…")
             }
 
             artworkPrefetchProgress.current = "Finished"
-            localArtworkLibraryDownloaded = artworkPrefetchProgress.completed > 0
+            localArtworkLibraryDownloaded = artworkPrefetchProgress.total > 0
+                && artworkPrefetchProgress.completed == artworkPrefetchProgress.total
+                && artworkPrefetchProgress.failed == 0
             AppLogger.shared.log(
                 "Local artwork library downloaded: \(artworkPrefetchProgress.completed) items, \(artworkPrefetchProgress.failed) failed",
                 category: .artwork
@@ -466,34 +566,56 @@ extension SettingsView {
     }
 
     @discardableResult
-    func persistArtistArtwork(_ artist: Artist, client: any MusicService) async -> Bool {
-        if await ArtworkLoader.shared.pinnedArtistImage(id: artist.id) != nil {
+    func persistArtistArtwork(
+        _ artist: Artist,
+        client: any MusicService,
+        serverID: String?,
+        owner: String
+    ) async -> Bool {
+        if await ArtworkLoader.shared.retainOwnership(
+            lookupID: ArtworkLoader.artistLookupID(artist.id, serverID: serverID),
+            owner: owner
+        ) {
             return true
         }
         if let directURL = artist.artistImageUrl.flatMap(URL.init(string:)),
-           await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: directURL) {
+           await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: directURL, serverID: serverID, owner: owner) {
             return true
         }
         if let info = try? await client.artistInfo(id: artist.id),
            let urlString = info.bestImageUrl,
            let url = URL(string: urlString),
-           await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: url) {
+           await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: url, serverID: serverID, owner: owner) {
             return true
         }
         if let fallbackURL = client.coverArtURL(id: artist.coverArt, size: 600) {
-            return await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: fallbackURL)
+            return await ArtworkLoader.shared.persistArtistImage(id: artist.id, from: fallbackURL, serverID: serverID, owner: owner)
         }
         return false
     }
 
-    func persistArtworkURLs(_ urls: [URL?], current: String) async {
+    func persistArtworkCovers(
+        _ coverIDs: [String],
+        client: any MusicService,
+        serverID: String?,
+        owner: String,
+        current: String
+    ) async {
         let batchSize = 8
         var index = 0
-        while index < urls.count {
-            let end = min(index + batchSize, urls.count)
-            let batch = Array(urls[index..<end])
-            let results = await DeveloperExperiments.runConcurrently(batch, defaultMaxConcurrent: batchSize) { url in
-                await ArtworkLoader.shared.persist(url)
+        while index < coverIDs.count {
+            let end = min(index + batchSize, coverIDs.count)
+            let batch = Array(coverIDs[index..<end])
+            let results = await DeveloperExperiments.runConcurrently(batch, defaultMaxConcurrent: batchSize) { coverID in
+                let url = client.coverArtURL(id: coverID, size: 1024) ?? client.coverArtURL(id: coverID)
+                return await ArtworkLoader.shared.persist(
+                    url,
+                    label: coverID,
+                    kind: "Album Cover",
+                    groupID: "server:\(serverID ?? "legacy")|album-cover:\(coverID)",
+                    lookupID: ArtworkLoader.coverArtLookupID(coverID, serverID: serverID),
+                    owner: owner
+                )
             }
             for ok in results {
                 recordArtworkPrefetchStep(ok: ok, current: current)
@@ -510,37 +632,74 @@ extension SettingsView {
 
     // MARK: - Cache management
 
+    var storageTransferMessage: String {
+        let destination = selectedDownloadStorage == .filesApp
+            ? "On My iPhone > Volta"
+            : "Volta private storage"
+        return "Music, artwork, and lyrics will transfer to \(destination). Do not edit Volta files while this runs."
+    }
+
+    func transferDownloadedData(method: DownloadStorageTransferMethod) {
+        storageManager.migrate(to: selectedDownloadStorage, method: method)
+    }
+
     func refreshCacheSize() {
         Task {
             let sizes = await DeveloperExperiments.runSync(priority: .utility) {
                 let fm = FileManager.default
-                let docs    = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 let caches  = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]
                 let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                let volta = support.appendingPathComponent("Volta", isDirectory: true)
+                let location = DownloadStorageLocation.current
+                let offline = SettingsView.directorySize(at: location.artworkDirectory())
+                    + SettingsView.fileSize(at: volta.appendingPathComponent("OfflineArtworkCatalog.json"))
+                let lyrics = SettingsView.directorySize(at: location.lyricsDirectory())
+                let downloads = SettingsView.directorySize(at: location.musicDirectory())
+                let history = SettingsView.fileSize(at: volta.appendingPathComponent("play_events.json"))
+                    + SettingsView.fileSize(at: volta.appendingPathComponent("play_events_fake.json"))
+                let playlists = SettingsView.directorySize(at: volta.appendingPathComponent("PlaylistCovers", isDirectory: true))
+                    + SettingsView.directorySize(at: volta.appendingPathComponent("PlaylistBackups", isDirectory: true))
+                let voltaTotal = SettingsView.directorySize(at: volta)
+                let privateArtworkCatalog = SettingsView.fileSize(at: volta.appendingPathComponent("OfflineArtworkCatalog.json"))
+                let activeBytesInsidePrivateStorage = location == .privateStorage
+                    ? downloads + SettingsView.directorySize(at: location.artworkDirectory()) + lyrics
+                    : 0
+                let otherAppData = max(0, voltaTotal - privateArtworkCatalog - activeBytesInsidePrivateStorage - history - playlists)
 
-                let downloads = SettingsView.directorySize(at: docs.appendingPathComponent("volta-downloads"))
-                let artwork   = SettingsView.directorySize(at: caches.appendingPathComponent("artwork"))
-                              + SettingsView.directorySize(at: caches.appendingPathComponent("api"))
-                let data = SettingsView.directorySize(at: support.appendingPathComponent("Volta"))
-                let playEvents = StatsStore.shared.storageSizeBytes()
-                let logs = AppLogger.shared.estimatedSizeBytes()
-                return (downloads: downloads, artwork: artwork, data: data, playEvents: playEvents, logs: logs)
+                return (
+                    downloads: downloads,
+                    playback: SettingsView.directorySize(at: caches.appendingPathComponent("playback-cache", isDirectory: true)),
+                    artwork: SettingsView.directorySize(at: caches.appendingPathComponent("artwork", isDirectory: true)),
+                    liveArtwork: SettingsView.directorySize(at: caches.appendingPathComponent("live-artwork", isDirectory: true)),
+                    api: SettingsView.directorySize(at: caches.appendingPathComponent("api", isDirectory: true)),
+                    offline: offline,
+                    lyrics: lyrics,
+                    history: history,
+                    playlists: playlists,
+                    diagnostics: SettingsView.directorySize(at: support.appendingPathComponent("ReliabilityReports", isDirectory: true)),
+                    otherAppData: otherAppData
+                )
             }
-            let localArtwork = await ArtworkLoader.shared.pinnedArtworkSize()
-            let lyrics = await LyricsService.shared.storageSizeBytes()
-            let playback = PlaybackCacheService.shared.totalBytes()
-            let total = sizes.downloads + playback + sizes.artwork + sizes.data + sizes.logs
+            let total = sizes.downloads + sizes.playback + sizes.artwork + sizes.liveArtwork
+                + sizes.offline + sizes.lyrics + sizes.history + sizes.api + sizes.playlists
+                + sizes.diagnostics + sizes.otherAppData
 
-            downloadsSize  = SettingsView.formatBytes(sizes.downloads)
-            playbackCacheSize = SettingsView.formatBytes(playback)
+            downloadsSize = SettingsView.formatBytes(sizes.downloads)
+            playbackCacheSize = SettingsView.formatBytes(sizes.playback)
             artworkSize    = SettingsView.formatBytes(sizes.artwork)
-            localArtworkSize = SettingsView.formatBytes(localArtwork)
-            lyricsSize = SettingsView.formatBytes(lyrics)
-            localArtworkBytes = localArtwork
-            localArtworkLibraryDownloaded = localArtwork > 0
-            dataSize       = SettingsView.formatBytes(sizes.data)
-            playEventsSize = SettingsView.formatBytes(sizes.playEvents)
-            logsSize       = SettingsView.formatBytes(sizes.logs)
+            liveArtworkCacheSize = SettingsView.formatBytes(sizes.liveArtwork)
+            apiCacheSize = SettingsView.formatBytes(sizes.api)
+            localArtworkSize = SettingsView.formatBytes(sizes.offline)
+            lyricsSize = SettingsView.formatBytes(sizes.lyrics)
+            localArtworkBytes = sizes.offline
+            localArtworkLibraryDownloaded = await ArtworkLoader.shared.hasLocalArtworkLibrary(
+                serverID: appState.currentServer?.id
+            )
+            dataSize = SettingsView.formatBytes(sizes.otherAppData)
+            playlistDataSize = SettingsView.formatBytes(sizes.playlists)
+            diagnosticsSize = SettingsView.formatBytes(sizes.diagnostics)
+            playEventsSize = SettingsView.formatBytes(sizes.history)
+            logsSize = "Not stored on disk"
             totalCacheSize = SettingsView.formatBytes(total)
         }
     }
@@ -554,11 +713,24 @@ extension SettingsView {
     func clearArtworkCache() {
         Task {
             await ArtworkLoader.shared.clearCache()
-            DiskCache.clear()
-            AppLogger.shared.log("Artwork & data cache cleared by user", category: .artwork)
+            AppLogger.shared.log("Artwork cache cleared by user", category: .artwork)
             VoltaNotificationCenter.shared.post(L(.notif_artwork_cache_cleared), tone: .success)
             refreshCacheSize()
         }
+    }
+
+    func clearLiveArtworkCache() {
+        Task {
+            await ArtworkLoader.shared.clearLiveCache()
+            AppLogger.shared.log("Live artwork cache cleared by user", category: .artwork)
+            refreshCacheSize()
+        }
+    }
+
+    func clearAPIDataCache() {
+        DiskCache.clear()
+        AppLogger.shared.log("API data cache cleared by user", category: .networking)
+        refreshCacheSize()
     }
 
     func clearLocalArtworkLibrary() {

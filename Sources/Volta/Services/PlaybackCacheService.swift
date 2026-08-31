@@ -186,6 +186,16 @@ final class PlaybackCacheService {
         return url
     }
 
+    // Read-only cache probe for background analyzers. Avoids rewriting cache
+    // manifest every time planning asks for same track source.
+    func analysisURL(for song: Song, client: any MusicService) -> URL? {
+        guard PlaybackCacheSettings.isEnabled,
+              let streamURL = client.streamURL(for: song),
+              let record = manifest[cacheKey(for: streamURL)] else { return nil }
+        let url = URL(fileURLWithPath: record.path)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     func prefetch(_ songs: [Song], client: any MusicService) {
         let limit = PlaybackCacheSettings.prefetchCount
         guard limit > 0,

@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-/// Owns the materialized contents of dynamic playlists. Library merging,
+/// Owns the materialized contents of smart playlists. Library merging,
 /// filtering, sorting, and limiting all happen on a worker so SwiftUI only
 /// publishes the finished snapshot.
 @MainActor

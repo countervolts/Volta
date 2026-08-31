@@ -171,6 +171,7 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case appearance_live_artwork
     case appearance_stylized_cover
     case appearance_stylized_album_cover
+    case appearance_stylized_playlist_cover
     case appearance_song_artwork_lists
     case appearance_long_track_titles
     case track_titles_truncate
@@ -352,6 +353,13 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case equalizer_profile_delete
     case equalizer_device_saved_assignments
     case equalizer_device_remove
+    case equalizer_processing_model
+    case equalizer_processing_accurate
+    case equalizer_processing_efficient
+    case equalizer_processing_battery_saver
+    case equalizer_processing_accurate_detail
+    case equalizer_processing_efficient_detail
+    case equalizer_processing_battery_saver_detail
     case settings_volume_normalization
     case settings_mono_audio
     case settings_spatial_widener
@@ -1641,6 +1649,7 @@ enum Strings {
             .japanese: "スタイル付きプレーヤーカバー", .korean: "스타일 플레이어 커버",
         ],
         .appearance_stylized_album_cover: en("Stylized Album Cover"),
+        .appearance_stylized_playlist_cover: en("Stylized Playlist Cover"),
         .appearance_song_artwork_lists: [
             .english: "Song Artwork in Lists", .spanish: "Carátulas en las listas", .french: "Pochettes dans les listes",
             .german: "Song-Cover in Listen", .portuguese: "Capas nas listas", .italian: "Copertine negli elenchi",
@@ -2755,6 +2764,13 @@ enum Strings {
             .danish: "Fjern %1$@", .finnish: "Poista %1$@", .chinese: "移除 %1$@",
             .japanese: "%1$@を削除", .korean: "%1$@ 제거",
         ],
+        .equalizer_processing_model: en("Processing Model"),
+        .equalizer_processing_accurate: en("Accurate (Heavy)"),
+        .equalizer_processing_efficient: en("Efficient"),
+        .equalizer_processing_battery_saver: en("Battery Saver"),
+        .equalizer_processing_accurate_detail: en("Full double-precision processing across all ten bands. Closest to the current EQ sound, but very heavy to run."),
+        .equalizer_processing_efficient_detail: en("Applies every band with compact single-precision filters and stereo SIMD processing. Much lighter on CPU and battery, with only a precision tradeoff."),
+        .equalizer_processing_battery_saver_detail: en("Uses the Efficient renderer but omits corrections below ±0.75 dB. Lowest CPU and battery use, with a small tonal tradeoff."),
         .settings_volume_normalization: [
             .english: "Volume Normalization", .spanish: "Normalización de volumen", .french: "Normalisation du volume",
             .german: "Lautstärke-Normalisierung", .portuguese: "Normalização de volume", .italian: "Normalizzazione del volume",

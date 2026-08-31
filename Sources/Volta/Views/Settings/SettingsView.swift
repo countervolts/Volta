@@ -70,6 +70,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
     case storage
     case backups
     case performance
+    case privacy
     case developer
     case about
 
@@ -87,6 +88,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .storage: return "Storage"
         case .backups: return "Backups"
         case .performance: return "Performance"
+        case .privacy: return "Privacy"
         case .developer: return "Developer"
         case .about: return "About"
         }
@@ -104,6 +106,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .storage: return "internaldrive"
         case .backups: return "clock.arrow.circlepath"
         case .performance: return "bolt.badge.a"
+        case .privacy: return "hand.raised"
         case .developer: return "hammer"
         case .about: return "info.circle"
         }
@@ -131,6 +134,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .storage: return "Downloads, caches, local files"
         case .backups: return "Settings and playlists"
         case .performance: return "Speed, battery, image loading"
+        case .privacy: return "Anonymous crash reports"
         case .developer: return "Tools and experiments"
         case .about: return "Support, version, changelog"
         }
@@ -147,9 +151,9 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .streaming:
             return [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["transcode", "transcoding", "codec", "file type", "rules", "format", "mp3", "aac", "opus", "flac", "alac"]]
         case .appearance:
-            return [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["stylized album cover", "stylised album cover", "album cover", "album style", "full bleed", "edge to edge", "cover style"], ["player controls", "player customization", "customise player", "customize player", "quick actions", "shuffle", "repeat", "queue"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]
+            return [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["stylized album cover", "stylised album cover", "album cover", "album style", "full bleed", "edge to edge", "cover style"], ["stylized playlist cover", "stylised playlist cover", "playlist cover", "playlist style", "full bleed", "edge to edge", "cover style"], ["player controls", "player customization", "customise player", "customize player", "quick actions", "shuffle", "repeat", "queue"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]
         case .library:
-            return [["custom sorting", "saved sorts", "saved views", "smart filters", "library views", "albums", "songs", "sort", "group", "filters"], ["rating", "ratings", "stars", "favorite", "favourite", "love"]]
+            return [["library design", "library layout", "modern library", "legacy library", "library appearance"], ["custom sorting", "saved sorts", "saved views", "smart filters", "library views", "albums", "songs", "sort", "group", "filters"], ["rating", "ratings", "stars", "favorite", "favourite", "love"]]
         case .server:
             return [["connected to", "server url", "cellular url", "data", "wifi", "username", "edit connection", "test connection", "log out", "logout", "sign out"], ["server health & speed test", "speed test", "server health", "latency", "connection"]]
         case .storage:
@@ -158,6 +162,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
             return [["settings backup", "settings", "backup", "restore", "export", "import"], ["playlist backup", "playlist", "deleted", "restore", "auto", "json"]]
         case .performance:
             return [["performance mode", "battery", "power save", "saver", "low power"], ["image loading", "images", "speed", "power", "threads", "fast", "conservative"], ["data caching", "cache", "aggressive", "memory"], ["prefetch artist images", "prefetch", "artist", "profile", "pictures"]]
+        case .privacy:
+            return [["privacy", "diagnostics", "crash reports", "share anonymous crash reports", "crashes", "anonymous"]]
         case .developer:
             return [["developer tools", "developer", "tools", "diagnostics"], ["experiments", "flags"], ["playback cache diagnostics", "cache diagnostics"], ["hangs", "crashes", "crash reports", "hang reports", "reliability", "send report", ".ips"], ["performance overlay", "overlay", "fps"], ["notifications", "toast"], ["dump app files", "export", "logs"], ["logging", "logs"]]
         case .about:
@@ -233,9 +239,6 @@ struct SettingsView: View {
     @AppStorage("replayGainMode")      var replayGainMode      = "off"
     @AppStorage("crossfadeDurationSeconds") var crossfadeDurationSeconds = 6.0
     @AppStorage("automixStyle")        var automixStyle        = "balanced"
-    @AppStorage("automixMaxBlendSeconds") var automixMaxBlendSeconds = 10.0
-    @AppStorage("automixSilenceTrim")  var automixSilenceTrim  = true
-    @AppStorage("automixTempoMatch")   var automixTempoMatch   = true
     @AppStorage("monoAudio")           var monoAudio           = false
     @AppStorage("spatialWidener")      var spatialWidener      = false
     @AppStorage("spatialWidenerAmount") var spatialWidenerAmount = 0.65
@@ -259,6 +262,7 @@ struct SettingsView: View {
     @AppStorage("liveArtwork")         var liveArtwork         = true
     @AppStorage("stylizedPlayerCover") var stylizedPlayerCover = false
     @AppStorage("stylizedAlbumCover")  var stylizedAlbumCover  = false
+    @AppStorage("stylizedPlaylistCover") var stylizedPlaylistCover = true
     @AppStorage("themeMode")           var themeMode           = "dark"
     @AppStorage("showLosslessBadge")   var showLosslessBadge   = true
     @AppStorage("showExplicitBadge")   var showExplicitBadge   = true
@@ -287,15 +291,21 @@ struct SettingsView: View {
     @State var downloadsSize: String  = "…"
     @State var playbackCacheSize: String = "…"
     @State var artworkSize: String     = "…"
+    @State var liveArtworkCacheSize: String = "…"
+    @State var apiCacheSize: String = "…"
     @State var localArtworkSize: String = "…"
     @State var lyricsSize: String = "…"
     @State var localArtworkBytes: Int = 0
     @State var dataSize: String        = "…"
+    @State var playlistDataSize: String = "…"
+    @State var diagnosticsSize: String = "…"
     @State var totalCacheSize: String  = "…"
     @State var playEventsSize: String = "…"
     @State var logsSize: String = "…"
     @State var showClearCacheAlert   = false
     @State var showClearArtworkAlert = false
+    @State var showClearLiveArtworkAlert = false
+    @State var showClearAPIDataAlert = false
     @State var showClearLocalArtworkAlert = false
     @State var showClearPlayEventsFirstAlert = false
     @State var showClearPlayEventsSecondAlert = false
@@ -337,19 +347,23 @@ struct SettingsView: View {
     @StateObject var networkMonitor = NetworkMonitor.shared
     @StateObject var hiddenAlbums = HiddenAlbumStore.shared
     @StateObject var downloadService = DownloadService.shared
+    @StateObject var storageManager = DownloadStorageManager.shared
     @State var playlistBackupStatus: String?
     @State var isRefreshingPlaylistBackups = false
     @State var restoringPlaylistBackupID: String?
     @State var allowedWiFiLoginSSIDs = WiFiSSIDPolicy.allowedSSIDs
     @State var isReadingCurrentSSID = false
     @State var wifiSSIDStatus: String?
+    @State var selectedDownloadStorage = DownloadStorageLocation.current
+    @State var showStorageTransferMethod = false
+    @State var showStorageTransferError = false
 
     init() {
         StreamingPreferences.migrateTranscodingSettingsIfNeeded()
     }
 
     var audio: AudioPlayer { appState.audioPlayer }
-    var hasLocalArtworkLibrary: Bool { localArtworkLibraryDownloaded || localArtworkBytes > 0 }
+    var hasLocalArtworkLibrary: Bool { localArtworkLibraryDownloaded }
     var viewMode: SettingsViewMode { SettingsViewMode(rawValue: settingsViewMode) ?? .list }
     var miniPlayerBottomInset: CGFloat {
         guard audio.hasActivePlaybackSession, audio.currentSong != nil else { return 0 }
@@ -421,6 +435,18 @@ struct SettingsView: View {
             ) { result in
                 restoreSettingsBackup(result)
             }
+            .confirmationDialog("Transfer Downloaded Data", isPresented: $showStorageTransferMethod, titleVisibility: .visible) {
+                Button("Move") { transferDownloadedData(method: .move) }
+                Button("Copy, then delete original") { transferDownloadedData(method: .copyThenDelete) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(storageTransferMessage)
+            }
+            .alert("Storage Transfer Stopped", isPresented: $showStorageTransferError) {
+                Button("OK", role: .cancel) { storageManager.clearError() }
+            } message: {
+                Text(storageManager.errorMessage ?? "Unknown error")
+            }
     }
 
     private var settingsBody: some View {
@@ -437,6 +463,13 @@ struct SettingsView: View {
             .onAppear { scheduleInitialRefresh() }
             .onChangeCompat(of: downloadService.bulkProgress.phase) { _, phase in
                 handleBulkDownloadPhaseChange(phase)
+            }
+            .onChangeCompat(of: storageManager.location) { _, location in
+                selectedDownloadStorage = location
+                refreshCacheSize()
+            }
+            .onChangeCompat(of: storageManager.errorMessage) { _, error in
+                showStorageTransferError = error != nil
             }
     }
 
@@ -456,14 +489,22 @@ struct SettingsView: View {
                 Button(L(.action_clear), role: .destructive) { clearDownloads() }
                 Button(L(.action_cancel), role: .cancel) {}
             } message: { Text("This removes all downloaded tracks. They can be re-downloaded.") }
-            .alert("Clear Caches", isPresented: $showClearArtworkAlert) {
+            .alert("Clear Artwork Cache", isPresented: $showClearArtworkAlert) {
                 Button(L(.action_clear), role: .destructive) { clearArtworkCache() }
                 Button(L(.action_cancel), role: .cancel) {}
-            } message: { Text("Removes cached artwork and saved home data. They’ll be re-fetched as needed.") }
-            .alert("Delete Local Artwork Library", isPresented: $showClearLocalArtworkAlert) {
+            } message: { Text("Removes only disposable static artwork. Downloaded offline artwork stays available.") }
+            .alert("Clear Live Artwork Cache", isPresented: $showClearLiveArtworkAlert) {
+                Button(L(.action_clear), role: .destructive) { clearLiveArtworkCache() }
+                Button(L(.action_cancel), role: .cancel) {}
+            } message: { Text("Removes disposable animated-artwork sources, frames, and videos. Downloaded animated artwork stays available.") }
+            .alert("Clear API/Data Cache", isPresented: $showClearAPIDataAlert) {
+                Button(L(.action_clear), role: .destructive) { clearAPIDataCache() }
+                Button(L(.action_cancel), role: .cancel) {}
+            } message: { Text("Removes cached API responses. They will be fetched again when connected.") }
+            .alert("Clear Offline Artwork", isPresented: $showClearLocalArtworkAlert) {
                 Button(L(.action_delete), role: .destructive) { clearLocalArtworkLibrary() }
                 Button(L(.action_cancel), role: .cancel) {}
-            } message: { Text("Removes downloaded album covers and artist profile pictures used for faster local image loading.") }
+            } message: { Text("Removes downloaded album covers, artist photos, and pinned animated artwork. Downloaded music remains.") }
             .alert("Clear Listening Stats?", isPresented: $showClearPlayEventsFirstAlert) {
                 Button(L(.action_continue), role: .destructive) { showClearPlayEventsSecondAlert = true }
                 Button(L(.action_cancel), role: .cancel) {}
@@ -559,6 +600,7 @@ struct SettingsView: View {
         cacheSection
         backupSection
         performanceSection
+        privacySection
         developerSection
         aboutSection
     }
@@ -624,6 +666,8 @@ struct SettingsView: View {
             backupSection
         case .performance:
             performanceSection
+        case .privacy:
+            privacySection
         case .developer:
             developerSection
         case .about:

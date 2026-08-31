@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // Folder listing source.
 enum FolderSource: Hashable, Sendable {
@@ -13,6 +14,7 @@ struct FolderBrowseView: View {
     let source: FolderSource
     // Optional root-level search filter.
     var filterText: String = ""
+    var alphabetItems: Binding<[AlphabetJumpItem]>? = nil
 
     @EnvironmentObject private var appState: AppState
     @AppStorage("showTrackArtwork") private var showTrackArtwork = true
@@ -59,6 +61,7 @@ struct FolderBrowseView: View {
             }
         }
         .task(id: source) { await load() }
+        .onAppear { publishAlphabetItems() }
         .sheet(item: $addToPlaylistSong) { song in
             AddToPlaylistSheet(song: song, onAdded: { _ in })
         }
@@ -145,6 +148,7 @@ struct FolderBrowseView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .id(alphabetAnchor(kind: "directory", id: entry.id))
     }
 
     private func songRow(_ song: Song, position: Int) -> some View {
@@ -169,6 +173,7 @@ struct FolderBrowseView: View {
             )
         }
         .padding(.horizontal, Theme.Layout.screenPadding)
+        .id(alphabetAnchor(kind: "song", id: song.id))
     }
 
     private func goToAlbum(_ song: Song) {
@@ -210,6 +215,38 @@ struct FolderBrowseView: View {
         case .directory(let id, _):
             entries = (try? await client.musicDirectory(id: id)) ?? []
         }
+        publishAlphabetItems()
+    }
+
+    private func publishAlphabetItems() {
+        alphabetItems?.wrappedValue = jumpItems
+    }
+
+    private var jumpItems: [AlphabetJumpItem] {
+        let namesAndTargets = directories.map {
+            ($0.name, alphabetAnchor(kind: "directory", id: $0.id))
+        } + songEntries.compactMap { entry in
+            entry.song.map { ($0.title, alphabetAnchor(kind: "song", id: $0.id)) }
+        }
+        var seen = Set<String>()
+        return namesAndTargets.compactMap { pair in
+            let label = alphabetLabel(for: pair.0)
+            return seen.insert(label).inserted
+                ? AlphabetJumpItem(label: label, targetID: pair.1)
+                : nil
+        }
+        .sorted { $0.label < $1.label }
+    }
+
+    private func alphabetAnchor(kind: String, id: String) -> String {
+        "folder-\(kind)-\(id)"
+    }
+
+    private func alphabetLabel(for text: String) -> String {
+        let normalized = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        guard let first = normalized.first else { return "#" }
+        let label = String(first).uppercased()
+        return ("A"..."Z").contains(label) ? label : "#"
     }
 }
 
@@ -220,16 +257,30 @@ struct FolderBrowseView: View {
 struct FolderBrowseScreen: View {
     let source: FolderSource
     let title: String
+    @State private var alphabetItems: [AlphabetJumpItem] = []
 
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            ScrollView {
-                FolderBrowseView(source: source)
-                    .padding(.top, 8)
-                    .padding(.bottom, 100)
+            ScrollViewReader { scrollProxy in
+                ZStack(alignment: .trailing) {
+                    ScrollView {
+                        FolderBrowseView(source: source, alphabetItems: $alphabetItems)
+                            .padding(.top, 8)
+                            .padding(.bottom, 100)
+                            .padding(.trailing, alphabetItems.count >= 3 ? 34 : 0)
+                    }
+                    .scrollIndicators(.hidden)
+
+                    if alphabetItems.count >= 3 {
+                        AlphabetJumpBar(items: alphabetItems) { item in
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            scrollProxy.scrollTo(item.targetID, anchor: .top)
+                        }
+                        .padding(.trailing, 4)
+                    }
+                }
             }
-            .scrollIndicators(.hidden)
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

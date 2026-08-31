@@ -12,9 +12,9 @@
   - [x] dynamic playlists (eg playlist for liked songs, when song is liked or unliked it will be added or removed alongside there should be other things that can be used for a dynamic playlist)
   - [x] improved downloading management (songs, lyrics etc)
   - [x] ssid specific server connection
-  - [ ] library redesign (more apple music like while giving the option of a "legacy view" in settings)
-  - [ ] animation improvements 
-  - [ ] landscape view improvements on ios
+  - [x] library redesign (more apple music like while giving the option of a "legacy view" in settings)
+  - [x] landscape view improvements on ios
+  - [x] animation improvements
 
 
 ### 1.5
