@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(VoltaLiveActivitySupport)
 import VoltaLiveActivitySupport
+#endif
 import WidgetKit
 
 enum WidgetSnapshotManager {

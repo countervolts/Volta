@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		2A02F1D42C35A4CC00A00109 /* VoltaLiveLyricsWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 2A02F1D42C35A4CC00A00101 /* VoltaLiveLyricsWidget.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		2A02F1D42C35A4CC00A00121 /* Sentry-Dynamic in Frameworks */ = {isa = PBXBuildFile; productRef = 2A02F1D42C35A4CC00A00120 /* Sentry-Dynamic */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -67,6 +68,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2A02F1D42C35A4CC00A00121 /* Sentry-Dynamic in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -127,6 +129,7 @@
 			);
 			name = Volta;
 			packageProductDependencies = (
+				2A02F1D42C35A4CC00A00120 /* Sentry-Dynamic */,
 			);
 			productName = Volta;
 			productReference = 2A02F1D42C35A4CC00A00001 /* Volta.app */;
@@ -183,6 +186,9 @@
 				Base,
 			);
 			mainGroup = 2A02F1D42C35A4CC00A00007;
+			packageReferences = (
+				2A02F1D42C35A4CC00A0011F /* XCRemoteSwiftPackageReference \"sentry-cocoa\" */,
+			);
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2A02F1D42C35A4CC00A00008 /* Products */;
@@ -229,6 +235,25 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		2A02F1D42C35A4CC00A0011F /* XCRemoteSwiftPackageReference \"sentry-cocoa\" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.26.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		2A02F1D42C35A4CC00A00120 /* Sentry-Dynamic */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2A02F1D42C35A4CC00A0011F /* XCRemoteSwiftPackageReference \"sentry-cocoa\" */;
+			productName = "Sentry-Dynamic";
+		};
+/* End XCSwiftPackageProductDependency section */
+
 /* Begin PBXTargetDependency section */
 		2A02F1D42C35A4CC00A0010C /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -272,7 +297,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = T3D62F3936;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
