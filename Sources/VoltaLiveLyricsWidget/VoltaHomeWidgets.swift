@@ -1,7 +1,9 @@
 import SwiftUI
 import UIKit
-import VoltaLiveActivitySupport
 import WidgetKit
+#if canImport(VoltaLiveActivitySupport)
+import VoltaLiveActivitySupport
+#endif
 
 private struct VoltaWidgetEntry: TimelineEntry {
     let date: Date

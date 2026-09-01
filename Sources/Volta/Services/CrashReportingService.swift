@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(Sentry)
 import Sentry
+#endif
 
 /// Opt-in Sentry crash reporting with a deliberately minimal event payload.
 @MainActor
@@ -23,6 +25,7 @@ final class CrashReportingService {
     }
 
     func startIfEnabled() {
+#if canImport(Sentry)
         guard isEnabled, !isStarted else { return }
         let cacheDirectoryPath = prepareCacheDirectory()
 
@@ -80,6 +83,7 @@ final class CrashReportingService {
             options.beforeSend = sanitize
         }
         isStarted = true
+#endif
     }
 
     func setEnabled(_ enabled: Bool) {
@@ -92,17 +96,23 @@ final class CrashReportingService {
     }
 
     func sendTestEvent() -> Bool {
+#if canImport(Sentry)
         guard isEnabled else { return false }
         startIfEnabled()
         SentrySDK.capture(message: syntheticTestMessage)
         return true
+#else
+        return false
+#endif
     }
 
     private func close() {
+#if canImport(Sentry)
         guard isStarted else { return }
         SentrySDK.close()
         try? FileManager.default.removeItem(at: cacheDirectory.appendingPathComponent("INSTALLATION"))
         isStarted = false
+#endif
     }
 
     private func prepareCacheDirectory() -> String {
@@ -112,6 +122,7 @@ final class CrashReportingService {
     }
 }
 
+#if canImport(Sentry)
 private let syntheticTestMessage = "Volta crash reporting connectivity test"
 
 private func releaseName() -> String {
@@ -146,3 +157,4 @@ private func sanitize(_ event: Event) -> Event {
 
     return event
 }
+#endif

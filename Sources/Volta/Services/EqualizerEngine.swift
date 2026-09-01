@@ -1781,10 +1781,10 @@ final class TapContext: AutoMixTransitionDSPContext {
             for filterIndex in 0..<filterCount {
                 let filter = efficientFilters[filterIndex]
                 var state = efficientStereoState[filterIndex]
-                let output = filter.b0Stereo * input
-                    + filter.sharedX1MinusY1Stereo * (state.x1 - state.y1)
-                    + filter.b2Stereo * state.x2
-                    - filter.a2Stereo * state.y2
+                var output = filter.b0Stereo * input
+                output += filter.sharedX1MinusY1Stereo * (state.x1 - state.y1)
+                output += filter.b2Stereo * state.x2
+                output -= filter.a2Stereo * state.y2
                 state.x2 = state.x1
                 state.x1 = input
                 state.y2 = state.y1
