@@ -170,6 +170,7 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case appearance_explicit_badge
     case appearance_live_artwork
     case appearance_stylized_cover
+    case appearance_simple_player_animations
     case appearance_stylized_album_cover
     case appearance_stylized_playlist_cover
     case appearance_song_artwork_lists
@@ -338,6 +339,9 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case settings_infinite_play
     case settings_track_transition
     case settings_gapless
+    case settings_gapless_mode
+    case settings_gapless_default
+    case settings_gapless_experimental
     case settings_shuffle_default
     case settings_artwork_zoom
     case settings_resume_interruption
@@ -1648,6 +1652,14 @@ enum Strings {
             .danish: "Stiliseret afspilleromslag", .finnish: "Tyylitelty soittimen kansi", .chinese: "风格化播放器封面",
             .japanese: "スタイル付きプレーヤーカバー", .korean: "스타일 플레이어 커버",
         ],
+        .appearance_simple_player_animations: [
+            .english: "Simple Player Animations", .spanish: "Animaciones simples del reproductor", .french: "Animations simples du lecteur",
+            .german: "Einfache Player-Animationen", .portuguese: "Animações simples do leitor", .italian: "Animazioni semplici del player",
+            .dutch: "Eenvoudige speleranimaties", .russian: "Простые анимации плеера", .polish: "Proste animacje odtwarzacza",
+            .turkish: "Basit oynatıcı animasyonları", .swedish: "Enkla spelaranimationer", .norwegian: "Enkle spilleranimasjoner",
+            .danish: "Enkle afspilleranimationer", .finnish: "Soittimen yksinkertaiset animaatiot", .chinese: "简单播放器动画",
+            .japanese: "シンプルなプレーヤーアニメーション", .korean: "간단한 플레이어 애니메이션",
+        ],
         .appearance_stylized_album_cover: en("Stylized Album Cover"),
         .appearance_stylized_playlist_cover: en("Stylized Playlist Cover"),
         .appearance_song_artwork_lists: [
@@ -2643,6 +2655,30 @@ enum Strings {
             .turkish: "Boşluksuz oynatma", .swedish: "Sömlös uppspelning", .norwegian: "Sømløs avspilling",
             .danish: "Sømløs afspilning", .finnish: "Tauoton toisto", .chinese: "无缝播放",
             .japanese: "ギャップレス再生", .korean: "갭리스 재생",
+        ],
+        .settings_gapless_mode: [
+            .english: "Gapless Mode", .spanish: "Modo sin pausas", .french: "Mode sans blanc",
+            .german: "Lückenloser Modus", .portuguese: "Modo sem pausas", .italian: "Modalità senza pause",
+            .dutch: "Naadloze modus", .russian: "Режим без пауз", .polish: "Tryb bez przerw",
+            .turkish: "Boşluksuz oynatma modu", .swedish: "Sömlöst läge", .norwegian: "Sømløs modus",
+            .danish: "Sømløs tilstand", .finnish: "Tauoton tila", .chinese: "无缝模式",
+            .japanese: "ギャップレスモード", .korean: "갭리스 모드",
+        ],
+        .settings_gapless_default: [
+            .english: "Default", .spanish: "Predeterminado", .french: "Par défaut",
+            .german: "Standard", .portuguese: "Padrão", .italian: "Predefinito",
+            .dutch: "Standaard", .russian: "По умолчанию", .polish: "Domyślny",
+            .turkish: "Varsayılan", .swedish: "Standard", .norwegian: "Standard",
+            .danish: "Standard", .finnish: "Oletus", .chinese: "默认",
+            .japanese: "デフォルト", .korean: "기본값",
+        ],
+        .settings_gapless_experimental: [
+            .english: "Experimental", .spanish: "Experimental", .french: "Expérimental",
+            .german: "Experimentell", .portuguese: "Experimental", .italian: "Sperimentale",
+            .dutch: "Experimenteel", .russian: "Экспериментальный", .polish: "Eksperymentalny",
+            .turkish: "Deneysel", .swedish: "Experimentellt", .norwegian: "Eksperimentell",
+            .danish: "Eksperimentel", .finnish: "Kokeellinen", .chinese: "实验性",
+            .japanese: "実験的", .korean: "실험적",
         ],
         .settings_shuffle_default: [
             .english: "Shuffle by Default", .spanish: "Aleatorio por defecto", .french: "Lecture aléatoire par défaut",

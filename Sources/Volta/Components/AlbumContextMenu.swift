@@ -17,6 +17,7 @@ struct AlbumContextMenu: ViewModifier {
         content.contextMenu {
             Section {
                 Button { download() } label: { Label(L(.action_download), systemImage: Symbols.download) }
+                    .disabled(appState.isLocalMode)
                 RatingMenuItem(
                     itemID: album.id,
                     kind: .album,
@@ -57,6 +58,7 @@ struct AlbumContextMenu: ViewModifier {
                 Button(role: .destructive) { removeDownload() } label: {
                     Label(L(.action_remove_download), systemImage: Symbols.trash)
                 }
+                .disabled(appState.isLocalMode)
             }
         } preview: {
             VStack(alignment: .leading, spacing: 10) {

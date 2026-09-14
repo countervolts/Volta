@@ -151,7 +151,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Hashable {
         case .streaming:
             return [["wi-fi quality", "wifi", "streaming", "quality", "bitrate"], ["cellular quality", "cellular", "mobile", "data"], ["transcode", "transcoding", "codec", "file type", "rules", "format", "mp3", "aac", "opus", "flac", "alac"]]
         case .appearance:
-            return [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["stylized album cover", "stylised album cover", "album cover", "album style", "full bleed", "edge to edge", "cover style"], ["stylized playlist cover", "stylised playlist cover", "playlist cover", "playlist style", "full bleed", "edge to edge", "cover style"], ["player controls", "player customization", "customise player", "customize player", "quick actions", "shuffle", "repeat", "queue"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]
+            return [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "system", "device", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["simple player animations", "simple player animation", "mini player animation", "player transition", "down up animation"], ["stylized album cover", "stylised album cover", "album cover", "album style", "full bleed", "edge to edge", "cover style"], ["stylized playlist cover", "stylised playlist cover", "playlist cover", "playlist style", "full bleed", "edge to edge", "cover style"], ["player controls", "player customization", "customise player", "customize player", "quick actions", "shuffle", "repeat", "queue"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]
         case .library:
             return [["library design", "library layout", "modern library", "legacy library", "library appearance"], ["custom sorting", "saved sorts", "saved views", "smart filters", "library views", "albums", "songs", "sort", "group", "filters"], ["rating", "ratings", "stars", "favorite", "favourite", "love"]]
         case .server:
@@ -235,6 +235,7 @@ struct SettingsView: View {
 
     @AppStorage("infinitePlayStyle")   var infinitePlayStyle   = "random"
     @AppStorage("gaplessPlayback")     var gaplessPlayback     = "on"
+    @AppStorage("gaplessPlaybackMode") var gaplessPlaybackMode = "default"
     @AppStorage("enhancedPlaybackCaching") var enhancedPlaybackCaching = true
     @AppStorage("replayGainMode")      var replayGainMode      = "off"
     @AppStorage("crossfadeDurationSeconds") var crossfadeDurationSeconds = 6.0
@@ -261,6 +262,7 @@ struct SettingsView: View {
     @AppStorage("artworkAnimation")    var artworkAnimation    = true
     @AppStorage("liveArtwork")         var liveArtwork         = true
     @AppStorage("stylizedPlayerCover") var stylizedPlayerCover = false
+    @AppStorage("simplePlayerAnimations") var simplePlayerAnimations = false
     @AppStorage("stylizedAlbumCover")  var stylizedAlbumCover  = false
     @AppStorage("stylizedPlaylistCover") var stylizedPlaylistCover = true
     @AppStorage("themeMode")           var themeMode           = "dark"
@@ -460,7 +462,10 @@ struct SettingsView: View {
             .background(SwipeBackEnabler())
             .toolbar { settingsToolbar }
             .preferredColorScheme(Theme.colorScheme)
-            .onAppear { scheduleInitialRefresh() }
+            .onAppear {
+                normalizeGaplessSettings()
+                scheduleInitialRefresh()
+            }
             .onChangeCompat(of: downloadService.bulkProgress.phase) { _, phase in
                 handleBulkDownloadPhaseChange(phase)
             }
@@ -684,6 +689,15 @@ struct SettingsView: View {
         }
     }
 
+    private func normalizeGaplessSettings() {
+        if gaplessPlayback == "weak" {
+            gaplessPlayback = "on"
+        }
+        if !GaplessPlaybackMode.allCases.map(\.rawValue).contains(gaplessPlaybackMode) {
+            gaplessPlaybackMode = GaplessPlaybackMode.default.rawValue
+        }
+    }
+
     func scheduleInitialRefresh() {
         guard !didScheduleInitialRefresh else {
             refreshCacheSize()
@@ -704,9 +718,7 @@ struct SettingsView: View {
     func loadDeletedPlaylistBackups(force: Bool = false) {
         guard force || !hasLoadedPlaylistBackups else { return }
         Task {
-            let snapshots = await DeveloperExperiments.runSync(priority: .utility) {
-                PlaylistBackupStore.deletedSnapshotsOnDisk()
-            }
+            let snapshots = await PlaylistBackupStore.deletedSnapshotsOnDisk()
             deletedPlaylistBackups = snapshots
             hasLoadedPlaylistBackups = true
         }

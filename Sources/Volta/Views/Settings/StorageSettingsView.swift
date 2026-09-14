@@ -58,6 +58,12 @@ extension SettingsView {
         return "\(scope)Simple · \(target)"
     }
 
+    var localLibraryStatsSummary: String {
+        guard let local = appState.client as? LocalMusicService else { return "—" }
+        return "\(local.songCount) songs · \(local.albumCount) albums · \(local.artistCount) artists · "
+            + ByteCountFormatter.string(fromByteCount: Int64(local.totalBytes), countStyle: .file)
+    }
+
     // MARK: - Streaming
 
     @ViewBuilder
@@ -119,6 +125,11 @@ extension SettingsView {
         let s = "Storage"
         if sectionVisible(s, [["download manager", "active downloads", "queued downloads", "downloaded tracks", "downloaded albums", "lyrics", "artwork", "playback cache", "enhanced caching", "prefetch", "artwork cache", "app data", "total", "clear playback cache", "clear artwork", "cache", "storage"]]) {
         Section {
+            if appState.isLocalMode {
+                Text("Local Files is already stored on this device. Downloading and downloaded-storage controls are unavailable for this library.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
             SettingsDetailNavigationLink(.downloadManager) {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
@@ -169,30 +180,35 @@ extension SettingsView {
             }
             .disabled(storageManager.isMigrating)
 
-            LabeledContent("Downloaded Music", value: downloadsSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Playback Cache", value: playbackCacheSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Artwork Cache", value: artworkSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Live Artwork Cache", value: liveArtworkCacheSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Offline Artwork", value: localArtworkSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Downloaded Lyrics", value: lyricsSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Listening History", value: playEventsSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("API/Data Cache", value: apiCacheSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Playlist/User Data", value: playlistDataSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Diagnostics", value: diagnosticsSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Other App Data", value: dataSize)
-                .foregroundStyle(Theme.primaryText)
-            LabeledContent("Total", value: totalCacheSize)
-                .foregroundStyle(Theme.secondaryText)
+            if appState.isLocalMode {
+                LabeledContent("Local Music Library", value: localLibraryStatsSummary)
+                    .foregroundStyle(Theme.primaryText)
+            } else {
+                LabeledContent("Downloaded Music", value: downloadsSize)
+                    .foregroundStyle(Theme.primaryText)
+                LabeledContent("Playback Cache", value: playbackCacheSize)
+                    .foregroundStyle(Theme.primaryText)
+                LabeledContent("Artwork Cache", value: artworkSize)
+                    .foregroundStyle(Theme.primaryText)
+                LabeledContent("Live Artwork Cache", value: liveArtworkCacheSize)
+                    .foregroundStyle(Theme.primaryText)
+                LabeledContent("Offline Artwork", value: localArtworkSize)
+                    .foregroundStyle(Theme.primaryText)
+                LabeledContent("Downloaded Lyrics", value: lyricsSize)
+                    .foregroundStyle(Theme.primaryText)
+                LabeledContent("Listening History", value: playEventsSize)
+                    .foregroundStyle(Theme.primaryText)
+                LabeledContent("API/Data Cache", value: apiCacheSize)
+                    .foregroundStyle(Theme.primaryText)
+                LabeledContent("Playlist/User Data", value: playlistDataSize)
+                    .foregroundStyle(Theme.primaryText)
+                LabeledContent("Diagnostics", value: diagnosticsSize)
+                    .foregroundStyle(Theme.primaryText)
+                LabeledContent("Other App Data", value: dataSize)
+                    .foregroundStyle(Theme.primaryText)
+                LabeledContent("Total", value: totalCacheSize)
+                    .foregroundStyle(Theme.secondaryText)
+            }
 
             Button(role: .destructive) {
                 clearPlaybackCache()
@@ -230,6 +246,8 @@ extension SettingsView {
             Text("Private Storage stays inside Volta. Files App stores downloads in On My iPhone > Volta, where editing files can break offline playback. Cache clears never remove downloaded music.")
         }
         .listRowBackground(Theme.secondaryBackground)
+        .disabled(appState.isLocalMode)
+        .opacity(appState.isLocalMode ? 0.45 : 1)
         }
     }
 

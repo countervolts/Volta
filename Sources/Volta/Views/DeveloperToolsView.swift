@@ -323,7 +323,8 @@ struct DeveloperToolsView: View {
         }
 
         lines.append("Transition: \(audio.transitionMode.settingsLabel)")
-        lines.append("Gapless: \(UserDefaults.standard.string(forKey: "gaplessPlayback") ?? "off")")
+        lines.append("Gapless: \(UserDefaults.standard.string(forKey: "gaplessPlayback") ?? "on")")
+        lines.append("Gapless mode: \(GaplessPlaybackMode.current.rawValue)")
         lines.append("Current: \(current.title)")
         lines.append("Next: \(next.title)")
         lines.append("Same album: \(sameAlbum ? "yes" : "no")")

@@ -721,6 +721,8 @@ struct LegacyLibraryView: View {
                         }
                         finishBatch(L(.toast_downloading_n, songs.count))
                     }
+                    .disabled(appState.isLocalMode)
+                    .opacity(appState.isLocalMode ? 0.35 : 1)
                 }
             }
         }

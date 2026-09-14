@@ -33,6 +33,7 @@ final class AppState: ObservableObject {
     @Published private(set) var connectionIssue: ConnectionIssue?
     @Published private(set) var isConnectionAttemptActive = false
     @Published private(set) var isOfflineMode = false
+    @Published private(set) var isLocalMode = false
     // Set by a Home Screen widget URL and consumed once the Stats tab is ready.
     @Published private(set) var requestedWidgetStatsDestination: WidgetStatsDestination?
     // probed once on activate
@@ -136,9 +137,74 @@ final class AppState: ObservableObject {
             let activeRecord = store.currentServer() ?? record
             activate(config: config, record: activeRecord, allowFallback: true)
         } else {
-            AppLogger.shared.log("No stored session; showing login", category: .ui)
-            phase = .login
+            if LocalLibraryStore.shared.shouldRestore {
+                restoreLocalLibrary()
+            } else {
+                AppLogger.shared.log("No stored session; showing login", category: .ui)
+                phase = .login
+            }
         }
+    }
+
+    func chooseLocalLibrary() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let service = try await LocalLibraryStore.shared.chooseService()
+                activateLocalLibrary(service)
+            } catch {
+                VoltaNotificationCenter.shared.post(
+                    error.localizedDescription,
+                    tone: .error
+                )
+            }
+        }
+    }
+
+    private func restoreLocalLibrary() {
+        phase = .loading
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                guard let service = try await LocalLibraryStore.shared.restoreService() else {
+                    phase = .login
+                    return
+                }
+                activateLocalLibrary(service)
+            } catch {
+                AppLogger.shared.log(
+                    "Local library restore failed; showing source picker: \(error.localizedDescription)",
+                    category: .library,
+                    level: .warning
+                )
+                phase = .login
+            }
+        }
+    }
+
+    private func activateLocalLibrary(_ service: LocalMusicService) {
+        activationID = UUID()
+        activationTask?.cancel()
+        slowConnectionTask?.cancel()
+        activationTask = nil
+        slowConnectionTask = nil
+        pendingConfig = nil
+        currentServer = nil
+        client = service
+        isOfflineMode = false
+        isLocalMode = true
+        connectionIssue = nil
+        isConnectionAttemptActive = false
+        sharingAvailable = false
+        phase = .authenticated
+        audioPlayer.updateClient(service, serverID: LocalMusicService.serverID)
+        IntentBridge.shared.setup(client: service, audioPlayer: audioPlayer)
+        AppLogger.shared.log(
+            "Local library activated; folder=\(service.folderName); songs=\(service.songCount)",
+            category: .library
+        )
+        Task { await audioPlayer.restoreLastPlaybackSessionIfNeeded() }
+        Task { await homeViewModel.load(appState: self, force: true) }
     }
 
     func completeLogin(
@@ -253,6 +319,7 @@ final class AppState: ObservableObject {
         isConnectionAttemptActive = false
         connectionIssue = nil
         isOfflineMode = true
+        isLocalMode = false
         client = nil
         sharingAvailable = false
         audioPlayer.updateClient(nil)
@@ -263,6 +330,7 @@ final class AppState: ObservableObject {
 
     func logout() {
         AppLogger.shared.logAlways("Logout started; server=\(currentServer?.displayName ?? "none")", category: .settings)
+        if isLocalMode { LocalLibraryStore.shared.disableAutoRestore() }
         audioPlayer.stopAndClear()
         store.clearCurrent()
         activationID = UUID()
@@ -274,6 +342,7 @@ final class AppState: ObservableObject {
         isConnectionAttemptActive = false
         connectionIssue = nil
         isOfflineMode = false
+        isLocalMode = false
         client = nil
         currentServer = nil
         audioPlayer.updateClient(nil)
@@ -395,6 +464,7 @@ final class AppState: ObservableObject {
         isConnectionAttemptActive = false
         connectionIssue = nil
         isOfflineMode = false
+        isLocalMode = false
         var activeRecord = record
         if record.backend == .plex, service.config != config {
             activeRecord = store.update(

@@ -51,6 +51,7 @@ final class PlaylistsViewModel: ObservableObject {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
+        await PlaylistOfflineCache.shared.waitUntilLoaded()
         let serverID = AppState.shared.currentServer?.id
         let cachedPlaylists = PlaylistOfflineCache.shared.playlists(for: serverID)
         if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
@@ -87,6 +88,7 @@ final class PlaylistsViewModel: ObservableObject {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
+        await PlaylistOfflineCache.shared.waitUntilLoaded()
         playlists = PlaylistOfflineCache.shared.playlists(for: serverID)
         await publishSmartSource([])
         hasLoaded = true

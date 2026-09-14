@@ -779,6 +779,7 @@ struct ModernLibraryView: View {
 
     private func loadLibrary() async {
         if appState.isOfflineMode || appState.client == nil {
+            await PlaylistOfflineCache.shared.waitUntilLoaded()
             vm.setSource(.downloaded)
             playlists = PlaylistOfflineCache.shared.playlists(for: appState.currentServer?.id)
         } else if let client = appState.client {

@@ -36,7 +36,19 @@ enum WidgetSnapshotManager {
     }
 
     static func refreshListening() {
-        updateListening(using: StatsStore.shared.allEvents())
+        Task.detached(priority: .utility) {
+            let startedAt = Date()
+            let events = StatsStore.shared.allEvents()
+            updateListening(using: events)
+            let duration = Date().timeIntervalSince(startedAt)
+            if duration >= 0.1 {
+                AppLogger.shared.log(
+                    "Widget listening refresh took \(String(format: "%.0f", duration * 1_000))ms; events=\(events.count)",
+                    category: .library,
+                    level: .warning
+                )
+            }
+        }
     }
 
     static func updateListening(using events: [PlayEvent], now: Date = .now) {

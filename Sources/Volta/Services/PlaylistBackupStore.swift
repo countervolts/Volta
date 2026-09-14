@@ -23,24 +23,132 @@ enum PlaylistBackupError: LocalizedError {
     }
 }
 
-private struct PlaylistBackupPayload: Codable {
+struct PlaylistBackupPayload: Codable, Sendable {
     var version = 1
     var snapshots: [PlaylistBackupSnapshot]
 }
 
+struct PlaylistBackupLoadResult: Sendable {
+    let snapshots: [PlaylistBackupSnapshot]
+    let bytes: Int
+    let duration: TimeInterval
+}
+
+struct PlaylistBackupPersistenceResult: Sendable {
+    let succeeded: Bool
+    let bytes: Int
+    let duration: TimeInterval
+}
+
+protocol PlaylistBackupPersisting: Sendable {
+    func load() async -> PlaylistBackupLoadResult
+    func save(_ snapshots: [PlaylistBackupSnapshot]) async -> PlaylistBackupPersistenceResult
+}
+
+actor PlaylistBackupPersistence: PlaylistBackupPersisting {
+    let fileURL: URL
+
+    init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+
+    func load() async -> PlaylistBackupLoadResult {
+        let startedAt = Date()
+        guard let data = try? Data(contentsOf: fileURL),
+              let payload = try? JSONDecoder().decode(PlaylistBackupPayload.self, from: data) else {
+            return PlaylistBackupLoadResult(
+                snapshots: [],
+                bytes: 0,
+                duration: Date().timeIntervalSince(startedAt)
+            )
+        }
+        return PlaylistBackupLoadResult(
+            snapshots: payload.snapshots,
+            bytes: data.count,
+            duration: Date().timeIntervalSince(startedAt)
+        )
+    }
+
+    func save(_ snapshots: [PlaylistBackupSnapshot]) async -> PlaylistBackupPersistenceResult {
+        let startedAt = Date()
+        let payload = PlaylistBackupPayload(snapshots: snapshots)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(payload) else {
+            return PlaylistBackupPersistenceResult(succeeded: false, bytes: 0, duration: Date().timeIntervalSince(startedAt))
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: fileURL, options: .atomic)
+            return PlaylistBackupPersistenceResult(
+                succeeded: true,
+                bytes: data.count,
+                duration: Date().timeIntervalSince(startedAt)
+            )
+        } catch {
+            return PlaylistBackupPersistenceResult(
+                succeeded: false,
+                bytes: data.count,
+                duration: Date().timeIntervalSince(startedAt)
+            )
+        }
+    }
+}
+
 @MainActor
 final class PlaylistBackupStore: ObservableObject {
-    static let shared = PlaylistBackupStore()
+    private static let defaultPersistence = PlaylistBackupPersistence(fileURL: storageFileURL)
+    static let shared = PlaylistBackupStore(persistence: defaultPersistence)
 
     @Published private(set) var snapshots: [PlaylistBackupSnapshot] = []
 
-    private let fileURL: URL
+    private let persistenceActor: any PlaylistBackupPersisting
+    private var loadTask: Task<Void, Never>?
+    private var pendingSaveTask: Task<Void, Never>?
+    private var persistenceGeneration: UInt64 = 0
+    private var backupAllTask: Task<Void, Never>?
+    private var backupAllGeneration: UInt64 = 0
+    private var persistedBytes = 0
 
-    private init() {
-        let directory = Self.storageDirectoryURL
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        fileURL = Self.storageFileURL
-        reload()
+    init(persistence: any PlaylistBackupPersisting) {
+        persistenceActor = persistence
+        loadTask = nil
+        pendingSaveTask = nil
+        backupAllTask = nil
+        let persistence = persistenceActor
+        loadTask = Task { @MainActor [weak self, persistence] in
+            let loaded = await persistence.load()
+            guard let self else { return }
+            let hadMutation = self.persistenceGeneration != 0
+            if !hadMutation {
+                self.snapshots = loaded.snapshots
+            } else {
+                var merged = loaded.snapshots
+                var indexes = Dictionary(uniqueKeysWithValues: merged.enumerated().map { ($0.element.id, $0.offset) })
+                for snapshot in self.snapshots {
+                    if let index = indexes[snapshot.id] {
+                        merged[index] = snapshot
+                    } else {
+                        indexes[snapshot.id] = merged.count
+                        merged.append(snapshot)
+                    }
+                }
+                self.snapshots = merged
+            }
+            self.persistedBytes = loaded.bytes
+            if loaded.duration >= 0.1 {
+                AppLogger.shared.log(
+                    "Playlist backup load took \(String(format: "%.0f", loaded.duration * 1_000))ms; playlists=\(loaded.snapshots.count); bytes=\(loaded.bytes)",
+                    category: .library,
+                    level: .warning
+                )
+            }
+            self.loadTask = nil
+            if hadMutation { self.persist() }
+        }
     }
 
     nonisolated static var storageDirectoryURL: URL {
@@ -52,12 +160,8 @@ final class PlaylistBackupStore: ObservableObject {
         storageDirectoryURL.appendingPathComponent("playlists.json")
     }
 
-    nonisolated static func snapshotsOnDisk() -> [PlaylistBackupSnapshot] {
-        guard let data = try? Data(contentsOf: storageFileURL),
-              let payload = try? JSONDecoder().decode(PlaylistBackupPayload.self, from: data) else {
-            return []
-        }
-        return payload.snapshots
+    nonisolated static func snapshotsOnDisk() async -> [PlaylistBackupSnapshot] {
+        await defaultPersistence.load().snapshots
     }
 
     nonisolated static func deletedSnapshots(from snapshots: [PlaylistBackupSnapshot]) -> [PlaylistBackupSnapshot] {
@@ -66,12 +170,12 @@ final class PlaylistBackupStore: ObservableObject {
             .sorted { ($0.deletedAt ?? $0.updatedAt) > ($1.deletedAt ?? $1.updatedAt) }
     }
 
-    nonisolated static func deletedSnapshotsOnDisk() -> [PlaylistBackupSnapshot] {
-        deletedSnapshots(from: snapshotsOnDisk())
+    nonisolated static func deletedSnapshotsOnDisk() async -> [PlaylistBackupSnapshot] {
+        deletedSnapshots(from: await snapshotsOnDisk())
     }
 
-    nonisolated static func estimatedSizeBytesOnDisk() -> Int {
-        (try? Data(contentsOf: storageFileURL).count) ?? 0
+    nonisolated static func estimatedSizeBytesOnDisk() async -> Int {
+        await defaultPersistence.load().bytes
     }
 
     var isEnabled: Bool {
@@ -82,26 +186,87 @@ final class PlaylistBackupStore: ObservableObject {
         Self.deletedSnapshots(from: snapshots)
     }
 
+    func waitUntilLoaded() async {
+        await loadTask?.value
+    }
+
+    func waitUntilPersisted() async {
+        await pendingSaveTask?.value
+    }
+
     func reload() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let payload = try? JSONDecoder().decode(PlaylistBackupPayload.self, from: data) else {
-            snapshots = []
-            return
+        loadTask?.cancel()
+        let persistence = persistenceActor
+        loadTask = Task { @MainActor [weak self, persistence] in
+            let loaded = await persistence.load()
+            guard let self else { return }
+            self.snapshots = loaded.snapshots
+            self.persistedBytes = loaded.bytes
+            if loaded.duration >= 0.1 {
+                AppLogger.shared.log(
+                    "Playlist backup load took \(String(format: "%.0f", loaded.duration * 1_000))ms; playlists=\(loaded.snapshots.count); bytes=\(loaded.bytes)",
+                    category: .library,
+                    level: .warning
+                )
+            }
+            self.loadTask = nil
         }
-        snapshots = payload.snapshots
     }
 
-    func backupPlaylistList(_ playlists: [Playlist], client: (any MusicService)? = nil) {
+    func backupPlaylistList(
+        _ playlists: [Playlist],
+        client: (any MusicService)? = nil,
+        persist: Bool = true
+    ) {
         guard isEnabled else { return }
-        for playlist in playlists {
-            upsert(snapshot(from: playlist, client: client), saveAfter: false)
+        var indexes: [String: Int] = [:]
+        indexes.reserveCapacity(snapshots.count)
+        for (index, snapshot) in snapshots.enumerated() {
+            indexes[snapshot.id] = index
         }
-        save()
+        for playlist in playlists {
+            let existing = indexes[playlist.id].map { snapshots[$0] }
+            let snapshot = snapshot(from: playlist, client: client, existing: existing)
+            if let index = indexes[playlist.id] {
+                snapshots[index] = snapshot
+            } else {
+                indexes[playlist.id] = snapshots.count
+                snapshots.append(snapshot)
+            }
+        }
+        if persist { self.persist() }
     }
 
-    func backup(playlist: Playlist, client: (any MusicService)? = nil, deletedAt: Date? = nil) {
+    func backup(
+        playlist: Playlist,
+        client: (any MusicService)? = nil,
+        deletedAt: Date? = nil,
+        persist: Bool = true
+    ) {
         guard isEnabled || deletedAt != nil else { return }
         upsert(snapshot(from: playlist, client: client, deletedAt: deletedAt))
+        if persist { self.persist() }
+    }
+
+    func backupPlaylistListAndDetails(
+        _ playlists: [Playlist],
+        client: any MusicService
+    ) async {
+        guard isEnabled else { return }
+        await waitUntilLoaded()
+        backupPlaylistList(playlists, client: client, persist: false)
+        var detailedPlaylists: [Playlist] = []
+        detailedPlaylists.reserveCapacity(playlists.count)
+        for playlist in playlists {
+            guard !Task.isCancelled else { return }
+            guard let full = try? await client.playlist(id: playlist.id) else { continue }
+            detailedPlaylists.append(full)
+            await Task.yield()
+        }
+        guard !Task.isCancelled else { return }
+        backupPlaylistList(detailedPlaylists, client: client, persist: false)
+        persist()
+        await waitUntilPersisted()
     }
 
     func backup(playlistID: String, client: any MusicService) async {
@@ -111,12 +276,58 @@ final class PlaylistBackupStore: ObservableObject {
     }
 
     func backupAll(client: any MusicService) async {
+        await backupAll(
+            fetchPlaylists: { try? await client.playlists() },
+            fetchPlaylist: { id in try? await client.playlist(id: id) },
+            client: client
+        )
+    }
+
+    func backupAll(
+        fetchPlaylists: @escaping @Sendable () async -> [Playlist]?,
+        fetchPlaylist: @escaping @Sendable (String) async -> Playlist?,
+        client: (any MusicService)? = nil
+    ) async {
         guard isEnabled else { return }
-        guard let playlists = try? await client.playlists() else { return }
-        backupPlaylistList(playlists, client: client)
-        for playlist in playlists {
-            await backup(playlistID: playlist.id, client: client)
+        backupAllGeneration &+= 1
+        let generation = backupAllGeneration
+        backupAllTask?.cancel()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performBackupAll(
+                fetchPlaylists: fetchPlaylists,
+                fetchPlaylist: fetchPlaylist,
+                client: client,
+                generation: generation
+            )
         }
+        backupAllTask = task
+        await task.value
+        if backupAllGeneration == generation { backupAllTask = nil }
+    }
+
+    private func performBackupAll(
+        fetchPlaylists: @escaping @Sendable () async -> [Playlist]?,
+        fetchPlaylist: @escaping @Sendable (String) async -> Playlist?,
+        client: (any MusicService)?,
+        generation: UInt64
+    ) async {
+        await waitUntilLoaded()
+        guard generation == backupAllGeneration,
+              let playlists = await fetchPlaylists() else { return }
+        backupPlaylistList(playlists, client: client, persist: false)
+        var detailedPlaylists: [Playlist] = []
+        detailedPlaylists.reserveCapacity(playlists.count)
+        for playlist in playlists {
+            guard !Task.isCancelled, generation == backupAllGeneration else { return }
+            guard let full = await fetchPlaylist(playlist.id) else { continue }
+            detailedPlaylists.append(full)
+            await Task.yield()
+        }
+        guard !Task.isCancelled, generation == backupAllGeneration else { return }
+        backupPlaylistList(detailedPlaylists, client: client, persist: false)
+        persist()
+        await waitUntilPersisted()
         AppLogger.shared.log("Playlist backups refreshed (\(playlists.count) playlists)", category: .library)
     }
 
@@ -126,6 +337,7 @@ final class PlaylistBackupStore: ObservableObject {
     }
 
     func restore(_ snapshot: PlaylistBackupSnapshot, client: any MusicService) async throws -> Playlist {
+        await waitUntilLoaded()
         let name = try await uniqueRestoredName(for: snapshot.name, client: client)
         guard let created = try await client.createPlaylist(name: name) else {
             throw PlaylistBackupError.createFailed
@@ -149,22 +361,50 @@ final class PlaylistBackupStore: ObservableObject {
             serverURL: client.config.baseURL.absoluteString
         )
         upsert(restoredSnapshot)
+        self.persist()
         AppLogger.shared.log("Restored playlist backup '\(snapshot.name)' as '\(name)'", category: .library)
         return restored
     }
 
     func delete(_ snapshot: PlaylistBackupSnapshot) {
         snapshots.removeAll { $0.id == snapshot.id }
-        save()
+        persist()
         AppLogger.shared.log("Deleted playlist backup '\(snapshot.name)'", category: .library)
     }
 
     func estimatedSizeBytes() -> Int {
-        (try? Data(contentsOf: fileURL).count) ?? 0
+        persistedBytes
     }
 
-    private func snapshot(from playlist: Playlist, client: (any MusicService)?, deletedAt: Date? = nil) -> PlaylistBackupSnapshot {
-        let existing = snapshots.first { $0.id == playlist.id }
+    func persist() {
+        persistenceGeneration &+= 1
+        let generation = persistenceGeneration
+        let snapshot = snapshots
+        pendingSaveTask?.cancel()
+        let persistence = persistenceActor
+        pendingSaveTask = Task { @MainActor [weak self, persistence] in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard !Task.isCancelled else { return }
+            let result = await persistence.save(snapshot)
+            guard let self, self.persistenceGeneration == generation else { return }
+            self.persistedBytes = result.bytes
+            if result.duration >= 0.1 {
+                AppLogger.shared.log(
+                    "Playlist backup persistence took \(String(format: "%.0f", result.duration * 1_000))ms; playlists=\(snapshot.count); bytes=\(result.bytes); success=\(result.succeeded)",
+                    category: .library,
+                    level: result.succeeded ? .info : .warning
+                )
+            }
+        }
+    }
+
+    private func snapshot(
+        from playlist: Playlist,
+        client: (any MusicService)?,
+        deletedAt: Date? = nil,
+        existing: PlaylistBackupSnapshot? = nil
+    ) -> PlaylistBackupSnapshot {
+        let existing = existing ?? snapshots.first { $0.id == playlist.id }
         return PlaylistBackupSnapshot(
             id: playlist.id,
             name: playlist.name,
@@ -176,21 +416,12 @@ final class PlaylistBackupStore: ObservableObject {
         )
     }
 
-    private func upsert(_ snapshot: PlaylistBackupSnapshot, saveAfter: Bool = true) {
+    private func upsert(_ snapshot: PlaylistBackupSnapshot) {
         if let index = snapshots.firstIndex(where: { $0.id == snapshot.id }) {
             snapshots[index] = snapshot
         } else {
             snapshots.append(snapshot)
         }
-        if saveAfter { save() }
-    }
-
-    private func save() {
-        let payload = PlaylistBackupPayload(snapshots: snapshots)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(payload) else { return }
-        try? data.write(to: fileURL, options: .atomic)
     }
 
     private func uniqueRestoredName(for name: String, client: any MusicService) async throws -> String {

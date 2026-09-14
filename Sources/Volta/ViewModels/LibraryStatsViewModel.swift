@@ -122,7 +122,8 @@ final class LibraryStatsViewModel: ObservableObject {
     private var globalTask: Task<Void, Never>?
 
     private func cacheKey(_ appState: AppState) -> String {
-        appState.currentServer?.id ?? "downloads"
+        if appState.isLocalMode { return LocalMusicService.serverID }
+        return appState.currentServer?.id ?? "downloads"
     }
 
     private func sharingName(_ appState: AppState) -> String {
@@ -289,7 +290,7 @@ final class LibraryStatsViewModel: ObservableObject {
     // MARK: - Fetch
 
     private func buildStats(appState: AppState) async throws -> (data: LibraryStatsData, offline: Bool) {
-        let offline = NetworkMonitor.shared.connection == .none
+        let offline = !appState.isLocalMode && NetworkMonitor.shared.connection == .none
         // Offline, or no live connection: compute from what's on disk.
         if offline || appState.client == nil {
             let songs = DownloadService.shared.downloadedSongs()
@@ -334,7 +335,9 @@ final class LibraryStatsViewModel: ObservableObject {
             await MainActor.run { self.progress = Double(done) / Double(total) }
         }
 
-        let source = appState.currentServer?.displayName ?? "Library"
+        let source = appState.isLocalMode
+            ? "Local Files"
+            : (appState.currentServer?.displayName ?? "Library")
         let albumLookup = Dictionary(albumMeta.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let data = await Task.detached(priority: .utility) {
             Self.computeStats(songs: allSongs, albumMeta: albumLookup, source: source)

@@ -64,7 +64,7 @@ extension SettingsView {
     @ViewBuilder
     var appearanceSection: some View {
         let s = "Appearance"
-        if sectionVisible(s, [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["stylized album cover", "stylised album cover", "album cover", "album style", "full bleed", "edge to edge", "cover style"], ["stylized playlist cover", "stylised playlist cover", "playlist cover", "playlist style", "full bleed", "edge to edge", "cover style"], ["player controls", "player customization", "customise player", "customize player", "quick actions", "shuffle", "repeat", "queue"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]) {
+        if sectionVisible(s, [["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"], ["hidden albums", "hide albums", "visibility", "library visibility", "artist visibility"], ["theme", "dark", "light", "amoled", "oled", "black", "appearance"], ["show lossless badge", "lossless", "badge"], ["show explicit badge", "explicit", "parental advisory", "badge"], ["live artwork", "animated artwork", "live", "gif", "webp", "motion", "animation"], ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"], ["simple player animations", "simple player animation", "mini player animation", "player transition", "down up animation"], ["stylized album cover", "stylised album cover", "album cover", "album style", "full bleed", "edge to edge", "cover style"], ["stylized playlist cover", "stylised playlist cover", "playlist cover", "playlist style", "full bleed", "edge to edge", "cover style"], ["player controls", "player customization", "customise player", "customize player", "quick actions", "shuffle", "repeat", "queue"], ["dynamic player background", "dynamic", "background", "gradient", "color", "colour", "style"], ["song artwork in lists", "artwork", "thumbnail", "cover", "track"], ["long track titles", "truncate", "sliding", "marquee", "wrap", "new line", "classical"], ["accent color", "accent", "color", "colour", "theme"]]) {
             Section {
                 if rowVisible(s, ["language", "languages", "idioma", "langue", "sprache", "lingua", "translate", "translation", "localization", "localisation"]) {
                     SettingsDetailNavigationLink(.language) {
@@ -129,6 +129,13 @@ extension SettingsView {
                 if rowVisible(s, ["stylized player cover", "stylised player cover", "full bleed", "edge to edge", "player cover", "cover style"]) {
                     Toggle(isOn: $stylizedPlayerCover) {
                         Label(L(.appearance_stylized_cover), systemImage: "rectangle.portrait.arrowtriangle.2.outward")
+                    }
+                    .tint(Theme.accent)
+                }
+
+                if rowVisible(s, ["simple player animations", "simple player animation", "mini player animation", "player transition", "down up animation"]) {
+                    Toggle(isOn: $simplePlayerAnimations) {
+                        Label(L(.appearance_simple_player_animations), systemImage: "arrow.up.and.down")
                     }
                     .tint(Theme.accent)
                 }

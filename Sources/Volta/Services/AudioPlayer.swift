@@ -8,24 +8,44 @@ import Combine
 enum RepeatMode: Sendable { case off, one, all }
 enum AutoplayMode: Sendable { case off, random, algorithm }
 
-enum GaplessPlaybackMode: String, Sendable {
-    case off
-    case weak
-    case on
+enum GaplessPlaybackMode: String, CaseIterable, Identifiable, Sendable {
+    case `default`
+    case experimental
+
+    var id: String { rawValue }
+
+    var localizationKey: LocKey {
+        switch self {
+        case .default: .settings_gapless_default
+        case .experimental: .settings_gapless_experimental
+        }
+    }
 
     static func resolved(storedValue: String?) -> GaplessPlaybackMode {
-        // Match the shipped player: gapless queue insertion is opt-in. Treat
-        // missing or unknown values as off so an upgrade cannot silently move
-        // an existing user onto a different AVQueuePlayer state machine.
-        storedValue.flatMap(GaplessPlaybackMode.init(rawValue:)) ?? .off
+        storedValue.flatMap(GaplessPlaybackMode.init(rawValue:)) ?? .default
     }
 
     static var current: GaplessPlaybackMode {
-        resolved(storedValue: UserDefaults.standard.string(forKey: "gaplessPlayback"))
+        resolved(storedValue: UserDefaults.standard.string(forKey: "gaplessPlaybackMode"))
     }
 
-    var preparesSuccessor: Bool { self != .off }
-    var enqueuesSuccessor: Bool { self == .on }
+    static func isEnabled(storedValue: String?) -> Bool {
+        // Migrate the removed legacy "weak" value by treating it as On until
+        // the settings screen writes the new two-state preference.
+        storedValue != "off"
+    }
+
+    var preparesSuccessor: Bool {
+        Self.isEnabled(storedValue: UserDefaults.standard.string(forKey: "gaplessPlayback"))
+    }
+
+    var enqueuesSuccessor: Bool {
+        preparesSuccessor && self == .default
+    }
+
+    var usesStandbyPlayer: Bool {
+        preparesSuccessor && self == .experimental
+    }
 }
 
 struct PlaybackTimeSnapshot: Sendable {
@@ -33,6 +53,16 @@ struct PlaybackTimeSnapshot: Sendable {
     let duration: TimeInterval
 
     var remaining: TimeInterval { max(0, duration - elapsed) }
+}
+
+private struct ExperimentalGaplessDeck {
+    let player: AVQueuePlayer
+    let item: AVPlayerItem
+    let songID: String
+    let index: Int
+    let source: PlaybackURLSource
+    let usesTranscode: Bool
+    let temporaryURL: URL?
 }
 
 struct PreviousTrackPlan: Equatable, Sendable {
@@ -255,6 +285,10 @@ final class AudioPlayer: ObservableObject {
 
     private let primaryPlayer = AVQueuePlayer()
     private let secondaryPlayer = AVQueuePlayer()
+    // Experimental mode mirrors the web player's two independent standby
+    // HTMLAudioElement decks. The active deck remains primary/secondary so
+    // the existing observers and transition machinery keep their invariants.
+    private let experimentalReservePlayer = AVQueuePlayer()
     private var activePlayer: AVQueuePlayer
     private var player: AVQueuePlayer { activePlayer }
     private var inactivePlayer: AVQueuePlayer {
@@ -293,6 +327,7 @@ final class AudioPlayer: ObservableObject {
     private var primedReady = false
 
     private var gaplessNextItem: AVPlayerItem? = nil
+    private weak var gaplessNextPlayer: AVQueuePlayer?
     private var gaplessNextSongID: String? = nil
     private var gaplessNextSource: PlaybackURLSource? = nil
     private var gaplessNextUsesTranscode = false
@@ -304,6 +339,8 @@ final class AudioPlayer: ObservableObject {
     private var gaplessRetryCount = 0
     private var gaplessReadinessLoggedItemID: ObjectIdentifier?
     private var gaplessTransitionMeasurementTask: Task<Void, Never>?
+    private var experimentalHandoffTimer: Timer?
+    private var experimentalGaplessDecks: [ExperimentalGaplessDeck] = []
     private var currentAudioProcessingTask: Task<Void, Never>?
     private var playbackPreparationTask: Task<Void, Never>?
     private let itemAudioProcessingModes = NSMapTable<AVPlayerItem, NSNumber>.weakToStrongObjects()
@@ -356,6 +393,8 @@ final class AudioPlayer: ObservableObject {
         secondaryPlayer.automaticallyWaitsToMinimizeStalling = false
         primaryPlayer.actionAtItemEnd = .advance
         secondaryPlayer.actionAtItemEnd = .advance
+        experimentalReservePlayer.automaticallyWaitsToMinimizeStalling = false
+        experimentalReservePlayer.actionAtItemEnd = .pause
         autoplayMode = UserDefaults.standard.bool(forKey: "autoplayEnabled") ? .random : .off
         if let raw = UserDefaults.standard.string(forKey: "playbackTransitionMode"),
            let mode = PlaybackTransitionMode(rawValue: raw) {
@@ -637,6 +676,7 @@ final class AudioPlayer: ObservableObject {
         }
         self.client = client
         currentServerID = serverID
+        starredIDs = client?.localStarredSongIDs() ?? []
         TrackPairingStore.shared.selectServer(serverID)
         if previousServerID != serverID {
             loadPlaybackHistory(for: serverID)
@@ -785,6 +825,7 @@ final class AudioPlayer: ObservableObject {
     }
 
     func pause() {
+        stopExperimentalHandoffMonitor()
         pauseAllPlayers()
         cancelTransitionPlayback(keepPaused: true)
         isPlaying = false
@@ -817,6 +858,7 @@ final class AudioPlayer: ObservableObject {
         autoplayAppendTask?.cancel(); autoplayAppendTask = nil
         PlaybackCacheService.shared.cancelPrefetches()
         pauseAllPlayers()
+        stopExperimentalHandoffMonitor()
         cancelTransitionPlayback(keepPaused: true)
         resetPreparedTransitionPlan()
         cancelSleepTimer(resumeGaplessPreload: false)
@@ -830,11 +872,12 @@ final class AudioPlayer: ObservableObject {
         gaplessTransitionMeasurementTask?.cancel(); gaplessTransitionMeasurementTask = nil
         currentAudioProcessingTask?.cancel(); currentAudioProcessingTask = nil
         playbackPreparationTask?.cancel(); playbackPreparationTask = nil
-        for item in primaryPlayer.items() + secondaryPlayer.items() {
+        for item in primaryPlayer.items() + secondaryPlayer.items() + experimentalReservePlayer.items() {
             releaseAudioPipeline(for: item)
         }
         primaryPlayer.removeAllItems()
         secondaryPlayer.removeAllItems()
+        experimentalReservePlayer.removeAllItems()
         activePlayer = primaryPlayer
         targetVolume = 1
         primaryPlayer.volume = 1
@@ -851,7 +894,9 @@ final class AudioPlayer: ObservableObject {
         currentPlaybackUsesTranscode = false
         prematureTranscodeEndRetries.removeAll()
         deferredRestoredTime = nil
+        experimentalGaplessDecks.removeAll()
         gaplessNextItem = nil
+        gaplessNextPlayer = nil
         gaplessNextSongID = nil
         gaplessNextSource = nil
         gaplessNextUsesTranscode = false
@@ -1992,6 +2037,10 @@ final class AudioPlayer: ObservableObject {
     // Best-effort metadata warmup for upcoming original streams.
     private func warmUpcomingStreams() {
         guard let client else { return }
+        // Reconcile the cache window with the newly active queue position.
+        // Otherwise old in-flight transfers can consume the concurrency slots
+        // and prevent the new successor window from being cached after a skip.
+        PlaybackCacheService.shared.cancelPrefetches()
         let gaplessMode = GaplessPlaybackMode.current
         let reservedNextIndex = automaticNextQueueIndex().flatMap { index -> Int? in
             guard gaplessMode.preparesSuccessor,
@@ -2046,22 +2095,35 @@ final class AudioPlayer: ObservableObject {
     }
 
     private func invalidatePreloadedNext() {
+        stopExperimentalHandoffMonitor()
         gaplessPreloadGeneration &+= 1
         gaplessPreloadTask?.cancel()
         gaplessPreloadTask = nil
         gaplessNextStatusObservation?.invalidate()
         gaplessNextStatusObservation = nil
+        if let nextItem = gaplessNextItem,
+           experimentalGaplessDecks.contains(where: { $0.item === nextItem }) {
+            gaplessNextItem = nil
+            gaplessNextPlayer = nil
+            gaplessNextSongID = nil
+            gaplessNextSource = nil
+            gaplessNextUsesTranscode = false
+            gaplessNextQueueIndex = nil
+        }
+        clearExperimentalGaplessDecks()
         if let gaplessNextItem {
+            let owner = gaplessNextPlayer
             if gaplessNextItem !== currentPlayerItem,
-               gaplessNextItem !== player.currentItem,
-               player.items().contains(where: { $0 === gaplessNextItem }) {
-                player.remove(gaplessNextItem)
+               let owner,
+               owner.items().contains(where: { $0 === gaplessNextItem }) {
+                owner.remove(gaplessNextItem)
             }
             if gaplessNextItem !== currentPlayerItem,
                gaplessNextItem !== player.currentItem {
                 releaseAudioPipeline(for: gaplessNextItem)
             }
         }
+        gaplessNextPlayer = nil
         gaplessNextItem = nil
         gaplessNextSongID = nil
         gaplessNextSource = nil
@@ -2070,7 +2132,312 @@ final class AudioPlayer: ObservableObject {
         gaplessReadinessLoggedItemID = nil
     }
 
+    private func clearExperimentalGaplessDecks() {
+        for deck in experimentalGaplessDecks {
+            deck.player.pause()
+            releaseAudioPipeline(for: deck.item)
+            deck.player.remove(deck.item)
+            deck.player.volume = 0
+            deck.player.rate = 1
+        }
+        experimentalGaplessDecks.removeAll()
+        experimentalReservePlayer.pause()
+        for item in experimentalReservePlayer.items() {
+            releaseAudioPipeline(for: item)
+        }
+        experimentalReservePlayer.removeAllItems()
+        experimentalReservePlayer.volume = 0
+        experimentalReservePlayer.rate = 1
+    }
+
+    private func startExperimentalHandoffMonitor() {
+        guard experimentalHandoffTimer == nil,
+              GaplessPlaybackMode.current.usesStandbyPlayer,
+              isPlaying else { return }
+        let timer = Timer(timeInterval: 0.004, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.checkExperimentalHandoff()
+            }
+        }
+        experimentalHandoffTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopExperimentalHandoffMonitor() {
+        experimentalHandoffTimer?.invalidate()
+        experimentalHandoffTimer = nil
+    }
+
+    private func checkExperimentalHandoff() {
+        guard GaplessPlaybackMode.current.usesStandbyPlayer,
+              !isTransitioning,
+              isPlaying,
+              transitionMode == .off,
+              let nextIndex = automaticNextQueueIndex(),
+              let incomingPlayer = gaplessNextPlayer,
+              incomingPlayer === inactivePlayer,
+              let incomingItem = gaplessNextItem,
+              incomingPlayer.currentItem === incomingItem,
+              incomingItem.status == .readyToPlay,
+              gaplessNextQueueIndex == nextIndex,
+              gaplessNextSongID == queue[nextIndex].id else { return }
+        let remaining = liveDuration() - liveTime()
+        guard remaining.isFinite,
+              remaining > 0,
+              remaining <= 0.01 else { return }
+        guard let finishedItem = currentPlayerItem else { return }
+        _ = completeQueuedGaplessHandoff(
+            finishedItem: finishedItem,
+            outgoingEndedAt: ProcessInfo.processInfo.systemUptime
+        )
+    }
+
+    private func experimentalUpcomingIndexes() -> [Int] {
+        guard !queue.isEmpty,
+              queue.indices.contains(currentIndex),
+              repeatMode != .one else { return [] }
+        var indexes: [Int] = []
+        for offset in 1...2 {
+            var index = currentIndex + offset
+            if index >= queue.count {
+                guard repeatMode == .all else { break }
+                index %= queue.count
+            }
+            guard index != currentIndex, !indexes.contains(index) else { break }
+            indexes.append(index)
+        }
+        return indexes
+    }
+
+    private func detachExperimentalGaplessDeck(_ deck: ExperimentalGaplessDeck) {
+        deck.player.pause()
+        if deck.player.items().contains(where: { $0 === deck.item }) {
+            deck.player.remove(deck.item)
+        }
+        deck.player.volume = 0
+        deck.player.rate = 1
+    }
+
+    private func removeExperimentalGaplessDeck(_ deck: ExperimentalGaplessDeck) {
+        detachExperimentalGaplessDeck(deck)
+        releaseAudioPipeline(for: deck.item)
+        if let temporaryURL = deck.temporaryURL {
+            try? FileManager.default.removeItem(at: temporaryURL)
+        }
+    }
+
+    private func experimentalPreparedPlayback(
+        for song: Song
+    ) async -> (info: PlaybackURLInfo, temporaryURL: URL?)? {
+        guard let client else { return nil }
+        if let existing = playbackURL(for: song), existing.source != .stream {
+            return (existing, nil)
+        }
+        if !client.streamMetadataReady(for: song) {
+            await client.prepareForPlayback(song: song)
+        }
+        guard !Task.isCancelled,
+              let streamURL = client.streamURL(for: song) else { return nil }
+
+        var request = URLRequest(url: streamURL)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 120
+        for (name, value) in client.mediaRequestHeaders() {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        do {
+            let (downloadedURL, response) = try await URLSession.shared.download(for: request)
+            guard !Task.isCancelled,
+                  let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode) else {
+                try? FileManager.default.removeItem(at: downloadedURL)
+                return nil
+            }
+            let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("experimental-gapless", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let songSuffix = song.suffix?.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            let suffix = songSuffix?.isEmpty == false ? songSuffix! : streamURL.pathExtension
+            let destination = directory.appendingPathComponent("\(UUID().uuidString).\(suffix.isEmpty ? "audio" : suffix)")
+            try FileManager.default.moveItem(at: downloadedURL, to: destination)
+            let usesTranscode = Self.streamURLUsesTranscode(streamURL)
+            return ((destination, .playbackCache, usesTranscode), destination)
+        } catch {
+            return nil
+        }
+    }
+
+    private func installExperimentalGaplessDeck(
+        item: AVPlayerItem,
+        song: Song,
+        index: Int,
+        source: PlaybackURLSource,
+        usesTranscode: Bool,
+        temporaryURL: URL?,
+        on target: AVQueuePlayer
+    ) {
+        if let occupant = experimentalGaplessDecks.first(where: { $0.player === target }) {
+            removeExperimentalGaplessDeck(occupant)
+            experimentalGaplessDecks.removeAll { $0.item === occupant.item }
+        }
+        target.pause()
+        // Defensive cleanup for an item left behind by an interrupted deck
+        // rotation. Never let AVQueuePlayer receive a second item while an
+        // untracked item is still attached to this standby player.
+        for existing in target.items() {
+            releaseAudioPipeline(for: existing)
+        }
+        target.removeAllItems()
+        target.volume = 0
+        target.automaticallyWaitsToMinimizeStalling = sourceNeedsNetworkBuffer(
+            source: source,
+            usesTranscode: usesTranscode
+        )
+        target.insert(item, after: nil)
+        experimentalGaplessDecks.append(
+            ExperimentalGaplessDeck(
+                player: target,
+                item: item,
+                songID: song.id,
+                index: index,
+                source: source,
+                usesTranscode: usesTranscode,
+                temporaryURL: temporaryURL
+            )
+        )
+        if index == automaticNextQueueIndex() {
+            gaplessNextItem = item
+            gaplessNextPlayer = target
+            gaplessNextSongID = song.id
+            gaplessNextSource = source
+            gaplessNextUsesTranscode = usesTranscode
+            gaplessNextQueueIndex = index
+            startExperimentalHandoffMonitor()
+        }
+    }
+
+    private func scheduleExperimentalGaplessPreload(currentItem: AVPlayerItem) {
+        let indexes = experimentalUpcomingIndexes()
+        guard indexes.count > 0 else {
+            clearExperimentalGaplessDecks()
+            return
+        }
+        let desired = indexes.enumerated().map { slot, index in
+            (slot: slot, index: index, song: queue[index])
+        }
+        let desiredKeys = Set(desired.map { "\($0.index):\($0.song.id)" })
+        let stale = experimentalGaplessDecks.filter {
+            !desiredKeys.contains("\($0.index):\($0.songID)")
+        }
+        stale.forEach(removeExperimentalGaplessDeck)
+        experimentalGaplessDecks.removeAll {
+            !desiredKeys.contains("\($0.index):\($0.songID)")
+        }
+
+        let generation = gaplessPreloadGeneration
+        gaplessPreloadTask?.cancel()
+        gaplessPreloadTask = Task { @MainActor [weak self, weak currentItem] in
+            guard let self, let currentItem else { return }
+            // Move the nearer deck first so a retained second track can be
+            // reassigned from the reserve deck into the newly inactive deck.
+            for request in desired {
+                guard !Task.isCancelled,
+                      generation == self.gaplessPreloadGeneration,
+                      self.player.currentItem === currentItem,
+                      self.currentPlayerItem === currentItem,
+                      GaplessPlaybackMode.current.usesStandbyPlayer else { return }
+                let target = request.slot == 0 ? self.inactivePlayer : self.experimentalReservePlayer
+                if let existingIndex = self.experimentalGaplessDecks.firstIndex(where: {
+                    $0.index == request.index && $0.songID == request.song.id
+                }) {
+                    let existing = self.experimentalGaplessDecks[existingIndex]
+                    if existing.player !== target {
+                        let replacementURL = (existing.item.asset as? AVURLAsset)?.url
+                        self.detachExperimentalGaplessDeck(existing)
+                        self.releaseAudioPipeline(for: existing.item)
+                        self.experimentalGaplessDecks.remove(at: existingIndex)
+                        if let replacementURL {
+                            let replacement = self.makePlayerItem(
+                                playback: (
+                                    replacementURL,
+                                    existing.source,
+                                    existing.usesTranscode
+                                )
+                            )
+                            if self.audioProcessingRequired {
+                                let processingReady = await self.prepareAudioProcessing(for: replacement)
+                                guard !Task.isCancelled, processingReady else {
+                                    if let temporaryURL = existing.temporaryURL {
+                                        try? FileManager.default.removeItem(at: temporaryURL)
+                                    }
+                                    return
+                                }
+                            }
+                            self.installExperimentalGaplessDeck(
+                                item: replacement,
+                                song: request.song,
+                                index: request.index,
+                                source: existing.source,
+                                usesTranscode: existing.usesTranscode,
+                                temporaryURL: existing.temporaryURL,
+                                on: target
+                            )
+                            continue
+                        }
+                        if let temporaryURL = existing.temporaryURL {
+                            try? FileManager.default.removeItem(at: temporaryURL)
+                        }
+                    }
+                    if existing.player === target { continue }
+                }
+                guard let prepared = await self.experimentalPreparedPlayback(for: request.song) else { continue }
+                let urlInfo = prepared.info
+                let item = self.makePlayerItem(playback: urlInfo)
+                if self.audioProcessingRequired {
+                    let processingReady = await self.prepareAudioProcessing(for: item)
+                    guard !Task.isCancelled else { return }
+                    if !processingReady {
+                        item.audioMix = nil
+                        self.setAudioProcessingMode(.none, for: item)
+                    }
+                }
+                guard !Task.isCancelled,
+                      generation == self.gaplessPreloadGeneration,
+                      self.player.currentItem === currentItem,
+                      self.currentPlayerItem === currentItem,
+                      GaplessPlaybackMode.current.usesStandbyPlayer else {
+                    if let temporaryURL = prepared.temporaryURL {
+                        try? FileManager.default.removeItem(at: temporaryURL)
+                    }
+                    return
+                }
+                self.installExperimentalGaplessDeck(
+                    item: item,
+                    song: request.song,
+                    index: request.index,
+                    source: urlInfo.source,
+                    usesTranscode: urlInfo.usesTranscode,
+                    temporaryURL: prepared.temporaryURL,
+                    on: target
+                )
+            }
+            guard !Task.isCancelled,
+                  generation == self.gaplessPreloadGeneration else { return }
+            if let next = self.experimentalGaplessDecks.first(where: { $0.index == indexes[0] }) {
+                self.gaplessNextItem = next.item
+                self.gaplessNextPlayer = next.player
+                self.gaplessNextSongID = next.songID
+                self.gaplessNextSource = next.source
+                self.gaplessNextUsesTranscode = next.usesTranscode
+                self.gaplessNextQueueIndex = next.index
+            }
+            self.gaplessPreloadTask = nil
+            self.startExperimentalHandoffMonitor()
+        }
+    }
+
     private func startPlaying(song: Song) {
+        stopExperimentalHandoffMonitor()
         cancelTransitionPlayback()
         resetPreparedTransitionPlan()
         playbackPreparationTask?.cancel()
@@ -2083,17 +2450,8 @@ final class AudioPlayer: ObservableObject {
             AppLogger.shared.log("Playback failed: no stream URL for '\(song.title)'", category: .playback, level: .error)
             return
         }
-        let reusableWeakItem: AVPlayerItem? = {
-            guard GaplessPlaybackMode.current == .weak,
-                  gaplessNextSongID == song.id,
-                  gaplessNextQueueIndex == currentIndex,
-                  let item = gaplessNextItem,
-                  let assetURL = (item.asset as? AVURLAsset)?.url,
-                  assetURL == urlInfo.url else { return nil }
-            return item
-        }()
         invalidatePreloadedNext()
-        let item = reusableWeakItem ?? makePlayerItem(playback: urlInfo)
+        let item = makePlayerItem(playback: urlInfo)
         let requestToken = playRequestID
         let desiredMode = desiredAudioProcessingMode
         if desiredMode != audioProcessingMode(for: item) {
@@ -2186,8 +2544,13 @@ final class AudioPlayer: ObservableObject {
               let currentItem = player.currentItem,
               currentItem === currentPlayerItem,
               let nextIndex = automaticNextQueueIndex(),
-              canUseGaplessForCurrentTransition(nextIndex: nextIndex) else {
+              canUseGaplessForCurrentTransition(nextIndex: nextIndex),
+              !mode.usesStandbyPlayer || transitionMode == .off else {
             invalidatePreloadedNext()
+            return
+        }
+        if mode.usesStandbyPlayer {
+            scheduleExperimentalGaplessPreload(currentItem: currentItem)
             return
         }
         let nextSong = queue[nextIndex]
@@ -2201,7 +2564,8 @@ final class AudioPlayer: ObservableObject {
         // later. Replacing it near the boundary would throw away useful data.
         if gaplessNextSongID == nextSong.id,
            let gaplessNextItem,
-           (mode == .weak || player.items().contains(where: { $0 === gaplessNextItem })) {
+           ((mode.usesStandbyPlayer && gaplessNextPlayer === inactivePlayer && inactivePlayer.items().contains(where: { $0 === gaplessNextItem })) ||
+            (!mode.usesStandbyPlayer && gaplessNextPlayer === player && player.items().contains(where: { $0 === gaplessNextItem }))) {
             gaplessNextQueueIndex = nextIndex
             return
         }
@@ -2327,6 +2691,7 @@ final class AudioPlayer: ObservableObject {
             return
         }
         gaplessNextItem = nextItem
+        gaplessNextPlayer = player
         gaplessNextStatusObservation?.invalidate()
         gaplessNextStatusObservation = nextItem.observe(\.status, options: [.new]) { [weak self, weak nextItem] _, _ in
             Task { @MainActor in
@@ -2359,7 +2724,8 @@ final class AudioPlayer: ObservableObject {
         finishedItem: AVPlayerItem,
         outgoingEndedAt: TimeInterval
     ) -> Bool {
-        guard GaplessPlaybackMode.current.enqueuesSuccessor,
+        let mode = GaplessPlaybackMode.current
+        guard mode.preparesSuccessor,
               let nextIndex = automaticNextQueueIndex(),
               canUseGaplessForCurrentTransition(nextIndex: nextIndex),
               let queuedItem = gaplessNextItem,
@@ -2376,32 +2742,50 @@ final class AudioPlayer: ObservableObject {
             return false
         }
 
-        let advancedAutomatically = player.currentItem === queuedItem
         var requiredFallback = false
-        if !advancedAutomatically,
-           player.currentItem === finishedItem,
-           player.items().contains(where: { $0 === queuedItem }) {
-            AppLogger.shared.log(
-                "Gapless automatic advance failed; using AVQueuePlayer fallback for '\(song.title)'",
-                category: .playback,
-                level: .warning
-            )
-            requiredFallback = true
-            player.advanceToNextItem()
-        }
+        if mode.usesStandbyPlayer {
+            guard transitionMode == .off,
+                  let standbyPlayer = gaplessNextPlayer,
+                  standbyPlayer === inactivePlayer,
+                  standbyPlayer.currentItem === queuedItem,
+                  queuedItem.status == .readyToPlay else { return false }
+            player.pause()
+            for item in player.items() {
+                releaseAudioPipeline(for: item)
+            }
+            player.removeAllItems()
+            player.volume = 0
+            activePlayer = standbyPlayer
+            experimentalGaplessDecks.removeAll { $0.item === queuedItem }
+            standbyPlayer.volume = replayGainVolume(for: song)
+        } else {
+            guard mode.enqueuesSuccessor else { return false }
+            let advancedAutomatically = player.currentItem === queuedItem
+            if !advancedAutomatically,
+               player.currentItem === finishedItem,
+               player.items().contains(where: { $0 === queuedItem }) {
+                AppLogger.shared.log(
+                    "Gapless automatic advance failed; using AVQueuePlayer fallback for '\(song.title)'",
+                    category: .playback,
+                    level: .warning
+                )
+                requiredFallback = true
+                player.advanceToNextItem()
+            }
 
-        guard let activeItem = player.currentItem, activeItem === queuedItem else {
-            AppLogger.shared.log(
-                "Gapless handoff fell back: queued item was not active for '\(song.title)'",
-                category: .playback,
-                level: .warning
-            )
-            invalidatePreloadedNext()
-            return false
+            guard let activeItem = player.currentItem, activeItem === queuedItem else {
+                AppLogger.shared.log(
+                    "Gapless handoff fell back: queued item was not active for '\(song.title)'",
+                    category: .playback,
+                    level: .warning
+                )
+                invalidatePreloadedNext()
+                return false
+            }
         }
 
         AppLogger.shared.log(
-            "Gapless handoff: AVQueuePlayer \(requiredFallback ? "required fallback" : "advanced automatically"); title='\(song.title)'",
+            "Gapless handoff: \(mode.rawValue) \(requiredFallback ? "required fallback" : "advanced automatically"); title='\(song.title)'",
             category: .playback
         )
         recordCurrentSongInHistory(unless: song.id)
@@ -2416,6 +2800,7 @@ final class AudioPlayer: ObservableObject {
         gaplessNextStatusObservation?.invalidate()
         gaplessNextStatusObservation = nil
         gaplessNextItem = nil
+        gaplessNextPlayer = nil
         gaplessNextSongID = nil
         gaplessNextSource = nil
         gaplessNextUsesTranscode = false
@@ -3154,6 +3539,7 @@ final class AudioPlayer: ObservableObject {
     private func pauseAllPlayers() {
         primaryPlayer.pause()
         secondaryPlayer.pause()
+        experimentalReservePlayer.pause()
     }
 
     private func loadArtwork(for song: Song) async {
@@ -3860,6 +4246,7 @@ final class AudioPlayer: ObservableObject {
             player.play()
         }
         isPlaying = true
+        startExperimentalHandoffMonitor()
         if currentSongStartedAt == nil {
             currentSongStartedAt = Date(timeIntervalSinceNow: -max(0, currentTime))
         }

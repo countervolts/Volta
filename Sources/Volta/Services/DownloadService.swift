@@ -457,6 +457,10 @@ final class DownloadService: ObservableObject {
     }
 
     func download(song: Song, notifyOnCompletion: Bool = true) {
+        guard !AppState.shared.isLocalMode else {
+            AppLogger.shared.log("Download ignored for local library track: \(song.title)", category: .downloads)
+            return
+        }
         if pendingResumes[song.id] != nil {
             pumpDownloads()
             return
@@ -1394,6 +1398,7 @@ final class DownloadService: ObservableObject {
     // MARK: - Bulk missing-song downloads
 
     func startBulkDownloadMissing(_ songs: [Song]) {
+        guard !AppState.shared.isLocalMode else { return }
         guard bulkProgress.isRunning == false else { return }
         guard let client else { return }
         if DemoServers.isDemo(client.config.baseURL) {

@@ -40,7 +40,7 @@ final class CrashReportingService {
             options.enableMemoryIntrospection = false
             options.enableCrashHandler = true
             options.enableSigtermReporting = false
-            options.enableWatchdogTerminationTracking = false
+            options.enableWatchdogTerminationTracking = true
             options.enableAutoSessionTracking = false
             options.sendClientReports = false
 
@@ -50,11 +50,16 @@ final class CrashReportingService {
             options.beforeBreadcrumb = { _ in nil }
 
             options.tracesSampleRate = 0
+            options.attachStacktrace = false
             options.enableAutoPerformanceTracing = false
             options.enablePersistingTracesWhenCrashing = false
             options.enableUIViewControllerTracing = false
+            options.enableSwizzling = false
             options.enableUserInteractionTracing = false
             options.enablePreWarmedAppStartTracing = false
+#if !SDK_V10
+            options.enableStandaloneAppStartTracing = false
+#endif
             options.enableNetworkTracking = false
             options.enableFileIOTracing = false
             options.enableDataSwizzling = false
@@ -64,8 +69,11 @@ final class CrashReportingService {
             options.tracePropagationTargets = []
             options.failedRequestTargets = []
             options.configureProfiling = nil
-            options.enableAppHangTracking = false
+            options.enableAppHangTracking = true
+            options.appHangTimeoutInterval = 2.0
+#if os(iOS) || os(tvOS) || os(visionOS)
             options.enableReportNonFullyBlockingAppHangs = false
+#endif
             options.enableMetricKit = false
             options.enableMetricKitRawPayload = false
             options.enableLogs = false
@@ -139,7 +147,9 @@ private func sanitize(_ event: Event) -> Event {
     event.breadcrumbs = nil
     event.tags = nil
     event.extra = nil
-    event.context = nil
+    event.context = event.context?.filter { key, _ in
+        ["app", "device", "os", "runtime"].contains(key)
+    }
     event.serverName = nil
     event.transaction = nil
 
@@ -148,13 +158,29 @@ private func sanitize(_ event: Event) -> Event {
     }
 
     for exception in event.exceptions ?? [] {
-        exception.value = nil
-        exception.module = nil
-        exception.mechanism?.desc = nil
+        exception.value = redactDiagnosticText(exception.value)
+        exception.module = redactDiagnosticText(exception.module)
+        exception.mechanism?.desc = redactDiagnosticText(exception.mechanism?.desc)
         exception.mechanism?.data = nil
         exception.mechanism?.helpLink = nil
     }
 
     return event
+}
+
+private func redactDiagnosticText(_ text: String?) -> String? {
+    guard let text else { return nil }
+    var redacted = text
+    redacted = redacted.replacingOccurrences(
+        of: #"https?://[^\s]+"#,
+        with: "<redacted-url>",
+        options: .regularExpression
+    )
+    redacted = redacted.replacingOccurrences(
+        of: #"(?i)(authorization|token|password|cookie)\s*[:=]\s*[^\s,;]+"#,
+        with: "$1=<redacted>",
+        options: .regularExpression
+    )
+    return String(redacted.prefix(300))
 }
 #endif

@@ -165,6 +165,10 @@ extension MusicService {
     func replacePlaylistSongs(playlistID: String, songIDs: [String]) async throws {
         throw SubsonicError.server(code: 0, message: "Playlist reordering is not supported by this server.")
     }
+
+    /// Local libraries use this optional capability to restore favorites before
+    /// the first track is played. Network backends keep the empty default.
+    func localStarredSongIDs() -> Set<String> { [] }
 }
 
 // MARK: - Shared streaming preferences

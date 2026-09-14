@@ -49,7 +49,7 @@ struct HomeView: View {
         }
         .tint(Theme.accent)
         .preferredColorScheme(Theme.colorScheme)
-        .task(id: appState.currentServer?.id) {
+        .task(id: "\(appState.currentServer?.id ?? "none")|\(appState.isLocalMode)") {
             if !vm.hasLoaded { await vm.load(appState: appState) }
         }
         .onChangeCompat(of: homeSectionPreferences.mixPreferences) { _, _ in

@@ -1388,10 +1388,27 @@ struct NowPlayingScreen: View {
 
     private func openCurrentAlbum() {
         guard let albumId = audio.currentSong?.albumId, !isFetchingAlbum else { return }
+        AppLogger.shared.logAlways(
+            "Album navigation requested from player; albumID=\(albumId); playerTab=\(activeTab); playerSongID=\(audio.currentSong?.id ?? "none")",
+            category: .ui
+        )
         isFetchingAlbum = true
         Task {
             defer { isFetchingAlbum = false }
-            albumToShow = try? await appState.client?.album(id: albumId)
+            do {
+                let album = try await appState.client?.album(id: albumId)
+                albumToShow = album
+                AppLogger.shared.logAlways(
+                    "Album navigation fetch completed from player; albumID=\(albumId); result=\(album == nil ? "nil" : "success")",
+                    category: .ui
+                )
+            } catch {
+                AppLogger.shared.logAlways(
+                    "Album navigation fetch failed from player; albumID=\(albumId); error=\(error)",
+                    category: .ui,
+                    level: .error
+                )
+            }
         }
     }
 

@@ -36,6 +36,7 @@ struct MainTabView: View {
     @AppStorage("developerPerformanceOverlay") private var developerPerformanceOverlay = false
     @AppStorage("stylizedPlayerCover") private var stylizedPlayerCover = false
     @AppStorage("artworkAnimation") private var artworkAnimation = true
+    @AppStorage("simplePlayerAnimations") private var simplePlayerAnimations = false
     @State private var selectedTab = 0
     @State private var showNowPlaying = false
     @State private var playerOverlayMounted = false
@@ -53,6 +54,7 @@ struct MainTabView: View {
     @State private var playerPresentationTask: Task<Void, Never>?
     @State private var miniPlayerLandingTask: Task<Void, Never>?
     @State private var isPlayerTransitioning = false
+    @State private var simplePlayerAnimationActive = false
     @State private var isPlayerDismissGestureActive = false
     @State private var isCompletingPlayerDismiss = false
     @State private var isCancellingPlayerDismiss = false
@@ -86,11 +88,15 @@ struct MainTabView: View {
     private var reducesPlayerMotion: Bool {
         accessibilityReduceMotion || PerformanceMode.reduceAnimations
     }
+    private var shouldUseSimplePlayerAnimation: Bool {
+        simplePlayerAnimations && !reducesPlayerMotion
+    }
     private var playerPresentationDuration: Double {
-        reducesPlayerMotion ? 0.16 : 0.52
+        if simplePlayerAnimationActive { return 0.34 }
+        return reducesPlayerMotion ? 0.16 : 0.52
     }
     private func playerPresentationAnimation(duration: Double) -> Animation {
-        if reducesPlayerMotion {
+        if reducesPlayerMotion || simplePlayerAnimationActive {
             return .easeOut(duration: duration)
         }
         return .spring(
@@ -100,20 +106,30 @@ struct MainTabView: View {
         )
     }
     private func playerPresentationSettleDelay(for duration: Double) -> Double {
-        reducesPlayerMotion ? duration + 0.02 : max(0.30, duration) + 0.10
+        if reducesPlayerMotion || simplePlayerAnimationActive {
+            return duration + 0.02
+        }
+        return max(0.30, duration) + 0.10
     }
     private func playerDismissFlightDuration(for progress: CGFloat) -> Double {
         if reducesPlayerMotion { return 0.16 }
+        if simplePlayerAnimationActive {
+            return max(0.18, 0.34 * Double(min(max(progress, 0), 1)))
+        }
         return max(0.14, 0.42 * Double(min(max(progress, 0), 1)))
     }
     private func playerDismissFlightAnimation(duration: Double) -> Animation {
-        reducesPlayerMotion ? .easeOut(duration: duration) : .easeInOut(duration: duration)
+        if reducesPlayerMotion || simplePlayerAnimationActive {
+            return .easeInOut(duration: duration)
+        }
+        return .easeInOut(duration: duration)
     }
     private var usesPhysicalPlayerDismissal: Bool {
         UIDevice.current.userInterfaceIdiom == .phone
             && horizontalSizeClass != .regular
             && verticalSizeClass != .compact
             && !reducesPlayerMotion
+            && !simplePlayerAnimationActive
     }
     private var isPhysicalPlayerDismissalActive: Bool {
         usesPhysicalPlayerDismissal
@@ -123,6 +139,39 @@ struct MainTabView: View {
     }
     private var showsRealMiniPlayer: Bool {
         playerPresentationPhase == .mini
+            || (simplePlayerAnimationActive && isSimpleMiniPlayerTransitionPhase)
+    }
+    private var isSimpleMiniPlayerTransitionPhase: Bool {
+        switch playerPresentationPhase {
+        case .expanding, .dragging, .collapsing:
+            return true
+        case .mini, .expanded, .cancelling:
+            return false
+        }
+    }
+    private var simpleMiniPlayerOffset: CGFloat {
+        guard simplePlayerAnimationActive else { return 0 }
+        let progress = min(max(playerExpansionProgress, 0), 1)
+        switch playerPresentationPhase {
+        case .expanding:
+            return 26 * smoothStep(progress, from: 0, to: 0.48)
+        case .dragging, .collapsing:
+            return 26 * smoothStep(progress, from: 0, to: 1)
+        case .mini, .expanded, .cancelling:
+            return 0
+        }
+    }
+    private var simpleMiniPlayerOpacity: Double {
+        guard simplePlayerAnimationActive else { return 1 }
+        let progress = min(max(playerExpansionProgress, 0), 1)
+        switch playerPresentationPhase {
+        case .expanding:
+            return Double(1 - smoothStep(progress, from: 0.06, to: 0.55))
+        case .dragging, .collapsing:
+            return Double(smoothStep(1 - progress, from: 0.06, to: 0.55))
+        case .mini, .expanded, .cancelling:
+            return 1
+        }
     }
     private var tabSelection: Binding<Int> {
         Binding(
@@ -173,7 +222,9 @@ struct MainTabView: View {
                                     dismissalStartProgress: playerDismissStartProgress,
                                     dismissalTravel: playerDismissTravel
                                 )
-                                .opacity(isPhysicalPlayerDismissalActive ? 0 : 1)
+                                .opacity(
+                                    isPhysicalPlayerDismissalActive || simplePlayerAnimationActive ? 0 : 1
+                                )
                             }
                             .allowsHitTesting(false)
                             .zIndex(0)
@@ -188,7 +239,9 @@ struct MainTabView: View {
                                     reveal: reveal,
                                     dismissTravelOffset: motion.travelOffset,
                                     dismissMorphProgress: motion.morphProgress,
-                                    safeAreaInsets: rootGeo.safeAreaInsets
+                                    safeAreaInsets: rootGeo.safeAreaInsets,
+                                    containerSize: rootGeo.size,
+                                    useSimpleAnimation: simplePlayerAnimationActive
                                 )
                             }
                             .allowsHitTesting(
@@ -260,6 +313,7 @@ struct MainTabView: View {
                 playerExpansionProgress = 0
                 playerSnapshot = nil
                 isPlayerTransitioning = false
+                simplePlayerAnimationActive = false
                 isPlayerDismissGestureActive = false
                 isCompletingPlayerDismiss = false
                 isCancellingPlayerDismiss = false
@@ -280,7 +334,9 @@ struct MainTabView: View {
         reveal: CGFloat,
         dismissTravelOffset: CGFloat,
         dismissMorphProgress: CGFloat,
-        safeAreaInsets: EdgeInsets
+        safeAreaInsets: EdgeInsets,
+        containerSize: CGSize,
+        useSimpleAnimation: Bool
     ) -> some View {
         let screen = NowPlayingScreen(
             isPresented: nowPlayingPresentationBinding,
@@ -304,7 +360,9 @@ struct MainTabView: View {
         .offset(
             y: isPhysicalPlayerDismissalActive
                 ? dismissTravelOffset
-                : playerContentVerticalOffset(for: progress)
+                : useSimpleAnimation
+                    ? simplePlayerContentVerticalOffset(for: progress, containerHeight: containerSize.height)
+                    : playerContentVerticalOffset(for: progress)
         )
 
         screen.mask {
@@ -317,6 +375,8 @@ struct MainTabView: View {
                     isInteractive: isPlayerDismissGestureActive
                 )
             } else if usesDirectDismissalPresentation {
+                Rectangle().ignoresSafeArea()
+            } else if useSimpleAnimation {
                 Rectangle().ignoresSafeArea()
             } else {
                 PlayerExpansionClipMask(
@@ -392,7 +452,10 @@ struct MainTabView: View {
             onSwiftUIFrameChange: recordMiniPlayerSwiftUIFrame,
             landingTextScale: miniPlayerLandingTextScale,
             landingTextOffset: miniPlayerLandingTextOffset,
-            isVisible: showsRealMiniPlayer
+            isVisible: showsRealMiniPlayer,
+            animationOffset: simpleMiniPlayerOffset,
+            animationOpacity: simpleMiniPlayerOpacity,
+            isInteractive: playerPresentationPhase == .mini
         )
     }
 
@@ -459,8 +522,9 @@ struct MainTabView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 4)
-                .opacity(showsRealMiniPlayer ? 1 : 0)
-                .allowsHitTesting(showsRealMiniPlayer)
+                .offset(y: simpleMiniPlayerOffset)
+                .opacity(showsRealMiniPlayer ? simpleMiniPlayerOpacity : 0)
+                .allowsHitTesting(showsRealMiniPlayer && playerPresentationPhase == .mini)
                 .accessibilityHidden(!showsRealMiniPlayer)
         }
     }
@@ -471,6 +535,10 @@ struct MainTabView: View {
         AppLogger.shared.log(
             "Player expanded from mini player; songID=\(song.id)",
             category: .playback
+        )
+        AppLogger.shared.logAlways(
+            "Player transition started: mini -> expanding; songID=\(song.id); miniFrameMeaningful=\(miniPlayerFrame.isMeaningful); miniPlacement=\(miniPlayerPlacement.rawValue)",
+            category: .ui
         )
 
         playerPresentationTask?.cancel()
@@ -492,12 +560,14 @@ struct MainTabView: View {
 
         var transaction = Transaction()
         transaction.disablesAnimations = true
+        let useSimpleAnimation = shouldUseSimplePlayerAnimation
         withTransaction(transaction) {
             playerSnapshot = snapshot
             playerExpansionProgress = 0
             playerOverlayMounted = true
             showNowPlaying = true
             isPlayerTransitioning = true
+            simplePlayerAnimationActive = useSimpleAnimation
             isPlayerDismissGestureActive = false
             isCompletingPlayerDismiss = false
             isCancellingPlayerDismiss = false
@@ -506,18 +576,23 @@ struct MainTabView: View {
             playerPresentationPhase = .expanding
         }
 
+        let presentationDuration = useSimpleAnimation ? 0.34 : playerPresentationDuration
+        let presentationAnimation: Animation = useSimpleAnimation
+            ? .easeInOut(duration: presentationDuration)
+            : playerPresentationAnimation(duration: presentationDuration)
+
         playerPresentationTask = Task { @MainActor in
             // Give the transition layer one render pass at the mini-player
             // endpoint before beginning the spring.
             await Task.yield()
             try? await Task.sleep(nanoseconds: 16_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation(playerPresentationAnimation(duration: playerPresentationDuration)) {
+            withAnimation(presentationAnimation) {
                 playerExpansionProgress = 1
             }
             try? await Task.sleep(
                 nanoseconds: UInt64(
-                    playerPresentationSettleDelay(for: playerPresentationDuration)
+                    playerPresentationSettleDelay(for: presentationDuration)
                         * 1_000_000_000
                 )
             )
@@ -551,6 +626,10 @@ struct MainTabView: View {
         }
 
         playerPresentationTask?.cancel()
+        AppLogger.shared.logAlways(
+            "Player dismissal requested; physical=\(usesPhysicalPlayerDismissal); dragOffset=\(dragOffset.map { Int($0) } ?? -1); predictedOffset=\(predictedOffset.map { Int($0) } ?? -1); phase=\(playerPresentationPhase)",
+            category: .ui
+        )
         if let currentSong = audio.currentSong {
             let refreshedSnapshot = PlayerTransitionSnapshot(
                 title: currentSong.title,
@@ -652,7 +731,12 @@ struct MainTabView: View {
                     isCompletingPlayerDismiss = false
                     isCancellingPlayerDismiss = false
                     playerPresentationPhase = .mini
+                    simplePlayerAnimationActive = false
                 }
+                AppLogger.shared.logAlways(
+                    "Player transition completed: collapsing -> mini; destinationFrameMeaningful=\(capturedFrame.isMeaningful); destinationPlacement=\(capturedGeometry.placement.rawValue)",
+                    category: .ui
+                )
 #if DEBUG
                 await Task.yield()
                 logRealMiniPlayerAfterHandoff()
@@ -699,7 +783,9 @@ struct MainTabView: View {
                 isCompletingPlayerDismiss = false
                 isCancellingPlayerDismiss = false
                 playerPresentationPhase = .mini
+                simplePlayerAnimationActive = false
             }
+            AppLogger.shared.logAlways("Player transition completed: collapsing -> mini", category: .ui)
             playerPresentationTask = nil
             playMiniPlayerLandingBounce()
         }
@@ -711,6 +797,12 @@ struct MainTabView: View {
         let startsPhysicalDrag = usesPhysicalPlayerDismissal
             && offset > 0
             && playerPresentationPhase != .dragging
+        if startsPhysicalDrag {
+            AppLogger.shared.logAlways(
+                "Player dismissal gesture started; destinationFrameMeaningful=\(miniPlayerFrame.isMeaningful); destinationGeometryMeaningful=\(miniTransitionGeometry.isMeaningful); placement=\(miniPlayerPlacement.rawValue)",
+                category: .ui
+            )
+        }
         playerPresentationTask?.cancel()
         playerPresentationTask = nil
 
@@ -825,6 +917,14 @@ struct MainTabView: View {
             return 0
         }
         return playerDismissTravel * (1 - min(max(progress, 0), 1))
+    }
+
+    private func simplePlayerContentVerticalOffset(
+        for progress: CGFloat,
+        containerHeight: CGFloat
+    ) -> CGFloat {
+        let p = min(max(progress, 0), 1)
+        return max(1, containerHeight + 24) * (1 - p)
     }
 
     private func playerContentOpacity(for progress: CGFloat) -> CGFloat {
@@ -2130,6 +2230,9 @@ private struct ModernMiniPlayerAccessory: View {
     let landingTextScale: CGFloat
     let landingTextOffset: CGFloat
     let isVisible: Bool
+    let animationOffset: CGFloat
+    let animationOpacity: Double
+    let isInteractive: Bool
 
     private var placement: MiniPlayerAccessoryPlacement {
         switch systemPlacement {
@@ -2163,8 +2266,9 @@ private struct ModernMiniPlayerAccessory: View {
                 onSurfaceFrameChange(frame, placement)
             }
         }
-        .opacity(isVisible ? 1 : 0)
-        .allowsHitTesting(isVisible)
+        .offset(y: animationOffset)
+        .opacity(isVisible ? animationOpacity : 0)
+        .allowsHitTesting(isVisible && isInteractive)
         .accessibilityHidden(!isVisible)
     }
 }
