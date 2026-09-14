@@ -37,17 +37,21 @@ struct DownloadManagerView: View {
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            List {
-                transferOverview
-                activeTransfers
-                companionLyricsTransfers
-                downloadedLibrary
-                storageLocation
-                libraryDownloads
-                downloadControls
+            if appState.isLocalMode {
+                localFilesNotice
+            } else {
+                List {
+                    transferOverview
+                    activeTransfers
+                    companionLyricsTransfers
+                    downloadedLibrary
+                    storageLocation
+                    libraryDownloads
+                    downloadControls
+                }
+                .scrollContentBackground(.hidden)
+                .background(Theme.background)
             }
-            .scrollContentBackground(.hidden)
-            .background(Theme.background)
         }
         .navigationTitle(L(.download_manager_title))
         .navigationBarTitleDisplayMode(.inline)
@@ -114,6 +118,32 @@ struct DownloadManagerView: View {
         .onChangeCompat(of: storageManager.errorMessage) { _, value in
             showStorageError = value != nil
         }
+    }
+
+    private var localFilesNotice: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 42, weight: .light))
+                .foregroundStyle(Theme.accent)
+            Text("Downloads are unavailable for Local Files")
+                .font(.headline)
+                .foregroundStyle(Theme.primaryText)
+                .multilineTextAlignment(.center)
+            Text("Your selected music folder is already the source of truth on this device. Downloaded-library controls and storage transfers are disabled.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondaryText)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 28)
+            if let local = appState.client as? LocalMusicService {
+                Text("Local library · \(local.songCount) songs · \(local.albumCount) albums · \(local.artistCount) artists · \(ByteCountFormatter.string(fromByteCount: Int64(local.totalBytes), countStyle: .file))")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
     }
 
     private var catalogKey: DownloadCatalogKey {

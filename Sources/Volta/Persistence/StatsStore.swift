@@ -34,138 +34,288 @@ struct PlayEvent: Codable, Identifiable, Sendable {
     }
 }
 
-// persists play events as a flat JSON array.
-// append-only during normal use; compaction can prune very old events.
-final class StatsStore {
+private struct StatsLoadResult: Sendable {
+    let realEvents: [PlayEvent]
+    let fakeEvents: [PlayEvent]
+    let realBytes: Int
+    let fakeBytes: Int
+    let duration: TimeInterval
+}
+
+private struct StatsWriteResult: Sendable {
+    let succeeded: Bool
+    let bytes: Int
+    let duration: TimeInterval
+}
+
+private actor StatsPersistence {
+    let fileURL: URL
+    let fakeFileURL: URL
+    private var realGeneration: UInt64 = 0
+    private var fakeGeneration: UInt64 = 0
+
+    init(fileURL: URL, fakeFileURL: URL) {
+        self.fileURL = fileURL
+        self.fakeFileURL = fakeFileURL
+    }
+
+    func load(fakeEnabled: Bool) -> StatsLoadResult {
+        let startedAt = Date()
+        let realData = try? Data(contentsOf: fileURL)
+        let realEvents = realData.flatMap { try? JSONDecoder().decode([PlayEvent].self, from: $0) } ?? []
+        let fakeData = fakeEnabled ? (try? Data(contentsOf: fakeFileURL)) : nil
+        let fakeEvents = fakeData.flatMap { try? JSONDecoder().decode([PlayEvent].self, from: $0) } ?? []
+        return StatsLoadResult(
+            realEvents: realEvents,
+            fakeEvents: fakeEvents,
+            realBytes: realData?.count ?? 0,
+            fakeBytes: fakeData?.count ?? 0,
+            duration: Date().timeIntervalSince(startedAt)
+        )
+    }
+
+    func saveReal(_ events: [PlayEvent], generation: UInt64) -> StatsWriteResult? {
+        guard generation >= realGeneration else { return nil }
+        realGeneration = generation
+        return save(events, to: fileURL)
+    }
+
+    func saveFake(_ events: [PlayEvent], generation: UInt64) -> StatsWriteResult? {
+        guard generation >= fakeGeneration else { return nil }
+        fakeGeneration = generation
+        return save(events, to: fakeFileURL)
+    }
+
+    func removeFake(generation: UInt64) -> StatsWriteResult? {
+        guard generation >= fakeGeneration else { return nil }
+        fakeGeneration = generation
+        let startedAt = Date()
+        do {
+            try FileManager.default.removeItem(at: fakeFileURL)
+        } catch CocoaError.fileNoSuchFile {
+            // Already absent.
+        } catch {
+            return StatsWriteResult(succeeded: false, bytes: 0, duration: Date().timeIntervalSince(startedAt))
+        }
+        return StatsWriteResult(succeeded: true, bytes: 0, duration: Date().timeIntervalSince(startedAt))
+    }
+
+    private func save(_ events: [PlayEvent], to url: URL) -> StatsWriteResult {
+        let startedAt = Date()
+        guard let data = try? JSONEncoder().encode(events) else {
+            return StatsWriteResult(succeeded: false, bytes: 0, duration: Date().timeIntervalSince(startedAt))
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: url, options: .atomic)
+            return StatsWriteResult(
+                succeeded: true,
+                bytes: data.count,
+                duration: Date().timeIntervalSince(startedAt)
+            )
+        } catch {
+            return StatsWriteResult(
+                succeeded: false,
+                bytes: data.count,
+                duration: Date().timeIntervalSince(startedAt)
+            )
+        }
+    }
+}
+
+// Persists play events asynchronously. Synchronous readers return an in-memory
+// snapshot only; they never wait for disk or JSON work.
+final class StatsStore: @unchecked Sendable {
     static let shared = StatsStore()
 
-    private let fileURL: URL
-    private let fakeFileURL: URL
-    // The user's real, never-falsified play history.
+    private let persistence: StatsPersistence
+    private let lock = NSLock()
     private var realEvents: [PlayEvent] = []
-    // A generated screenshot dataset, only consulted while the experiment is on.
     private var fakeEvents: [PlayEvent] = []
-    private let queue = DeveloperExperiments.queue(label: "stats-store", qos: .utility)
-
     private var fakeEnabled: Bool { DeveloperExperiments.fakeListeningStats }
+    private var realGeneration: UInt64 = 0
+    private var fakeGeneration: UInt64 = 0
+    private var initialLoadFinished = false
+    private var realClearedBeforeInitialLoad = false
+    private var persistedBytes = 0
+    private var fakePersistedBytes = 0
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Volta", isDirectory: true)
-        try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
-        fileURL = support.appendingPathComponent("play_events.json")
-        fakeFileURL = support.appendingPathComponent("play_events_fake.json")
-        load()
-        if fakeEnabled { loadFake() }
-        NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification,
-                                               object: nil, queue: nil) { [weak self] _ in
+        let fileURL = support.appendingPathComponent("play_events.json")
+        let fakeFileURL = support.appendingPathComponent("play_events_fake.json")
+        let persistence = StatsPersistence(fileURL: fileURL, fakeFileURL: fakeFileURL)
+        self.persistence = persistence
+        Task.detached(priority: .utility) { [weak self, persistence] in
+            let loaded = await persistence.load(fakeEnabled: self?.fakeEnabled ?? false)
+            guard let self else { return }
+            self.lock.withLock {
+                if self.realGeneration == 0 {
+                    self.realEvents = loaded.realEvents
+                } else if self.realClearedBeforeInitialLoad {
+                    // A clear issued before disk loading must not resurrect
+                    // the old file. Keep any events recorded after the clear.
+                } else {
+                    var merged = Dictionary(uniqueKeysWithValues: loaded.realEvents.map { ($0.id, $0) })
+                    for event in self.realEvents { merged[event.id] = event }
+                    self.realEvents = merged.values.sorted { $0.timestamp < $1.timestamp }
+                }
+                if self.fakeGeneration == 0 {
+                    self.fakeEvents = loaded.fakeEvents
+                }
+                self.initialLoadFinished = true
+                self.persistedBytes = loaded.realBytes
+                self.fakePersistedBytes = loaded.fakeBytes
+            }
+            if loaded.duration >= 0.1 {
+                AppLogger.shared.log(
+                    "Stats load took \(String(format: "%.0f", loaded.duration * 1_000))ms; events=\(loaded.realEvents.count); fakeEvents=\(loaded.fakeEvents.count); bytes=\(loaded.realBytes)",
+                    category: .library,
+                    level: .warning
+                )
+            }
+            WidgetSnapshotManager.refreshListening()
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .playEventRecorded, object: nil)
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
             self?.flush()
         }
     }
 
     func flush() {
-        // Only the real history mutates during normal use, so that is all we persist here.
-        syncOnStore { [weak self] in self?.saveReal() }
+        let snapshot = lock.withLock { (events: realEvents, generation: realGeneration) }
+        scheduleRealSave(snapshot.events, generation: snapshot.generation)
     }
 
-    // MARK: - Write
-
     func record(_ event: PlayEvent) {
-        // Always record to the real history, even while faking, so toggling the
-        // experiment off restores an accurate, intact dataset.
-        asyncOnStore { [weak self] in
-            guard let self else { return }
-            self.realEvents.append(event)
-            self.saveReal()
-            WidgetSnapshotManager.updateListening(using: self.fakeEnabled ? self.fakeEvents : self.realEvents)
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .playEventRecorded, object: nil)
-            }
+        let snapshot = lock.withLock { () -> (events: [PlayEvent], generation: UInt64) in
+            realEvents.append(event)
+            realGeneration &+= 1
+            return (realEvents, realGeneration)
+        }
+        scheduleRealSave(snapshot.events, generation: snapshot.generation)
+        refreshWidgetInBackground()
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .playEventRecorded, object: nil)
         }
     }
 
     // MARK: - Fake stats (screenshot mode)
 
-    // Enable/disable the falsified dataset. Real data is never touched.
     func setFakeStats(_ enabled: Bool, songPool: [Song]) {
-        asyncOnStore { [weak self] in
+        Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
             if enabled {
                 let events = FakeStatsGenerator.generate(pool: songPool)
-                self.fakeEvents = events
-                if let data = try? JSONEncoder().encode(events) {
-                    try? data.write(to: self.fakeFileURL, options: .atomic)
+                let generation = self.lock.withLock { () -> UInt64 in
+                    self.fakeEvents = events
+                    self.fakeGeneration &+= 1
+                    return self.fakeGeneration
                 }
+                self.scheduleFakeSave(events, generation: generation)
             } else {
-                self.fakeEvents = []
-                try? FileManager.default.removeItem(at: self.fakeFileURL)
+                let generation = self.lock.withLock { () -> UInt64 in
+                    self.fakeEvents.removeAll()
+                    self.fakeGeneration &+= 1
+                    return self.fakeGeneration
+                }
+                self.scheduleFakeRemoval(generation: generation)
             }
-            WidgetSnapshotManager.updateListening(using: self.fakeEnabled ? self.fakeEvents : self.realEvents)
+            self.refreshWidgetInBackground()
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .playEventRecorded, object: nil)
             }
         }
     }
 
-    // MARK: - Read (synchronous snapshots for use on background threads)
+    // MARK: - Read (in-memory snapshots only)
 
     func allEvents() -> [PlayEvent] {
-        syncOnStore { fakeEnabled ? fakeEvents : realEvents }
+        lock.withLock { fakeEnabled ? fakeEvents : realEvents }
     }
 
     func storageSizeBytes() -> Int {
-        let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
-        return attrs?[.size] as? Int ?? 0
+        lock.withLock { fakeEnabled ? fakePersistedBytes : persistedBytes }
     }
 
     func clearAll() {
-        // While faking, "clear" only drops the fake dataset — the real history is protected.
-        syncOnStore {
+        let action = lock.withLock { () -> (real: [PlayEvent]?, realGeneration: UInt64, fakeGeneration: UInt64) in
             if fakeEnabled {
                 fakeEvents.removeAll()
-                try? FileManager.default.removeItem(at: fakeFileURL)
-            } else {
-                realEvents.removeAll()
-                saveReal()
+                fakeGeneration &+= 1
+                return (nil, realGeneration, fakeGeneration)
             }
-            WidgetSnapshotManager.updateListening(using: fakeEnabled ? fakeEvents : realEvents)
+            realEvents.removeAll()
+            realGeneration &+= 1
+            if !initialLoadFinished { realClearedBeforeInitialLoad = true }
+            return (realEvents, realGeneration, fakeGeneration)
         }
+        if let real = action.real {
+            scheduleRealSave(real, generation: action.realGeneration)
+        } else {
+            scheduleFakeRemoval(generation: action.fakeGeneration)
+        }
+        refreshWidgetInBackground()
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .playEventRecorded, object: nil)
         }
     }
 
     func events(from start: Date, to end: Date) -> [PlayEvent] {
-        syncOnStore {
-            let source = fakeEnabled ? fakeEvents : realEvents
-            return source.filter { $0.timestamp >= start && $0.timestamp <= end }
+        allEvents().filter { $0.timestamp >= start && $0.timestamp <= end }
+    }
+
+    private func scheduleRealSave(_ events: [PlayEvent], generation requestedGeneration: UInt64? = nil) {
+        let generation = requestedGeneration ?? lock.withLock { realGeneration }
+        let persistence = self.persistence
+        Task.detached(priority: .utility) { [weak self, persistence] in
+            guard let result = await persistence.saveReal(events, generation: generation) else { return }
+            guard let self else { return }
+            self.lock.withLock { self.persistedBytes = result.bytes }
+            self.logSlowSave(result, operation: "Stats persistence", count: events.count)
         }
     }
 
-    // MARK: - Persistence
-
-    private func syncOnStore<T>(_ operation: () -> T) -> T {
-        return queue.sync(execute: operation)
+    private func scheduleFakeSave(_ events: [PlayEvent], generation: UInt64) {
+        let persistence = self.persistence
+        Task.detached(priority: .utility) { [weak self, persistence] in
+            guard let result = await persistence.saveFake(events, generation: generation) else { return }
+            guard let self else { return }
+            self.lock.withLock { self.fakePersistedBytes = result.bytes }
+            self.logSlowSave(result, operation: "Fake stats persistence", count: events.count)
+        }
     }
 
-    private func asyncOnStore(_ operation: @escaping () -> Void) {
-        queue.async(execute: operation)
+    private func scheduleFakeRemoval(generation: UInt64) {
+        let persistence = self.persistence
+        Task.detached(priority: .utility) { [weak self, persistence] in
+            guard let result = await persistence.removeFake(generation: generation) else { return }
+            guard let self else { return }
+            self.lock.withLock { self.fakePersistedBytes = 0 }
+            self.logSlowSave(result, operation: "Fake stats removal", count: 0)
+        }
     }
 
-    private func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([PlayEvent].self, from: data) else { return }
-        realEvents = decoded
+    private func refreshWidgetInBackground() {
+        WidgetSnapshotManager.refreshListening()
     }
 
-    private func loadFake() {
-        guard let data = try? Data(contentsOf: fakeFileURL),
-              let decoded = try? JSONDecoder().decode([PlayEvent].self, from: data) else { return }
-        fakeEvents = decoded
-    }
-
-    private func saveReal() {
-        guard let data = try? JSONEncoder().encode(realEvents) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+    private func logSlowSave(_ result: StatsWriteResult, operation: String, count: Int) {
+        guard result.duration >= 0.1 else { return }
+        AppLogger.shared.log(
+            "\(operation) took \(String(format: "%.0f", result.duration * 1_000))ms; events=\(count); bytes=\(result.bytes); success=\(result.succeeded)",
+            category: .library,
+            level: result.succeeded ? .info : .warning
+        )
     }
 }

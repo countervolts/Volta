@@ -81,7 +81,7 @@ struct PlaylistDetailView: View {
         }
         .task(id: "\(appState.currentServer?.id ?? "none")|\(appState.isOfflineMode)") {
             if appState.isOfflineMode || appState.client == nil {
-                vm.loadOffline(serverID: appState.currentServer?.id)
+                await vm.loadOffline(serverID: appState.currentServer?.id)
             } else if let client = appState.client {
                 await vm.load(client: client)
             }

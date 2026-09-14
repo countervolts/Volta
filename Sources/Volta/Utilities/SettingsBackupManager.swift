@@ -85,7 +85,7 @@ struct SettingsBackupPayload: Codable {
 
 enum SettingsBackupManager {
     private static let keys: Set<String> = [
-        "gaplessPlayback", "replayGainMode", "crossfadeDurationSeconds", RatingMode.storageKey,
+        "gaplessPlayback", "gaplessPlaybackMode", "replayGainMode", "crossfadeDurationSeconds", RatingMode.storageKey,
         "enhancedPlaybackCaching", LiveLyricsPreferences.enabledKey, "developerPlaybackCacheMode",
         "automixStyle", "automixMinimumEndLeadSeconds", "autoplayEnabled", "playbackTransitionMode",
         "crossfadeEnabled", "streamingBitrate", "streamingBitrateCell",
@@ -93,7 +93,7 @@ enum SettingsBackupManager {
         "transcodingSettingsMode", "transcodingCellularOnly", "transcodingRulesEnabled", "transcodeFileTypeRules",
         "transcodeRuleDefaultBitrate", "transcodingSettingsMigrationVersion",
         "downloadSpeedLimitKBps", "downloadCapMB", "autoEvictDownloads",
-        "artworkAnimation", "liveArtwork", "stylizedAlbumCover", "showLosslessBadge", "showExplicitBadge",
+        "artworkAnimation", "liveArtwork", "stylizedPlayerCover", "simplePlayerAnimations", "stylizedAlbumCover", "showLosslessBadge", "showExplicitBadge",
         "dynamicBackground", "dynamicBackgroundStyle", "showTrackArtwork", "albumTrackTitleDisplayMode", "accentColorName",
         "customAccentRed", "customAccentGreen", "customAccentBlue",
         "imageLoadMode", "cacheMode", "prefetchArtistImages",

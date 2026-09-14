@@ -341,6 +341,11 @@ actor ArtworkLoader {
                     lowResolutionFallback = image
                 }
             }
+            if url.isFileURL,
+               let data = try? Data(contentsOf: url),
+               let image = await finish(data) {
+                return image
+            }
             guard let (data, response) = try? await session.data(from: url),
                   Self.isImageResponse(response, data: data),
                   let image = await finish(data) else {

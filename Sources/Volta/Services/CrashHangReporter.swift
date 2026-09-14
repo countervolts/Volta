@@ -284,6 +284,15 @@ final class CrashHangReportStore: @unchecked Sendable {
                 startedText
             ]
 
+            let breadcrumbs = AppLogger.shared.recentFormatted(limit: 120)
+            if !breadcrumbs.isEmpty {
+                details += [
+                    "",
+                    "Recent persisted breadcrumbs:",
+                    breadcrumbs
+                ]
+            }
+
             let didWrite = writeReportLocked(
                 kind: .crash,
                 occurredAt: lastHeartbeat,

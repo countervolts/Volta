@@ -159,6 +159,7 @@ struct LoginView: View {
                         serviceCard(option)
                     }
 
+                    localFilesCard
                     autoDiscoveryCard
                 }
 
@@ -220,6 +221,49 @@ struct LoginView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(Theme.accent.opacity(0.24), lineWidth: 0.8)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var localFilesCard: some View {
+        Button {
+            appState.chooseLocalLibrary()
+        } label: {
+            HStack(spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(Color.orange.gradient)
+                        .frame(width: 50, height: 50)
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 23, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .shadow(color: .orange.opacity(0.30), radius: 8, y: 4)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Local Files")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.primaryText)
+                    Text("Choose a folder and play music stored on this device or in Files")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Theme.secondaryText)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+                Image(systemName: Symbols.chevron)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.5))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .glassCard(cornerRadius: 18)
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(.orange.opacity(0.24), lineWidth: 0.8)
             )
         }
         .buttonStyle(.plain)

@@ -26,7 +26,8 @@ final class PlaylistDetailViewModel: ObservableObject {
         }
     }
 
-    func loadOffline(serverID: String?) {
+    func loadOffline(serverID: String?) async {
+        await PlaylistOfflineCache.shared.waitUntilLoaded()
         guard let cached = PlaylistOfflineCache.shared.playlist(id: playlist.id, serverID: serverID) else { return }
         playlist = cached
         songs = cached.entry ?? []

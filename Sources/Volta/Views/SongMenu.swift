@@ -38,6 +38,7 @@ struct SongMenu<Trigger: View>: View {
                 Button(action: toggleDownload) {
                     Label(downloadLabel, systemImage: downloadIcon)
                 }
+                .disabled(appState.isLocalMode)
                 Button {
                     audio.toggleStar(songID: song.id)
                 } label: {
@@ -133,6 +134,7 @@ struct SongMenu<Trigger: View>: View {
     }
 
     private func toggleDownload() {
+        guard !appState.isLocalMode else { return }
         switch dlState {
         case .notDownloaded: DownloadService.shared.download(song: song)
         case .downloaded:    DownloadService.shared.removeDownload(for: song)

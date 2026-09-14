@@ -738,10 +738,12 @@ struct AlbumDetailView: View {
 
 struct DownloadAlbumButton: View {
     let songs: [Song]
+    @EnvironmentObject private var appState: AppState
 
     var body: some View {
         let state = overallState
         Button {
+            guard !appState.isLocalMode else { return }
             for song in songs where DownloadService.shared.state(for: song) == .notDownloaded {
                 DownloadService.shared.download(song: song)
             }
@@ -770,6 +772,8 @@ struct DownloadAlbumButton: View {
             .glassCircle()
         }
         .buttonStyle(.plain)
+        .disabled(appState.isLocalMode)
+        .opacity(appState.isLocalMode ? 0.35 : 1)
     }
 
     private var overallState: DownloadState {

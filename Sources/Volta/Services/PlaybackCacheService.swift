@@ -117,23 +117,134 @@ struct PlaybackCacheDiagnosticsSnapshot {
     }
 }
 
+private struct PlaybackCacheRecord: Codable, Sendable {
+    let key: String
+    let songID: String
+    let title: String
+    let path: String
+    let bytes: Int
+    let createdAt: Date
+    var lastAccessed: Date
+}
+
+private struct PlaybackCachePersistenceResult: Sendable {
+    let succeeded: Bool
+    let bytes: Int
+    let duration: TimeInterval
+}
+
+private struct PlaybackCacheLoadResult: Sendable {
+    let manifest: [String: PlaybackCacheRecord]
+    let bytesOnDisk: Int
+    let duration: TimeInterval
+}
+
+/// Owns manifest encoding, disk I/O, and cache-directory cleanup. The player
+/// remains main-actor isolated for URLSession task bookkeeping, but it never
+/// waits for this actor to touch the filesystem.
+private actor PlaybackCachePersistence {
+    let directory: URL
+    let manifestURL: URL
+
+    init(directory: URL, manifestURL: URL) {
+        self.directory = directory
+        self.manifestURL = manifestURL
+    }
+
+    func load() -> PlaybackCacheLoadResult {
+        let startedAt = Date()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        var manifest: [String: PlaybackCacheRecord] = [:]
+        if let data = try? Data(contentsOf: manifestURL),
+           let decoded = try? JSONDecoder().decode([String: PlaybackCacheRecord].self, from: data) {
+            manifest = decoded
+        }
+
+        let missing = manifest.compactMap { key, record in
+            FileManager.default.fileExists(atPath: record.path) ? nil : key
+        }
+        for key in missing { manifest.removeValue(forKey: key) }
+
+        let known = Set(manifest.values.map(\.path) + [manifestURL.path])
+        if let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for url in entries where !known.contains(url.path) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+
+        if !missing.isEmpty {
+            _ = save(manifest)
+        }
+        return PlaybackCacheLoadResult(
+            manifest: manifest,
+            bytesOnDisk: directorySize(excluding: manifestURL.lastPathComponent),
+            duration: Date().timeIntervalSince(startedAt)
+        )
+    }
+
+    func save(_ manifest: [String: PlaybackCacheRecord]) -> PlaybackCachePersistenceResult {
+        let startedAt = Date()
+        guard let data = try? JSONEncoder().encode(manifest) else {
+            return PlaybackCachePersistenceResult(
+                succeeded: false,
+                bytes: 0,
+                duration: Date().timeIntervalSince(startedAt)
+            )
+        }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: manifestURL, options: .atomic)
+            return PlaybackCachePersistenceResult(
+                succeeded: true,
+                bytes: data.count,
+                duration: Date().timeIntervalSince(startedAt)
+            )
+        } catch {
+            return PlaybackCachePersistenceResult(
+                succeeded: false,
+                bytes: data.count,
+                duration: Date().timeIntervalSince(startedAt)
+            )
+        }
+    }
+
+    func clear() {
+        try? FileManager.default.removeItem(at: directory)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    private func directorySize(excluding excludedName: String) -> Int {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+        return entries
+            .filter { $0.lastPathComponent != excludedName }
+            .reduce(0) { total, url in
+                total + ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            }
+    }
+}
+
 @MainActor
 final class PlaybackCacheService {
     static let shared = PlaybackCacheService()
 
-    private struct Record: Codable {
-        let key: String
-        let songID: String
-        let title: String
-        let path: String
-        let bytes: Int
-        let createdAt: Date
-        var lastAccessed: Date
-    }
-
     private let directory: URL
     private let manifestURL: URL
-    private var manifest: [String: Record] = [:]
+    private let persistence: PlaybackCachePersistence
+    private var manifest: [String: PlaybackCacheRecord] = [:]
+    private var manifestLoadTask: Task<Void, Never>?
+    private var pendingManifestSaveTask: Task<Void, Never>?
+    private var manifestGeneration: UInt64 = 0
+    private var didClearBeforeManifestLoad = false
+    private var bytesOnDisk = 0
     private var activeTasks: [String: URLSessionDownloadTask] = [:]
     private var activeTitles: [String: String] = [:]
     private var transferStartedAt: [String: Date] = [:]
@@ -155,10 +266,41 @@ final class PlaybackCacheService {
 
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        directory = caches.appendingPathComponent("playback-cache", isDirectory: true)
-        manifestURL = directory.appendingPathComponent("manifest.json")
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        loadManifest()
+        let directory = caches.appendingPathComponent("playback-cache", isDirectory: true)
+        let manifestURL = directory.appendingPathComponent("manifest.json")
+        self.directory = directory
+        self.manifestURL = manifestURL
+        let persistence = PlaybackCachePersistence(directory: directory, manifestURL: manifestURL)
+        self.persistence = persistence
+        self.manifestLoadTask = nil
+        self.pendingManifestSaveTask = nil
+        self.manifestLoadTask = Task { @MainActor [weak self, persistence] in
+            let loaded = await persistence.load()
+            guard let self else { return }
+            let hadMutation = self.manifestGeneration != 0
+            if !hadMutation {
+                self.manifest = loaded.manifest
+            } else if !self.didClearBeforeManifestLoad {
+                var merged = loaded.manifest
+                for (key, record) in self.manifest { merged[key] = record }
+                self.manifest = merged
+            }
+            if !self.didClearBeforeManifestLoad {
+                self.bytesOnDisk = loaded.bytesOnDisk
+            }
+            self.manifestLoadTask = nil
+            if loaded.duration >= 0.1 {
+                let duration = String(format: "%.0f", loaded.duration * 1_000)
+                AppLogger.shared.log(
+                    "Playback cache manifest load took \(duration)ms; entries=\(loaded.manifest.count); bytes=\(loaded.bytesOnDisk)",
+                    category: .playback,
+                    level: .warning
+                )
+            }
+            if hadMutation && !self.didClearBeforeManifestLoad {
+                self.saveManifest()
+            }
+        }
     }
 
     func cachedURL(for song: Song, client: any MusicService) -> URL? {
@@ -173,6 +315,7 @@ final class PlaybackCacheService {
         let url = URL(fileURLWithPath: record.path)
         guard FileManager.default.fileExists(atPath: url.path) else {
             manifest.removeValue(forKey: key)
+            bytesOnDisk = max(0, bytesOnDisk - record.bytes)
             saveManifest()
             misses += 1
             recordEvent("Cache miss: file missing for \(song.title)")
@@ -238,14 +381,20 @@ final class PlaybackCacheService {
     func clear() {
         cancelPrefetches()
         manifest.removeAll()
-        try? FileManager.default.removeItem(at: directory)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        bytesOnDisk = 0
+        manifestGeneration &+= 1
+        didClearBeforeManifestLoad = true
+        pendingManifestSaveTask?.cancel()
+        let persistence = self.persistence
+        Task { @MainActor in
+            await persistence.clear()
+        }
         recordEvent("Playback cache cleared")
         AppLogger.shared.log("Playback cache cleared by user", category: .playback)
     }
 
     func totalBytes() -> Int {
-        Self.directorySize(at: directory, excluding: [manifestURL.lastPathComponent])
+        bytesOnDisk
     }
 
     func diagnostics() -> PlaybackCacheDiagnosticsSnapshot {
@@ -425,7 +574,7 @@ final class PlaybackCacheService {
     private func complete(song: Song, key: String, path: String, bytes: Int) {
         let now = Date()
         let elapsed = transferStartedAt.removeValue(forKey: key).map { now.timeIntervalSince($0) }
-        manifest[key] = Record(
+        manifest[key] = PlaybackCacheRecord(
             key: key,
             songID: song.id,
             title: song.title,
@@ -434,6 +583,7 @@ final class PlaybackCacheService {
             createdAt: now,
             lastAccessed: now
         )
+        bytesOnDisk += bytes
         saveManifest()
         enforceLimit(keeping: key)
         completed += 1
@@ -449,6 +599,7 @@ final class PlaybackCacheService {
         guard let record = manifest[key] else { return false }
         if FileManager.default.fileExists(atPath: record.path) { return true }
         manifest.removeValue(forKey: key)
+        bytesOnDisk = max(0, bytesOnDisk - record.bytes)
         saveManifest()
         return false
     }
@@ -456,7 +607,7 @@ final class PlaybackCacheService {
     private func enforceLimit(keeping protectedKey: String?) {
         let maxBytes = PlaybackCacheSettings.maxBytes
         guard maxBytes > 0 else { return }
-        var total = manifest.values.reduce(0) { $0 + Self.fileSize(atPath: $1.path) }
+        var total = bytesOnDisk
         guard total > maxBytes else { return }
 
         let active = Set(activeTasks.keys)
@@ -467,7 +618,7 @@ final class PlaybackCacheService {
         var changed = false
         for record in candidates {
             guard total > maxBytes else { break }
-            let bytes = Self.fileSize(atPath: record.path)
+            let bytes = record.bytes
             try? FileManager.default.removeItem(atPath: record.path)
             manifest.removeValue(forKey: record.key)
             total -= bytes
@@ -476,39 +627,29 @@ final class PlaybackCacheService {
             recordEvent("Playback cache evicted: \(record.title)")
             AppLogger.shared.log("Playback cache evicted: '\(record.title)'", category: .playback)
         }
+        bytesOnDisk = max(0, total)
         if changed { saveManifest() }
-    }
-
-    private func loadManifest() {
-        if let data = try? Data(contentsOf: manifestURL),
-           let decoded = try? JSONDecoder().decode([String: Record].self, from: data) {
-            manifest = decoded
-        }
-
-        let missing = manifest.compactMap { key, record in
-            FileManager.default.fileExists(atPath: record.path) ? nil : key
-        }
-        for key in missing { manifest.removeValue(forKey: key) }
-        let changed = !missing.isEmpty
-        pruneOrphanedFiles()
-        if changed { saveManifest() }
-    }
-
-    private func pruneOrphanedFiles() {
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else { return }
-        let known = Set(manifest.values.map(\.path) + [manifestURL.path])
-        for url in entries where !known.contains(url.path) {
-            try? FileManager.default.removeItem(at: url)
-        }
     }
 
     private func saveManifest() {
-        guard let data = try? JSONEncoder().encode(manifest) else { return }
-        try? data.write(to: manifestURL, options: .atomic)
+        manifestGeneration &+= 1
+        let generation = manifestGeneration
+        let snapshot = manifest
+        pendingManifestSaveTask?.cancel()
+        let persistence = self.persistence
+        pendingManifestSaveTask = Task { @MainActor [weak self, persistence] in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard !Task.isCancelled else { return }
+            let result = await persistence.save(snapshot)
+            guard let self, self.manifestGeneration == generation else { return }
+            if result.duration >= 0.1 {
+                AppLogger.shared.log(
+                    "Playback cache manifest persistence took \(String(format: "%.0f", result.duration * 1_000))ms; entries=\(snapshot.count); bytes=\(result.bytes); success=\(result.succeeded)",
+                    category: .playback,
+                    level: result.succeeded ? .info : .warning
+                )
+            }
+        }
     }
 
     private func recordEvent(_ text: String) {
@@ -593,13 +734,4 @@ final class PlaybackCacheService {
         (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
     }
 
-    private nonisolated static func directorySize(at url: URL, excluding excludedNames: Set<String> = []) -> Int {
-        guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
-        var total = 0
-        for case let file as URL in enumerator {
-            guard !excludedNames.contains(file.lastPathComponent) else { continue }
-            total += fileSize(at: file)
-        }
-        return total
-    }
 }

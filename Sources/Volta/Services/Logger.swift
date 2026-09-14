@@ -1,6 +1,6 @@
 import Foundation
 
-enum LogCategory: String, CaseIterable, Sendable {
+enum LogCategory: String, CaseIterable, Codable, Sendable {
     case networking = "Networking"
     case playback   = "Playback"
     case library    = "Library"
@@ -19,7 +19,7 @@ struct LogEntry: Identifiable, Sendable {
     let level: Level
     let message: String
 
-    enum Level: String, CaseIterable, Sendable { case info, warning, error }
+    enum Level: String, CaseIterable, Codable, Sendable { case info, warning, error }
 
     var formatted: String {
         let t = timestamp.formatted(date: .omitted, time: .standard)
@@ -37,7 +37,31 @@ final class AppLogger: @unchecked Sendable {
 
     private var entries: [LogEntry] = []
     private let lock = NSLock()
+    private let persistenceQueue = DispatchQueue(label: "com.ayo.volta.log-persistence")
     private let maxEntries = 4000
+    private let maxPersistedEntries = 240
+    private let persistenceURL: URL?
+
+    private struct PersistedEntry: Codable, Sendable {
+        let timestamp: Date
+        let category: LogCategory
+        let level: LogEntry.Level
+        let message: String
+    }
+
+    private init() {
+        let applicationSupport = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        persistenceURL = applicationSupport?.appendingPathComponent(
+            "VoltaLogBuffer.json",
+            isDirectory: false
+        )
+        loadPersistedEntries()
+    }
 
     func log(_ message: String, category: LogCategory = .other, level: LogEntry.Level = .info) {
         let verbose = UserDefaults.standard.object(forKey: "developerLogging") as? Bool ?? true
@@ -54,6 +78,17 @@ final class AppLogger: @unchecked Sendable {
         lock.withLock {
             entries.append(entry)
             if entries.count > maxEntries { entries.removeFirst(entries.count - maxEntries) }
+            let persistedEntries = entries.suffix(maxPersistedEntries).map {
+                PersistedEntry(
+                    timestamp: $0.timestamp,
+                    category: $0.category,
+                    level: $0.level,
+                    message: $0.message
+                )
+            }
+            // Queue the snapshot while holding the same lock that orders
+            // in-memory appends, so background writes cannot finish out of order.
+            persist(persistedEntries)
         }
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .logEntryAdded, object: entry)
@@ -111,9 +146,34 @@ final class AppLogger: @unchecked Sendable {
         allEntries().map(\.formatted).joined(separator: "\n")
     }
 
+    func recentFormatted(limit: Int = 120) -> String {
+        lock.withLock {
+            entries.suffix(max(0, limit)).map(\.formatted).joined(separator: "\n")
+        }
+    }
+
     private func notifyEntriesChanged() {
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .logEntriesChanged, object: nil)
+        }
+    }
+
+    private func loadPersistedEntries() {
+        guard let persistenceURL,
+              let data = try? Data(contentsOf: persistenceURL),
+              let persisted = try? JSONDecoder().decode([PersistedEntry].self, from: data) else {
+            return
+        }
+        entries = persisted.map {
+            LogEntry(timestamp: $0.timestamp, category: $0.category, level: $0.level, message: $0.message)
+        }
+    }
+
+    private func persist(_ persistedEntries: [PersistedEntry]) {
+        guard let persistenceURL else { return }
+        persistenceQueue.async {
+            guard let data = try? JSONEncoder().encode(persistedEntries) else { return }
+            try? data.write(to: persistenceURL, options: .atomic)
         }
     }
 }

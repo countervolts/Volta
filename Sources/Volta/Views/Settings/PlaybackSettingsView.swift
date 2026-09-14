@@ -143,19 +143,33 @@ extension SettingsView {
 
         case .gapless:
             return AnyView(
-                Picker(selection: $gaplessPlayback) {
-                    Text("Off").tag("off")
-                    Text("Weak").tag("weak")
-                    Text("On").tag("on")
-                } label: {
-                    Label(L(.settings_gapless), systemImage: "music.note")
-                }
-                .tint(Theme.accent)
-                .onChangeCompat(of: gaplessPlayback) { _, mode in
-                    if mode == "off", audio.transitionMode == .automix {
-                        audio.setTransitionMode(.crossfade)
+                Group {
+                    Picker(selection: $gaplessPlayback) {
+                        Text("Off").tag("off")
+                        Text("On").tag("on")
+                    } label: {
+                        Label(L(.settings_gapless), systemImage: "music.note")
                     }
-                    audio.refreshGaplessPlaybackMode()
+                    .tint(Theme.accent)
+                    .onChangeCompat(of: gaplessPlayback) { _, mode in
+                        if mode == "off", audio.transitionMode == .automix {
+                            audio.setTransitionMode(.crossfade)
+                        }
+                        audio.refreshGaplessPlaybackMode()
+                    }
+
+                    Picker(selection: $gaplessPlaybackMode) {
+                        ForEach(GaplessPlaybackMode.allCases) { mode in
+                            Text(L(mode.localizationKey)).tag(mode.rawValue)
+                        }
+                    } label: {
+                        Label(L(.settings_gapless_mode), systemImage: "slider.horizontal.3")
+                    }
+                    .tint(Theme.accent)
+                    .disabled(gaplessPlayback == "off")
+                    .onChangeCompat(of: gaplessPlaybackMode) { _, _ in
+                        audio.refreshGaplessPlaybackMode()
+                    }
                 }
             )
 
