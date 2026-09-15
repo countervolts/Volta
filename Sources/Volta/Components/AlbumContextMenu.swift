@@ -146,8 +146,7 @@ struct AlbumContextMenu: ViewModifier {
 
     private func share() {
         Task {
-            if let client = appState.client,
-               let url = try? await client.createShare(id: album.id) {
+            if let url = await AppleMusicLinkService.url(for: album) {
                 ShareSheet.present([url])
             } else {
                 ShareSheet.present(["\(album.name) — \(album.displayArtist)"])
@@ -326,12 +325,7 @@ private struct PlaylistContextMenu: ViewModifier {
 
     private func share() {
         Task {
-            if let client = appState.client,
-               let url = try? await client.createShare(id: playlist.id) {
-                ShareSheet.present([url])
-            } else {
-                ShareSheet.present([playlist.name])
-            }
+            ShareSheet.present([AppleMusicLinkService.searchURL(for: playlist) ?? playlist.name])
         }
     }
 }
