@@ -1366,9 +1366,7 @@ struct NowPlayingScreen: View {
     private func shareCurrentSong() {
         guard let song = audio.currentSong else { return }
         Task {
-            if let url = await SongLinkService.pageURL(for: song) {
-                ShareSheet.present([url])
-            }
+            ShareSheet.present([await AppleMusicLinkService.url(for: song) ?? song.title])
         }
     }
 
