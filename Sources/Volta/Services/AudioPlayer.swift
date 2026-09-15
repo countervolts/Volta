@@ -3064,14 +3064,51 @@ final class AudioPlayer: ObservableObject {
         await AutoMixAnalysisService.shared.analysis(for: autoMixAnalysisRequest(for: song))
     }
 
+    func autoMixPreview(
+        current: Song,
+        next: Song
+    ) async -> (
+        outgoing: AutoMixTrackAnalysis,
+        incoming: AutoMixTrackAnalysis,
+        plan: AutoMixTransitionPlan
+    ) {
+        // Keep preview generation as one structured operation. The previous
+        // implementation launched two analyses here and another two inside
+        // autoMixPlan(), which duplicated work and made cancellation tear down
+        // nested async-let tasks while the preview view was disappearing.
+        let outgoing = await autoMixAnalysis(for: current)
+        let incoming = await autoMixAnalysis(for: next)
+        let plan = makeAutoMixPlan(
+            current: current,
+            next: next,
+            outgoing: outgoing,
+            incoming: incoming
+        )
+        return (outgoing, incoming, plan)
+    }
+
     func autoMixPlan(current: Song, next: Song) async -> AutoMixTransitionPlan {
-        async let outgoing = AutoMixAnalysisService.shared.analysis(for: autoMixAnalysisRequest(for: current))
-        async let incoming = AutoMixAnalysisService.shared.analysis(for: autoMixAnalysisRequest(for: next))
-        return autoMixPlanner.plan(
+        let outgoing = await autoMixAnalysis(for: current)
+        let incoming = await autoMixAnalysis(for: next)
+        return makeAutoMixPlan(
+            current: current,
+            next: next,
+            outgoing: outgoing,
+            incoming: incoming
+        )
+    }
+
+    private func makeAutoMixPlan(
+        current: Song,
+        next: Song,
+        outgoing: AutoMixTrackAnalysis,
+        incoming: AutoMixTrackAnalysis
+    ) -> AutoMixTransitionPlan {
+        autoMixPlanner.plan(
             outgoing: autoMixContext(for: current),
             incoming: autoMixContext(for: next),
-            outgoingAnalysis: await outgoing,
-            incomingAnalysis: await incoming,
+            outgoingAnalysis: outgoing,
+            incomingAnalysis: incoming,
             constraints: AutoMixPlaybackConstraints(
                 currentTime: 0,
                 outgoingDuration: Double(current.duration ?? 0),

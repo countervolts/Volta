@@ -308,16 +308,13 @@ final class AutoMixPreviewEngine: ObservableObject {
         }) ?? pool[1]
         songA = first
         songB = second
-        async let firstAnalysis = appState.audioPlayer.autoMixAnalysis(for: first)
-        async let secondAnalysis = appState.audioPlayer.autoMixAnalysis(for: second)
-        async let pairPlan = appState.audioPlayer.autoMixPlan(current: first, next: second)
-        let results = await (firstAnalysis, secondAnalysis, pairPlan)
+        let results = await appState.audioPlayer.autoMixPreview(current: first, next: second)
         guard !Task.isCancelled,
               songA?.id == first.id,
               songB?.id == second.id else { return }
-        analysisA = results.0
-        analysisB = results.1
-        plan = results.2
+        analysisA = results.outgoing
+        analysisB = results.incoming
+        plan = results.plan
     }
 
     func play() {
