@@ -430,6 +430,7 @@ struct StatsShareCustomization: Codable, Hashable {
 struct StatsShareSheet: View {
     @ObservedObject var listening: StatsViewModel
     @ObservedObject var library: LibraryStatsViewModel
+    @ObservedObject private var downloads = DownloadService.shared
 
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
@@ -509,6 +510,11 @@ struct StatsShareSheet: View {
             }
         }
         .preferredColorScheme(Theme.colorScheme)
+        .onChangeCompat(of: downloads.downloadedRevision) { _, _ in
+            if customization.template == .library, library.selectedScope == .local {
+                library.refresh(appState: appState, scope: .local)
+            }
+        }
     }
 
     private var controls: some View {
@@ -805,7 +811,7 @@ struct StatsShareSheet: View {
 
     private func loadLibraryIfNeeded() {
         guard customization.template == .library else { return }
-        library.loadIfNeeded(appState: appState)
+        library.loadIfNeeded(appState: appState, scope: library.selectedScope)
     }
 
     @MainActor

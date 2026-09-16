@@ -97,227 +97,144 @@ struct LibraryStatsData: Hashable {
 
 @MainActor
 final class LibraryStatsViewModel: ObservableObject {
+    enum Scope: String, CaseIterable, Identifiable {
+        case server = "Server"
+        case local = "Local"
+
+        var id: String { rawValue }
+    }
+
     enum Phase: Equatable { case idle, loading, ready, failed }
-    enum GlobalPhase: Equatable { case idle, loading, ready, failed }
 
     @Published private(set) var phase: Phase = .idle
-    @Published private(set) var progress: Double = 0       // 0...1 while scanning
     @Published private(set) var stats: LibraryStatsData?
     @Published private(set) var errorMessage: String?
+    @Published private(set) var progress: Double = 0
     @Published private(set) var isOfflineData = false
-    @Published private(set) var globalPhase: GlobalPhase = .idle
-    @Published private(set) var globalStats: GlobalLibraryStatsData?
-    @Published private(set) var globalErrorMessage: String?
-    @Published private(set) var isGlobalSharingEnabled = GlobalLibraryStatsService.isOptedIn
+    @Published private(set) var selectedScope: Scope = .server
 
-    private static let sharedLibraryKey = "globalLibraryStatsSharedLibraryKey"
-    private static let sharedLibraryNameKey = "globalLibraryStatsSharedLibraryName"
-
-    // Computed snapshots are expensive (a full library walk), so keep the last
-    // result per server alive across tab switches.
-    private static var cache: [String: LibraryStatsData] = [:]
-    private static var cacheOffline: [String: Bool] = [:]
+    private static var serverCache: [String: LibraryStatsData] = [:]
+    private static var serverCacheOffline: [String: Bool] = [:]
+    private static var localCache: LibraryStatsData?
+    private static var localCacheRevision: Int?
 
     private var currentTask: Task<Void, Never>?
-    private var globalTask: Task<Void, Never>?
+    private var activeScope: Scope?
+    private var activeKey: String?
 
-    private func cacheKey(_ appState: AppState) -> String {
+    private func serverCacheKey(_ appState: AppState) -> String {
         if appState.isLocalMode { return LocalMusicService.serverID }
-        return appState.currentServer?.id ?? "downloads"
+        return appState.currentServer?.id ?? "no-server"
     }
 
-    private func sharingName(_ appState: AppState) -> String {
-        appState.currentServer?.displayName ?? "Downloaded Music"
-    }
+    func loadIfNeeded(appState: AppState, scope: Scope? = nil) {
+        let scope = scope ?? selectedScope
+        selectedScope = scope
+        let key = scope == .server ? serverCacheKey(appState) : "local-downloads"
 
-    var sharedLibraryName: String? {
-        UserDefaults.standard.string(forKey: Self.sharedLibraryNameKey)
-    }
-
-    func isSharingCurrentLibrary(appState: AppState) -> Bool {
-        guard isGlobalSharingEnabled,
-              let sharedKey = UserDefaults.standard.string(forKey: Self.sharedLibraryKey) else {
-            return false
+        if activeScope != nil && (activeScope != scope || activeKey != key) {
+            currentTask?.cancel()
+            currentTask = nil
+            self.activeScope = nil
+            activeKey = nil
         }
-        return sharedKey == cacheKey(appState)
-    }
 
-    private func shouldShareLibrary(key: String) -> Bool {
-        isGlobalSharingEnabled && UserDefaults.standard.string(forKey: Self.sharedLibraryKey) == key
-    }
-
-    // Load from cache if we have a snapshot, otherwise scan once.
-    func loadIfNeeded(appState: AppState) {
-        if let cached = Self.cache[cacheKey(appState)] {
+        if scope == .server, let cached = Self.serverCache[key] {
             stats = cached
-            isOfflineData = Self.cacheOffline[cacheKey(appState)] ?? false
+            isOfflineData = Self.serverCacheOffline[key] ?? false
             phase = .ready
             return
         }
-        guard phase != .loading else { return }
-        scan(appState: appState)
+        if scope == .local,
+           let cached = Self.localCache,
+           Self.localCacheRevision == DownloadService.shared.downloadedRevision {
+            stats = cached
+            isOfflineData = true
+            phase = .ready
+            return
+        }
+        guard phase != .loading || activeScope != scope || activeKey != key else { return }
+        scan(appState: appState, scope: scope, key: key)
     }
 
-    func refresh(appState: AppState) {
-        scan(appState: appState)
+    func refresh(appState: AppState, scope: Scope? = nil) {
+        let scope = scope ?? selectedScope
+        selectedScope = scope
+        let key = scope == .server ? serverCacheKey(appState) : "local-downloads"
+        scan(appState: appState, scope: scope, key: key)
     }
 
-    private func scan(appState: AppState) {
+    private func scan(appState: AppState, scope: Scope, key: String) {
         currentTask?.cancel()
         phase = .loading
         progress = 0
         errorMessage = nil
-        let key = cacheKey(appState)
+        stats = nil
+        activeScope = scope
+        activeKey = key
+        let localRevision = DownloadService.shared.downloadedRevision
+        let localSongs = scope == .local ? DownloadService.shared.downloadedSongs() : []
 
         currentTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let result = try await self.buildStats(appState: appState)
+                let result: (data: LibraryStatsData, offline: Bool)
+                switch scope {
+                case .local:
+                    let data = await Task.detached(priority: .utility) {
+                        Self.computeStats(songs: localSongs, albumMeta: [:], source: "Downloaded Music")
+                    }.value
+                    result = (data, true)
+                case .server:
+                    result = try await self.buildServerStats(appState: appState)
+                }
                 if Task.isCancelled { return }
-                Self.cache[key] = result.data
-                Self.cacheOffline[key] = result.offline
+                if scope == .server {
+                    Self.serverCache[key] = result.data
+                    Self.serverCacheOffline[key] = result.offline
+                } else {
+                    Self.localCache = result.data
+                    Self.localCacheRevision = localRevision
+                }
                 self.stats = result.data
                 self.isOfflineData = result.offline
                 self.phase = .ready
+                self.activeScope = nil
+                self.activeKey = nil
                 WidgetSnapshotManager.updateLibrary(with: result.data)
-                if self.shouldShareLibrary(key: key) {
-                    self.syncGlobalStats(uploading: result.data)
-                }
             } catch is CancellationError {
                 // superseded by a newer scan; leave state untouched
             } catch {
                 if Task.isCancelled { return }
                 self.errorMessage = error.localizedDescription
                 self.phase = .failed
+                self.activeScope = nil
+                self.activeKey = nil
             }
         }
     }
 
-    func loadGlobalIfAllowed(appState: AppState) {
-        guard isGlobalSharingEnabled else { return }
-        guard isSharingCurrentLibrary(appState: appState) else {
-            globalPhase = .idle
-            globalErrorMessage = nil
-            return
+    private func buildServerStats(appState: AppState) async throws -> (data: LibraryStatsData, offline: Bool) {
+        if !appState.isLocalMode && (appState.isOfflineMode || NetworkMonitor.shared.connection == .none) {
+            throw NSError(domain: "LibraryStats", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "The server is offline. Switch to Local to view downloaded music."])
         }
-        if globalStats != nil, globalPhase == .ready { return }
-        if let stats {
-            syncGlobalStats(uploading: stats)
-        } else {
-            globalPhase = .loading
-            globalErrorMessage = nil
-            loadIfNeeded(appState: appState)
-        }
-    }
-
-    func refreshGlobal(appState: AppState) {
-        guard isGlobalSharingEnabled else { return }
-        guard isSharingCurrentLibrary(appState: appState) else {
-            globalPhase = .idle
-            globalErrorMessage = nil
-            return
-        }
-        if let stats {
-            syncGlobalStats(uploading: stats)
-        } else {
-            globalPhase = .loading
-            globalErrorMessage = nil
-            refresh(appState: appState)
-        }
-    }
-
-    func enableGlobalSharing(appState: AppState) {
-        guard !isGlobalSharingEnabled else {
-            loadGlobalIfAllowed(appState: appState)
-            return
-        }
-
-        UserDefaults.standard.set(cacheKey(appState), forKey: Self.sharedLibraryKey)
-        UserDefaults.standard.set(sharingName(appState), forKey: Self.sharedLibraryNameKey)
-        isGlobalSharingEnabled = true
-        GlobalLibraryStatsService.setOptedIn(true)
-        refreshGlobal(appState: appState)
-    }
-
-    func disableGlobalSharing() {
-        guard isGlobalSharingEnabled else { return }
-
-        globalPhase = .loading
-        globalErrorMessage = nil
-        globalTask?.cancel()
-
-        globalTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await GlobalLibraryStatsService.deleteSharedStats()
-                if Task.isCancelled { return }
-                self.isGlobalSharingEnabled = false
-                GlobalLibraryStatsService.setOptedIn(false)
-                UserDefaults.standard.removeObject(forKey: Self.sharedLibraryKey)
-                UserDefaults.standard.removeObject(forKey: Self.sharedLibraryNameKey)
-                self.globalStats = nil
-                self.globalPhase = .idle
-            } catch {
-                if Task.isCancelled { return }
-                self.globalErrorMessage = "Could not delete shared stats: \(error.localizedDescription)"
-                self.globalPhase = .failed
-            }
-        }
-    }
-
-    private func syncGlobalStats(uploading stats: LibraryStatsData) {
-        guard isGlobalSharingEnabled else { return }
-
-        globalTask?.cancel()
-        globalPhase = .loading
-        globalErrorMessage = nil
-
-        globalTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let global = try await GlobalLibraryStatsService.submit(stats: stats)
-                if Task.isCancelled { return }
-                self.globalStats = global
-                self.globalPhase = .ready
-            } catch {
-                if Task.isCancelled { return }
-                self.globalErrorMessage = error.localizedDescription
-                self.globalPhase = .failed
-            }
-        }
-    }
-
-    // MARK: - Fetch
-
-    private func buildStats(appState: AppState) async throws -> (data: LibraryStatsData, offline: Bool) {
-        let offline = !appState.isLocalMode && NetworkMonitor.shared.connection == .none
-        // Offline, or no live connection: compute from what's on disk.
-        if offline || appState.client == nil {
-            let songs = DownloadService.shared.downloadedSongs()
-            let data = await Task.detached(priority: .utility) {
-                Self.computeStats(songs: songs, albumMeta: [:], source: "Downloaded Music")
-            }.value
-            return (data, true)
-        }
-
         guard let client = appState.client else {
             throw NSError(domain: "LibraryStats", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "No server connected."])
+                          userInfo: [NSLocalizedDescriptionKey: "No server connected. Switch to Local to view downloaded music."])
         }
 
-        // 1. Page through the album index for the album-level metadata.
         var albumMeta: [Album] = []
         var offset = 0
         while true {
             try Task.checkCancellation()
-            let batch = (try? await client.allAlbums(size: 500, offset: offset)) ?? []
+            let batch = try await client.allAlbums(size: 500, offset: offset)
             albumMeta.append(contentsOf: batch)
             if batch.count < 500 { break }
             offset += 500
             if offset > 50_000 { break }
         }
 
-        // 2. Expand each album into its tracks for the per-song audio detail.
         var allSongs: [Song] = []
         let total = max(1, albumMeta.count)
         var done = 0
@@ -337,7 +254,7 @@ final class LibraryStatsViewModel: ObservableObject {
 
         let source = appState.isLocalMode
             ? "Local Files"
-            : (appState.currentServer?.displayName ?? "Library")
+            : (appState.currentServer?.displayName ?? "Server Library")
         let albumLookup = Dictionary(albumMeta.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let data = await Task.detached(priority: .utility) {
             Self.computeStats(songs: allSongs, albumMeta: albumLookup, source: source)
