@@ -54,27 +54,14 @@ final class PlaylistsViewModel: ObservableObject {
         await PlaylistOfflineCache.shared.waitUntilLoaded()
         let serverID = AppState.shared.currentServer?.id
         let cachedPlaylists = PlaylistOfflineCache.shared.playlists(for: serverID)
-        if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
-            if let loaded = try? await client.playlists() {
-                playlists = loaded
-                PlaylistOfflineCache.shared.cacheList(loaded, serverID: serverID)
-                Task { await PlaylistOfflineCache.shared.cacheAll(loaded, client: client, serverID: serverID) }
-            } else {
-                playlists = cachedPlaylists
-            }
-            await publishSmartSource((try? await client.randomSongs(size: 1000)) ?? [])
+        if let loaded = try? await client.playlists() {
+            playlists = loaded
+            PlaylistOfflineCache.shared.cacheList(loaded, serverID: serverID)
+            Task { await PlaylistOfflineCache.shared.cacheAll(loaded, client: client, serverID: serverID) }
         } else {
-            async let playlistsTask = client.playlists()
-            async let songsTask = client.randomSongs(size: 1000)
-            if let loaded = try? await playlistsTask {
-                playlists = loaded
-                PlaylistOfflineCache.shared.cacheList(loaded, serverID: serverID)
-                Task { await PlaylistOfflineCache.shared.cacheAll(loaded, client: client, serverID: serverID) }
-            } else {
-                playlists = cachedPlaylists
-            }
-            await publishSmartSource((try? await songsTask) ?? [])
+            playlists = cachedPlaylists
         }
+        await publishSmartSource((try? await client.randomSongs(size: 1000)) ?? [])
         hasLoaded = true
         let completeLibrary = await Self.loadSmartPlaylistLibrary(client: client)
         let fallback = smartSourceSongs

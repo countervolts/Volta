@@ -407,19 +407,9 @@ final class LibraryViewModel: ObservableObject {
         let started = ProcessInfo.processInfo.systemUptime
         AppLogger.shared.log("Library load started; backend=\(client.backendKind.displayName)", category: .library)
 
-        let a: [Artist]
-        let al: [Album]
-        let s: [Song]
-        if DeveloperExperiments.constrainedConcurrency(default: 3) == 1 {
-            a = await loadArtists(client: client)
-            al = await loadAlbums(client: client)
-            s = await loadSongs(client: client)
-        } else {
-            async let artistsTask = loadArtists(client: client)
-            async let albumsTask = loadAlbums(client: client)
-            async let songsTask = loadSongs(client: client)
-            (a, al, s) = await (artistsTask, albumsTask, songsTask)
-        }
+        let a = await loadArtists(client: client)
+        let al = await loadAlbums(client: client)
+        let s = await loadSongs(client: client)
         artists = a.sorted { $0.name < $1.name }
         albums = al.sorted { $0.name < $1.name }
         songs = s.sorted { $0.title < $1.title }

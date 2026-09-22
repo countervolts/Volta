@@ -43,17 +43,11 @@ final class ArtworkLibraryDownloader: ObservableObject {
     private func run(client: any MusicService) async {
         let serverID = activeServerID
         let owner = "local-artwork-library:\(serverID ?? "legacy")"
-        let albums: [Album]
-        let artists: [Artist]
-        if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
-            albums = await Self.loadAllAlbums(client: client)
-            artists = (try? await client.artists()) ?? []
-        } else {
-            async let albumsRequest = Self.loadAllAlbums(client: client)
-            async let artistsRequest = client.artists()
-            albums = await albumsRequest
-            artists = (try? await artistsRequest) ?? []
-        }
+        // This is the same request shape as the storage-settings downloader.
+        // Keep it ordered to avoid the `async let` teardown runtime abort seen
+        // in TestFlight crash reports.
+        let albums = await Self.loadAllAlbums(client: client)
+        let artists = (try? await client.artists()) ?? []
         guard !Task.isCancelled else { finish(cancelled: true); return }
 
         let coverAlbums = await DeveloperExperiments.runSync {

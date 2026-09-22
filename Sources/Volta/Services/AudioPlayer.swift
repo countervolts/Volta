@@ -2900,13 +2900,14 @@ final class AudioPlayer: ObservableObject {
         let incomingRequest = autoMixAnalysisRequest(for: next)
         transitionPlanTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            async let outgoingAnalysis = AutoMixAnalysisService.shared.analysis(for: outgoingRequest)
-            async let incomingAnalysis = AutoMixAnalysisService.shared.analysis(for: incomingRequest)
+            let outgoingAnalysis = await AutoMixAnalysisService.shared.analysis(for: outgoingRequest)
+            guard !Task.isCancelled else { return }
+            let incomingAnalysis = await AutoMixAnalysisService.shared.analysis(for: incomingRequest)
             let plan = self.autoMixPlanner.plan(
                 outgoing: outgoing,
                 incoming: incoming,
-                outgoingAnalysis: await outgoingAnalysis,
-                incomingAnalysis: await incomingAnalysis,
+                outgoingAnalysis: outgoingAnalysis,
+                incomingAnalysis: incomingAnalysis,
                 constraints: self.autoMixConstraints(current: current, next: next)
             )
             guard !Task.isCancelled,
@@ -3581,10 +3582,7 @@ final class AudioPlayer: ObservableObject {
 
     private func loadArtwork(for song: Song) async {
         let started = ProcessInfo.processInfo.systemUptime
-        async let staticImage = loadStaticArtwork(for: song)
-        async let liveResult = resolveVisualLiveArtwork(for: song)
-
-        let image = await staticImage
+        let image = await loadStaticArtwork(for: song)
         guard !Task.isCancelled, currentSong?.id == song.id else { return }
         currentArtwork = image
         AppLogger.shared.log(
@@ -3601,7 +3599,7 @@ final class AudioPlayer: ObservableObject {
 
         // Skip the costly live-artwork decode if the track already changed.
         guard !Task.isCancelled else { return }
-        let (live, liveURL) = await liveResult
+        let (live, liveURL) = await resolveVisualLiveArtwork(for: song)
         guard !Task.isCancelled, currentSong?.id == song.id else { return }
         currentLiveArtwork = live
         currentAnimatedArtwork = live?.animatedImage

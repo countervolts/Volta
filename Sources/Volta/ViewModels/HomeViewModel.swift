@@ -63,32 +63,16 @@ final class HomeViewModel: ObservableObject {
         }
         serverUnavailable = false
 
-        if DeveloperExperiments.isAppWorkerLimitEnabled {
-            picks = cachedRandomSectionsAreFresh && !force ? picks : await loadPicks(client: client)
-            mixes = cachedRandomSectionsAreFresh && !force ? mixes : await loadMixes(client: client)
-            recentlyPlayed = await loadRecentlyPlayed(client: client)
-            moreLike = await loadMoreLike(client: client)
-            discover = await loadDiscover(client: client, serverID: serverID, store: appState.store)
-            newReleases = await loadNewReleases(client: client)
-            topArtists = await loadTopArtists(client: client)
-        } else {
-            // A failed section just renders empty.
-            async let picksResult       = cachedRandomSectionsAreFresh && !force ? picks : loadPicks(client: client)
-            async let mixesResult       = cachedRandomSectionsAreFresh && !force ? mixes : loadMixes(client: client)
-            async let recentResult      = loadRecentlyPlayed(client: client)
-            async let moreLikeResult    = loadMoreLike(client: client)
-            async let discoverResult    = loadDiscover(client: client, serverID: serverID, store: appState.store)
-            async let newReleasesResult = loadNewReleases(client: client)
-            async let artistsResult     = loadTopArtists(client: client)
-
-            picks         = await picksResult
-            mixes         = await mixesResult
-            recentlyPlayed = await recentResult
-            moreLike      = await moreLikeResult
-            discover      = await discoverResult
-            newReleases   = await newReleasesResult
-            topArtists    = await artistsResult
-        }
+        // These results are large and many requests can fail independently.
+        // Avoid sibling `async let` values: their release-build teardown has
+        // caused Swift concurrency runtime aborts while Home is loading.
+        picks = cachedRandomSectionsAreFresh && !force ? picks : await loadPicks(client: client)
+        mixes = cachedRandomSectionsAreFresh && !force ? mixes : await loadMixes(client: client)
+        recentlyPlayed = await loadRecentlyPlayed(client: client)
+        moreLike = await loadMoreLike(client: client)
+        discover = await loadDiscover(client: client, serverID: serverID, store: appState.store)
+        newReleases = await loadNewReleases(client: client)
+        topArtists = await loadTopArtists(client: client)
 
         loadedServerID = serverID
         hasLoaded = true
@@ -304,17 +288,8 @@ final class HomeViewModel: ObservableObject {
     // MARK: recently played (albums + playlists merged by recency)
 
     private func loadRecentlyPlayed(client: any MusicService) async -> [MediaItem] {
-        let recentAlbums: [Album]
-        let allPlaylists: [Playlist]
-        if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
-            recentAlbums = await fetchRecentAlbums(client: client)
-            allPlaylists = await fetchPlaylists(client: client)
-        } else {
-            async let albumsTask = fetchRecentAlbums(client: client)
-            async let playlistsTask = fetchPlaylists(client: client)
-            recentAlbums = await albumsTask
-            allPlaylists = await playlistsTask
-        }
+        let recentAlbums = await fetchRecentAlbums(client: client)
+        let allPlaylists = await fetchPlaylists(client: client)
 
         // Albums are already recency-ordered; synthesize timestamps for merge sort.
         let now = Date()

@@ -757,14 +757,8 @@ private struct GenreHomeView: View {
         .navigationBarTitleDisplayMode(.large)
         .preferredColorScheme(Theme.colorScheme)
         .task(id: "\(genreName)-\(hiddenAlbums.revision)") {
-            if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
-                await loadGenreData()
-                await loadGenreMix()
-            } else {
-                async let data: Void = loadGenreData()
-                async let mix: Void = loadGenreMix()
-                _ = await (data, mix)
-            }
+            await loadGenreData()
+            await loadGenreMix()
         }
     }
 

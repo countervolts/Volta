@@ -231,26 +231,11 @@ final class SearchViewModel: ObservableObject {
         let normalized = q.normalizedForSearch()
         let useBoth = normalized != q.lowercased() && !normalized.isEmpty
 
-        let res1: (artists: [Artist], albums: [Album], songs: [Song])?
-        let res2: (artists: [Artist], albums: [Album], songs: [Song])?
-        let albumSample: [Album]
-        if DeveloperExperiments.isAppWorkerLimitEnabled {
-            res1 = try? await client.search(query: q, artistCount: 10, albumCount: 10, songCount: 20)
-            res2 = useBoth
-                ? (try? await client.search(query: normalized, artistCount: 10, albumCount: 10, songCount: 20))
-                : nil
-            albumSample = (try? await client.allAlbums(size: 500)) ?? []
-        } else {
-            async let r1 = client.search(query: q, artistCount: 10, albumCount: 10, songCount: 20)
-            async let r2 = useBoth
-                ? client.search(query: normalized, artistCount: 10, albumCount: 10, songCount: 20)
-                : nil
-            async let genreAlbums = client.allAlbums(size: 500)
-
-            res1 = (try? await r1)
-            res2 = (try? await r2)
-            albumSample = (try? await genreAlbums) ?? []
-        }
+        let res1 = try? await client.search(query: q, artistCount: 10, albumCount: 10, songCount: 20)
+        let res2 = useBoth
+            ? (try? await client.search(query: normalized, artistCount: 10, albumCount: 10, songCount: 20))
+            : nil
+        let albumSample = (try? await client.allAlbums(size: 500)) ?? []
         guard query == q else { return }
 
         // A nil primary result means the search call threw — the server is

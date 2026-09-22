@@ -184,4 +184,32 @@ enum ColorExtractor {
         }
         return colors.map(Color.init)
     }
+
+    /// Soft vertical feather for detail-page backdrops.
+    ///
+    /// The first stop is exactly `backgroundVariant(of:)`, so it can be placed
+    /// immediately below a hero that fades to that same colour and the two meet
+    /// without a seam. Only the later stops deepen the tint, keeping the area
+    /// right under the header identical to the header's own bottom edge.
+    static func featheredBackgroundColors(for color: UIColor) -> [Color] {
+        let base = backgroundVariant(of: color)
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        base.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+
+        // Halfway down the page the tint has deepened only slightly; the full
+        // drop happens near the floor so the transition stays gentle.
+        let middle = UIColor(
+            hue: h,
+            saturation: min(s * 1.02, 1),
+            brightness: max(b * 0.86, 0.04),
+            alpha: 1
+        )
+        let floor = UIColor(
+            hue: h,
+            saturation: min(s * 0.88, 1),
+            brightness: max(b * 0.45, 0.02),
+            alpha: 1
+        )
+        return [Color(base), Color(middle), Color(floor)]
+    }
 }

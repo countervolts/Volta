@@ -519,17 +519,10 @@ extension SettingsView {
                 refreshCacheSize()
             }
 
-            let albums: [Album]
-            let artists: [Artist]
-            if DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
-                albums = await loadAllAlbumsForArtwork(client: client)
-                artists = (try? await client.artists()) ?? []
-            } else {
-                async let albumsRequest = loadAllAlbumsForArtwork(client: client)
-                async let artistsRequest = client.artists()
-                albums = await albumsRequest
-                artists = (try? await artistsRequest) ?? []
-            }
+            // Avoid sibling `async let` values here. Their optimized teardown has
+            // caused a Swift concurrency runtime abort in this download flow.
+            let albums = await loadAllAlbumsForArtwork(client: client)
+            let artists = (try? await client.artists()) ?? []
             let serverID = appState.currentServer?.id
             let owner = "local-artwork-library:\(serverID ?? "legacy")"
             let coverIDs = Array(Set(albums.compactMap(\.coverArt))).sorted()
