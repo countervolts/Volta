@@ -179,6 +179,7 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case track_titles_sliding
     case track_titles_new_line
     case appearance_dynamic_background
+    case appearance_animated_background
     case appearance_dynamic_background_style
     case player_background_style_color
     case player_background_style_gradient
@@ -1704,6 +1705,7 @@ enum Strings {
             .danish: "Dynamisk afspillerbaggrund", .finnish: "Dynaaminen soittimen tausta", .chinese: "动态播放器背景",
             .japanese: "ダイナミックなプレーヤー背景", .korean: "동적 플레이어 배경",
         ],
+        .appearance_animated_background: en("Animated Background"),
         .appearance_dynamic_background_style: en("Background Style"),
         .player_background_style_color: en("Color"),
         .player_background_style_gradient: en("Gradient"),

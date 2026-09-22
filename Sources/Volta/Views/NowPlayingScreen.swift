@@ -70,6 +70,7 @@ struct NowPlayingScreen: View {
     @AppStorage(DeveloperExperiments.preciseTimestampsKey) private var preciseTimestamps = false
     @AppStorage("artworkAnimation") private var artworkAnimation = true
     @AppStorage("dynamicBackground") private var dynamicBackground = true
+    @AppStorage("animatedPlayerBackground") private var animatedPlayerBackground = false
     @AppStorage(PlayerDynamicBackgroundStyle.storageKey) private var dynamicBackgroundStyle = PlayerDynamicBackgroundStyle.defaultStyle
     // present a normal (static) cover with the same edge-to-edge, gradient-fade
     // look animated covers get
@@ -161,14 +162,39 @@ struct NowPlayingScreen: View {
     private var playerBackgroundFadeColor: Color {
         normalizedPlayerBackgroundColors.last ?? Color(white: 0.08)
     }
+    private var playerBackgroundArtwork: UIImage? {
+        audio.currentLiveArtwork?.animatedImage ?? audio.currentArtwork
+    }
+    private var playerBackgroundArtworkID: String? {
+        guard let songID = audio.currentSong?.id else { return nil }
+        if let liveID = audio.currentLiveArtwork?.artworkID {
+            return "\(songID)|live|\(liveID)"
+        }
+        return "\(songID)|static|\(audio.currentArtwork == nil ? "pending" : "ready")"
+    }
     private var usesGradientPlayerBackground: Bool {
         dynamicBackground
             && !PerformanceMode.disableDynamicBackground
             && selectedPlayerBackgroundStyle == .gradient
     }
+    private var usesAnimatedPlayerBackground: Bool {
+        animatedPlayerBackground
+            && dynamicBackground
+            && !PerformanceMode.disableDynamicBackground
+            && playerBackgroundArtwork != nil
+    }
+    private var usesDynamicPlayerBackground: Bool {
+        usesGradientPlayerBackground || usesAnimatedPlayerBackground
+    }
     @ViewBuilder
     private var playerBackgroundSurface: some View {
-        if usesGradientPlayerBackground {
+        if usesAnimatedPlayerBackground {
+            AnimatedPlayerBackground(
+                artwork: playerBackgroundArtwork,
+                artworkID: playerBackgroundArtworkID,
+                fallbackColor: playerBackgroundFadeColor
+            )
+        } else if usesGradientPlayerBackground {
             playerBackgroundGradient
         } else {
             // Preserve the original 1.3.1 solid-color rendering path when the
@@ -362,6 +388,9 @@ struct NowPlayingScreen: View {
         .onChangeCompat(of: dynamicBackgroundStyle) { _, _ in
             refreshPlayerBackground(animated: true)
         }
+        .onChangeCompat(of: animatedPlayerBackground) { _, _ in
+            refreshPlayerBackground(animated: true)
+        }
         .onChangeCompat(of: activeTab) { _, tab in
             if tab != .queue {
                 showQueueHistory = false
@@ -436,7 +465,7 @@ struct NowPlayingScreen: View {
                     // Solid mode retains the exact 1.3.1 lower surface. In
                     // gradient mode, keep it transparent so the same gradient
                     // continues through the controls without a color seam.
-                    .background(usesGradientPlayerBackground ? Color.clear : playerBackgroundFadeColor)
+                    .background(usesDynamicPlayerBackground ? Color.clear : playerBackgroundFadeColor)
                     .zIndex(5)
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
@@ -572,7 +601,7 @@ struct NowPlayingScreen: View {
                         .transition(trackChangeTransition)
                         .animation(trackChangeAnimation, value: audio.currentSong?.id)
 
-                    if prefersFullBleedCover && !usesGradientPlayerBackground {
+                    if prefersFullBleedCover && !usesDynamicPlayerBackground {
                         LinearGradient(
                             stops: [
                                 .init(color: .clear, location: 0),
@@ -720,7 +749,7 @@ struct NowPlayingScreen: View {
                 .transition(trackChangeTransition)
                 .animation(trackChangeAnimation, value: audio.currentSong?.id)
 
-            if prefersFullBleedCover && !usesGradientPlayerBackground {
+            if prefersFullBleedCover && !usesDynamicPlayerBackground {
                 LinearGradient(
                     stops: [
                         .init(color: .clear, location: 0),
@@ -779,7 +808,7 @@ struct NowPlayingScreen: View {
         width: CGFloat,
         progress: CGFloat
     ) -> some View {
-        if prefersFullBleedCover && usesGradientPlayerBackground {
+        if prefersFullBleedCover && usesDynamicPlayerBackground {
             let fadeHeight = width * 0.30
             let fadeStart = sourceHeight > 0
                 ? max(0, min(1, (sourceHeight - fadeHeight) / sourceHeight))

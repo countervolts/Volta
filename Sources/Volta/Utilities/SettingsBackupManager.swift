@@ -94,7 +94,7 @@ enum SettingsBackupManager {
         "transcodeRuleDefaultBitrate", "transcodingSettingsMigrationVersion",
         "downloadSpeedLimitKBps", "downloadCapMB", "autoEvictDownloads",
         "artworkAnimation", "liveArtwork", "stylizedPlayerCover", "simplePlayerAnimations", "stylizedAlbumCover", "showLosslessBadge", "showExplicitBadge",
-        "dynamicBackground", "dynamicBackgroundStyle", "showTrackArtwork", "albumTrackTitleDisplayMode", "accentColorName",
+        "dynamicBackground", "animatedPlayerBackground", "dynamicBackgroundStyle", "showTrackArtwork", "albumTrackTitleDisplayMode", "accentColorName",
         "customAccentRed", "customAccentGreen", "customAccentBlue",
         "imageLoadMode", "cacheMode", "prefetchArtistImages",
         "localArtworkLibraryDownloaded", "albumSortOrder",
