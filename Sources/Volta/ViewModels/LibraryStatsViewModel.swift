@@ -89,19 +89,25 @@ struct LibraryStatsData: Hashable {
     var sizePerTrack: Int { totalSongs > 0 ? totalSize / totalSongs : 0 }
     var hoursTotal: Int { totalSeconds / 3600 }
     var commonResolution: String {
-        let depth = bitDepths.first?.label ?? "Unknown"
-        let rate = sampleRates.first?.label ?? "Unknown"
-        return "\(depth) · \(rate)"
+        let parts = [bitDepths.first?.label, sampleRates.first?.label].compactMap { $0 }
+        return parts.isEmpty ? "Unavailable" : parts.joined(separator: " · ")
     }
 }
 
 @MainActor
 final class LibraryStatsViewModel: ObservableObject {
     enum Scope: String, CaseIterable, Identifiable {
-        case server = "Server"
-        case local = "Local"
+        case library
+        case downloads
 
         var id: String { rawValue }
+
+        func label(isLocalLibrary: Bool) -> String {
+            switch self {
+            case .library: return isLocalLibrary ? "Local Files" : "Server"
+            case .downloads: return "Downloads"
+            }
+        }
     }
 
     enum Phase: Equatable { case idle, loading, ready, failed }
@@ -111,26 +117,26 @@ final class LibraryStatsViewModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var progress: Double = 0
     @Published private(set) var isOfflineData = false
-    @Published private(set) var selectedScope: Scope = .server
+    @Published private(set) var selectedScope: Scope = .library
 
     private static var serverCache: [String: LibraryStatsData] = [:]
     private static var serverCacheOffline: [String: Bool] = [:]
-    private static var localCache: LibraryStatsData?
-    private static var localCacheRevision: Int?
+    private static var downloadsCache: LibraryStatsData?
+    private static var downloadsCacheRevision: Int?
 
     private var currentTask: Task<Void, Never>?
     private var activeScope: Scope?
     private var activeKey: String?
 
     private func serverCacheKey(_ appState: AppState) -> String {
-        if appState.isLocalMode { return LocalMusicService.serverID }
+        if let local = appState.client as? LocalMusicService { return local.persistenceID }
         return appState.currentServer?.id ?? "no-server"
     }
 
     func loadIfNeeded(appState: AppState, scope: Scope? = nil) {
         let scope = scope ?? selectedScope
         selectedScope = scope
-        let key = scope == .server ? serverCacheKey(appState) : "local-downloads"
+        let key = scope == .library ? serverCacheKey(appState) : "device-downloads"
 
         if activeScope != nil && (activeScope != scope || activeKey != key) {
             currentTask?.cancel()
@@ -139,15 +145,15 @@ final class LibraryStatsViewModel: ObservableObject {
             activeKey = nil
         }
 
-        if scope == .server, let cached = Self.serverCache[key] {
+        if scope == .library, let cached = Self.serverCache[key] {
             stats = cached
             isOfflineData = Self.serverCacheOffline[key] ?? false
             phase = .ready
             return
         }
-        if scope == .local,
-           let cached = Self.localCache,
-           Self.localCacheRevision == DownloadService.shared.downloadedRevision {
+        if scope == .downloads,
+           let cached = Self.downloadsCache,
+           Self.downloadsCacheRevision == DownloadService.shared.downloadedRevision {
             stats = cached
             isOfflineData = true
             phase = .ready
@@ -160,7 +166,7 @@ final class LibraryStatsViewModel: ObservableObject {
     func refresh(appState: AppState, scope: Scope? = nil) {
         let scope = scope ?? selectedScope
         selectedScope = scope
-        let key = scope == .server ? serverCacheKey(appState) : "local-downloads"
+        let key = scope == .library ? serverCacheKey(appState) : "device-downloads"
         scan(appState: appState, scope: scope, key: key)
     }
 
@@ -173,28 +179,28 @@ final class LibraryStatsViewModel: ObservableObject {
         activeScope = scope
         activeKey = key
         let localRevision = DownloadService.shared.downloadedRevision
-        let localSongs = scope == .local ? DownloadService.shared.downloadedSongs() : []
+        let localSongs = scope == .downloads ? DownloadService.shared.downloadedSongs() : []
 
         currentTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let result: (data: LibraryStatsData, offline: Bool)
                 switch scope {
-                case .local:
+                case .downloads:
                     let data = await Task.detached(priority: .utility) {
-                        Self.computeStats(songs: localSongs, albumMeta: [:], source: "Downloaded Music")
+                        Self.computeStats(songs: localSongs, albumMeta: [:], source: "Device Downloads")
                     }.value
                     result = (data, true)
-                case .server:
+                case .library:
                     result = try await self.buildServerStats(appState: appState)
                 }
                 if Task.isCancelled { return }
-                if scope == .server {
+                if scope == .library {
                     Self.serverCache[key] = result.data
                     Self.serverCacheOffline[key] = result.offline
                 } else {
-                    Self.localCache = result.data
-                    Self.localCacheRevision = localRevision
+                    Self.downloadsCache = result.data
+                    Self.downloadsCacheRevision = localRevision
                 }
                 self.stats = result.data
                 self.isOfflineData = result.offline
@@ -217,11 +223,11 @@ final class LibraryStatsViewModel: ObservableObject {
     private func buildServerStats(appState: AppState) async throws -> (data: LibraryStatsData, offline: Bool) {
         if !appState.isLocalMode && (appState.isOfflineMode || NetworkMonitor.shared.connection == .none) {
             throw NSError(domain: "LibraryStats", code: 2,
-                          userInfo: [NSLocalizedDescriptionKey: "The server is offline. Switch to Local to view downloaded music."])
+                          userInfo: [NSLocalizedDescriptionKey: "The server is offline. Switch to Downloads to view music downloaded to this device."])
         }
         guard let client = appState.client else {
             throw NSError(domain: "LibraryStats", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "No server connected. Switch to Local to view downloaded music."])
+                          userInfo: [NSLocalizedDescriptionKey: "No server connected. Switch to Downloads to view music downloaded to this device."])
         }
 
         var albumMeta: [Album] = []

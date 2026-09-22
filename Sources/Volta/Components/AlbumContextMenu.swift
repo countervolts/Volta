@@ -149,7 +149,7 @@ struct AlbumContextMenu: ViewModifier {
             if let url = await AppleMusicLinkService.url(for: album) {
                 ShareSheet.present([url])
             } else {
-                ShareSheet.present(["\(album.name) — \(album.displayArtist)"])
+                ShareSheet.present([AppleMusicLinkService.fallbackShareText(for: album)])
             }
         }
     }
@@ -325,7 +325,13 @@ private struct PlaylistContextMenu: ViewModifier {
 
     private func share() {
         Task {
-            ShareSheet.present([AppleMusicLinkService.searchURL(for: playlist) ?? playlist.name])
+            if let url = try? await appState.client?.createShare(id: playlist.id) {
+                ShareSheet.present([url])
+            } else {
+                // A catalog search cannot represent the user's private server
+                // or Local Files playlist. Share truthful descriptive text.
+                ShareSheet.present(["Playlist: \(playlist.name)"])
+            }
         }
     }
 }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum HomeRoute: Hashable {
-    case album(Album)
+    case album(Album, heroSourceID: String)
     case playlist(Playlist)
     case artist(Artist)
     case mix(MusicMix)
@@ -62,9 +62,9 @@ struct HomeView: View {
     @ViewBuilder
     private func destination(for route: HomeRoute) -> some View {
         switch route {
-        case .album(let album):
+        case .album(let album, let heroSourceID):
             AlbumDetailView(album: album)
-                .zoomNavigationTransition(sourceID: album.id, in: heroNamespace)
+                .zoomNavigationTransition(sourceID: heroSourceID, in: heroNamespace)
         case .playlist(let pl):
             PlaylistDetailView(playlist: pl)
                 .zoomNavigationTransition(sourceID: pl.id, in: heroNamespace)
@@ -80,10 +80,12 @@ struct HomeView: View {
         }
     }
 
-    private func navigate(to item: MediaItem) {
+    private func navigate(to item: MediaItem, heroSourceID: String? = nil) {
         switch item.kind {
         case .album:
-            if let album = item.albumRef { path.append(HomeRoute.album(album)) }
+            if let album = item.albumRef {
+                path.append(HomeRoute.album(album, heroSourceID: heroSourceID ?? item.id))
+            }
         case .playlist:
             if let pl = item.playlistRef { path.append(HomeRoute.playlist(pl)) }
         }
@@ -414,7 +416,10 @@ struct HomeView: View {
             if !data.picksFeed.isEmpty {
                 section(title: L(.home_picks_for_you)) {
                     HorizontalPickRow(items: data.picksFeed,
-                        onSelectAlbum: { path.append(HomeRoute.album($0)) },
+                        heroSourceID: { item, index in "home-picks-\(index)-\(item.id)" },
+                        onSelectAlbum: { album, sourceID in
+                            path.append(HomeRoute.album(album, heroSourceID: sourceID))
+                        },
                         onSelectMix: { path.append(HomeRoute.mix($0)) },
                         onSaveMix: { saveMixAsPlaylist($0) },
                         isSavingMix: { savingMixIDs.contains($0.id) })
@@ -427,8 +432,11 @@ struct HomeView: View {
                         path.append(HomeRoute.mediaGrid(title: L(.home_recently_played), items: data.recentlyPlayed))
                     }
                     .padding(.horizontal, pad)
-                    HorizontalMediaRow(items: data.recentlyPlayed) { item in
-                        navigate(to: item)
+                    HorizontalMediaRow(
+                        items: data.recentlyPlayed,
+                        heroSourceID: { item, index in "home-recently-played-\(index)-\(item.id)" }
+                    ) { item, sourceID in
+                        navigate(to: item, heroSourceID: sourceID)
                     }
                 }
             }
@@ -443,16 +451,26 @@ struct HomeView: View {
         case .moreLike:
             ForEach(data.moreLike) { item in
                 section(title: L(.home_more_like, item.artistName)) {
-                    HorizontalMediaRow(items: item.albums.map(MediaItem.init(album:))) { mediaItem in
-                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+                    HorizontalMediaRow(
+                        items: item.albums.map(MediaItem.init(album:)),
+                        heroSourceID: { mediaItem, index in "home-more-like-\(item.id)-\(index)-\(mediaItem.id)" }
+                    ) { mediaItem, sourceID in
+                        if let album = mediaItem.albumRef {
+                            path.append(HomeRoute.album(album, heroSourceID: sourceID))
+                        }
                     }
                 }
             }
         case .discover:
             if !data.discover.isEmpty {
                 section(title: L(.home_discover)) {
-                    HorizontalMediaRow(items: data.discover.map(MediaItem.init(album:))) { mediaItem in
-                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+                    HorizontalMediaRow(
+                        items: data.discover.map(MediaItem.init(album:)),
+                        heroSourceID: { mediaItem, index in "home-discover-\(index)-\(mediaItem.id)" }
+                    ) { mediaItem, sourceID in
+                        if let album = mediaItem.albumRef {
+                            path.append(HomeRoute.album(album, heroSourceID: sourceID))
+                        }
                     }
                 }
             }
@@ -460,8 +478,13 @@ struct HomeView: View {
             if !data.newReleases.isEmpty {
                 let items = data.newReleases.map(MediaItem.init(album:))
                 section(title: L(.home_recently_added), seeAll: { path.append(HomeRoute.mediaGrid(title: L(.home_recently_added), items: items)) }) {
-                    HorizontalMediaRow(items: items) { mediaItem in
-                        if let album = mediaItem.albumRef { path.append(HomeRoute.album(album)) }
+                    HorizontalMediaRow(
+                        items: items,
+                        heroSourceID: { mediaItem, index in "home-recently-added-\(index)-\(mediaItem.id)" }
+                    ) { mediaItem, sourceID in
+                        if let album = mediaItem.albumRef {
+                            path.append(HomeRoute.album(album, heroSourceID: sourceID))
+                        }
                     }
                 }
             }

@@ -23,7 +23,7 @@ struct AnimatedPlayerBackground: View {
 
     private static let renderInterval = 1.0 / 15.0
     private static let artworkFadeDuration = 1.7
-    private static let reducedMotionScale = 0.2
+    private static let reducedMotionScale = 0.0
     private static let blurRadius: CGFloat = 104
 
     init(artwork: UIImage?, artworkID: String?, fallbackColor: Color) {
@@ -44,7 +44,10 @@ struct AnimatedPlayerBackground: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: Self.renderInterval)) { context in
+        TimelineView(.periodic(
+            from: .now,
+            by: reducesMotion ? 1 : Self.renderInterval
+        )) { context in
             GeometryReader { geometry in
                 let size = geometry.size
                 let elapsed = max(0, context.date.timeIntervalSince(startedAt)) * motionScale
@@ -217,13 +220,14 @@ struct AnimatedPlayerBackground: View {
 
     @ViewBuilder
     private func artworkImage(_ image: UIImage) -> some View {
-        if image.images?.count ?? 0 > 1 {
-            AnimatedImageView(image: image)
-        } else {
-            Image(uiImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-        }
+        // This scene uses up to six copies of each image (and another six
+        // while crossfading). Animating GIF/WebP frames in every copy multiplies
+        // decoding and GPU work, so the ambient background intentionally uses
+        // UIImage's poster frame while live artwork remains available in its
+        // dedicated foreground surface.
+        Image(uiImage: image)
+            .resizable()
+            .aspectRatio(contentMode: .fill)
     }
 
     private func degrees(_ elapsed: TimeInterval, period: TimeInterval, direction: Double) -> Double {

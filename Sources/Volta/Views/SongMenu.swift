@@ -127,7 +127,7 @@ struct SongMenu<Trigger: View>: View {
 
     private func shareSong() {
         Task {
-            ShareSheet.present([await AppleMusicLinkService.url(for: song) ?? song.title])
+            ShareSheet.present([await AppleMusicLinkService.url(for: song) ?? AppleMusicLinkService.fallbackShareText(for: song)])
         }
     }
 

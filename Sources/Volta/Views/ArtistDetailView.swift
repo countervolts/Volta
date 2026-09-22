@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import UIKit
 
 struct ArtistDetailView: View {
     @EnvironmentObject private var appState: AppState
@@ -16,6 +17,10 @@ struct ArtistDetailView: View {
     /// Window-level (not view-level) top inset, so the floating buttons sit in
     /// the same place no matter which screen pushed this profile.
     @State private var windowTopInset: CGFloat?
+    /// The hosting navigation controller is captured by `SwipeBackEnabler`.
+    /// `dismiss` is unreliable for this full-screen custom navigation chrome,
+    /// while a direct pop always removes the pushed artist profile.
+    @State private var navigationController: UINavigationController?
 #if os(iOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 #endif
@@ -63,6 +68,19 @@ struct ArtistDetailView: View {
                 )
             }
             .ignoresSafeArea(edges: .top)
+            // Keep navigation controls outside the full-screen hero/scroll
+            // composition. On iOS 26 the interactive glass and scroll layers
+            // can otherwise win hit testing even though the button is visible.
+            .overlay(alignment: .top) {
+                // An overlay is normally laid out *below* its parent's safe
+                // area. Let it extend to the physical top before applying the
+                // window inset inside `artistNavOverlay`, otherwise that inset
+                // gets counted twice and the controls drift downward.
+                artistNavOverlay(topInset: windowTopInset ?? 0)
+                    .ignoresSafeArea(edges: .top)
+                    .zIndex(100)
+                    .allowsHitTesting(true)
+            }
         }
         .background(
             WindowTopInsetReader { value in
@@ -76,7 +94,13 @@ struct ArtistDetailView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .preferredColorScheme(Theme.colorScheme)
-        .background(SwipeBackEnabler())
+        .background(
+            SwipeBackEnabler(onNavigationControllerResolved: { controller in
+                if navigationController !== controller {
+                    navigationController = controller
+                }
+            })
+        )
         .onAppear {
             if !RuntimeCompatibility.isIOS16 {
                 scrollState.start()
@@ -177,7 +201,6 @@ struct ArtistDetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            artistNavOverlay(topInset: topInset)
         }
         // Anchored to the container's bottom edge (just above the mini player,
         // which already removes its own height from the safe area).
@@ -225,10 +248,12 @@ struct ArtistDetailView: View {
                     Image(systemName: Symbols.back)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .glassCircle()
                 }
                 .buttonStyle(.plain)
+                .contentShape(Rectangle())
                 .accessibilityLabel(L(.action_done))
 
                 Spacer(minLength: 0)
@@ -248,7 +273,7 @@ struct ArtistDetailView: View {
                     Image(systemName: Symbols.more)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
+                        .frame(width: 44, height: 44)
                         .glassCircle()
                 }
                 .buttonStyle(.plain)
@@ -262,7 +287,14 @@ struct ArtistDetailView: View {
     }
 
     private func dismissArtist() {
-        dismiss()
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        if let navigationController, navigationController.viewControllers.count > 1 {
+            navigationController.popViewController(animated: true)
+        } else {
+            // Artist profiles can also be presented in a one-controller modal
+            // navigation stack; use SwiftUI's presentation dismissal there.
+            dismiss()
+        }
     }
 
     private func addAllToQueue() {

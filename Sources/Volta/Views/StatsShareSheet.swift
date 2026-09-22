@@ -511,8 +511,8 @@ struct StatsShareSheet: View {
         }
         .preferredColorScheme(Theme.colorScheme)
         .onChangeCompat(of: downloads.downloadedRevision) { _, _ in
-            if customization.template == .library, library.selectedScope == .local {
-                library.refresh(appState: appState, scope: .local)
+            if customization.template == .library, library.selectedScope == .downloads {
+                library.refresh(appState: appState, scope: .downloads)
             }
         }
     }

@@ -5,11 +5,16 @@ import UIKit
 struct SwipeBackEnabler: UIViewControllerRepresentable {
     var onNavigationWillAppear: (() -> Void)? = nil
     var onNavigationWillDisappear: (() -> Void)? = nil
+    /// Exposes the exact controller that owns this SwiftUI destination so a
+    /// custom back control can pop it without relying on SwiftUI's dismiss
+    /// environment.
+    var onNavigationControllerResolved: ((UINavigationController) -> Void)? = nil
 
     func makeUIViewController(context: Context) -> _VC { _VC() }
     func updateUIViewController(_ v: _VC, context: Context) {
         v.onNavigationWillAppear = onNavigationWillAppear
         v.onNavigationWillDisappear = onNavigationWillDisappear
+        v.onNavigationControllerResolved = onNavigationControllerResolved
         v.scheduleApplyGestureIfNeeded()
     }
 
@@ -20,6 +25,7 @@ struct SwipeBackEnabler: UIViewControllerRepresentable {
         private var pendingDelayedApply = false
         var onNavigationWillAppear: (() -> Void)?
         var onNavigationWillDisappear: (() -> Void)?
+        var onNavigationControllerResolved: ((UINavigationController) -> Void)?
 
         override func viewWillAppear(_ animated: Bool) {
             super.viewWillAppear(animated)
@@ -85,6 +91,7 @@ struct SwipeBackEnabler: UIViewControllerRepresentable {
         private func applyGesture(force: Bool) {
             guard let navigationController = resolvedNavigationController(),
                   let gesture = navigationController.interactivePopGestureRecognizer else { return }
+            onNavigationControllerResolved?(navigationController)
             guard force || !isGestureApplied else { return }
             popDelegate.navigationController = navigationController
             gesture.isEnabled = true

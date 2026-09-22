@@ -25,7 +25,11 @@ enum Crypto {
     }
 
     static func md5Hex(_ input: String) -> String {
-        let digest = Insecure.MD5.hash(data: Data(input.utf8))
+        md5Hex(Data(input.utf8))
+    }
+
+    static func md5Hex(_ data: Data) -> String {
+        let digest = Insecure.MD5.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

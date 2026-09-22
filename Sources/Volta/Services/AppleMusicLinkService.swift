@@ -17,8 +17,9 @@ enum AppleMusicLinkService {
         await resolve(SearchTarget(type: .album, title: album.name, artist: album.artist))
     }
 
-    /// Apple Music cannot represent a user's private server playlist. Keep the
-    /// share destination on Apple Music without exposing the server URL.
+    /// A convenience search URL for an explicitly catalog-oriented playlist
+    /// action. Ordinary playlist sharing uses a real server share URL or
+    /// descriptive text, because Apple Music cannot represent a private list.
     static func searchURL(for playlist: Playlist) -> URL? {
         searchURL(term: playlist.name)
     }
@@ -65,7 +66,7 @@ enum AppleMusicLinkService {
             URLQueryItem(name: "term", value: [target.artist, target.title, target.album]
                 .compactMap { $0?.nonBlank }
                 .joined(separator: " ")),
-            URLQueryItem(name: "country", value: "US"),
+            URLQueryItem(name: "country", value: storefront()),
             URLQueryItem(name: "media", value: "music"),
             URLQueryItem(name: "entity", value: target.type.rawValue),
             URLQueryItem(name: "limit", value: "8"),
@@ -76,10 +77,7 @@ enum AppleMusicLinkService {
             let (data, response) = try await URLSession.shared.data(from: url)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return fallbackURL(for: target) }
             let results = try JSONDecoder().decode(SearchResponse.self, from: data).results
-                .filter { matches(target, $0) }
-            let result = target.duration.map { duration in
-                results.min { abs(($0.trackTimeMillis ?? 0) / 1000 - duration) < abs(($1.trackTimeMillis ?? 0) / 1000 - duration) }
-            } ?? results.first
+            let result = bestConfidentMatch(for: target, in: results)
             if let rawLink = link(for: target, result: result), let link = URL(string: rawLink) {
                 return link
             }
@@ -89,14 +87,53 @@ enum AppleMusicLinkService {
         }
     }
 
+    private static func bestConfidentMatch(for target: SearchTarget, in results: [Result]) -> Result? {
+        let candidates = results.compactMap { result -> (Result, Int)? in
+            guard matches(target, result) else { return nil }
+            let durationDifference: Int
+            if target.type == .song,
+               let expected = target.duration, expected > 0,
+               let actual = result.trackTimeMillis, actual > 0 {
+                durationDifference = abs(actual / 1_000 - expected)
+                // Album versions, live takes, and remasters with a materially
+                // different runtime are safer as a search link.
+                guard durationDifference <= 8 else { return nil }
+            } else {
+                durationDifference = 0
+            }
+            return (result, durationDifference)
+        }.sorted { left, right in
+            left.1 == right.1 ? stableResultIdentity(left.0) < stableResultIdentity(right.0) : left.1 < right.1
+        }
+
+        guard let first = candidates.first else { return nil }
+        // A direct catalog URL claims that this is the user's item. When two
+        // equally plausible results remain, share the regional search instead.
+        guard candidates.dropFirst().first?.1 != first.1 else { return nil }
+        return first.0
+    }
+
+    private static func stableResultIdentity(_ result: Result) -> String {
+        result.trackViewUrl ?? result.collectionViewUrl ?? result.artistViewUrl ?? ""
+    }
+
     private static func matches(_ target: SearchTarget, _ result: Result) -> Bool {
         switch target.type {
         case .song:
-            return matches(target.title, result.trackName) && matches(target.artist, result.artistName)
+            return songCandidateIsConfident(
+                title: target.title,
+                artist: target.artist,
+                album: target.album,
+                duration: target.duration,
+                candidateTitle: result.trackName,
+                candidateArtist: result.artistName,
+                candidateAlbum: result.collectionName,
+                candidateDuration: result.trackTimeMillis.map { $0 / 1_000 }
+            )
         case .album:
-            return matches(target.title, result.collectionName) && matches(target.artist, result.artistName)
+            return exactMatch(target.title, result.collectionName) && exactMatch(target.artist, result.artistName)
         case .musicArtist:
-            return matches(target.title, result.artistName)
+            return exactMatch(target.title, result.artistName)
         }
     }
 
@@ -108,27 +145,68 @@ enum AppleMusicLinkService {
         }
     }
 
-    private static func matches(_ left: String?, _ right: String?) -> Bool {
+    private static func exactMatch(_ left: String?, _ right: String?) -> Bool {
         guard let left = normalized(left), let right = normalized(right) else { return false }
-        return left == right || left.contains(right) || right.contains(left)
+        return left == right
     }
 
-    private static func normalized(_ value: String?) -> String? {
+    static func normalized(_ value: String?) -> String? {
         guard let value, !value.isEmpty else { return nil }
-        let result = value
+        let folded = value
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .replacingOccurrences(of: "[^a-zA-Z0-9]+", with: " ", options: .regularExpression)
+        // CharacterSet.alphanumerics is Unicode-aware. The former ASCII-only
+        // regex discarded Japanese, Korean, Chinese, Cyrillic, and many other
+        // valid catalog titles before comparison.
+        let result = String(folded.unicodeScalars.map {
+            CharacterSet.alphanumerics.contains($0) ? String($0) : " "
+        }.joined())
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         return result.isEmpty ? nil : result
+    }
+
+    static func songCandidateIsConfident(
+        title: String,
+        artist: String?,
+        album: String?,
+        duration: Int?,
+        candidateTitle: String?,
+        candidateArtist: String?,
+        candidateAlbum: String?,
+        candidateDuration: Int?
+    ) -> Bool {
+        guard exactMatch(title, candidateTitle), exactMatch(artist, candidateArtist) else { return false }
+        if let album, !exactMatch(album, candidateAlbum) { return false }
+        if let duration, duration > 0, let candidateDuration, candidateDuration > 0,
+           abs(candidateDuration - duration) > 8 { return false }
+        return true
+    }
+
+    static func storefront(for locale: Locale = .current) -> String {
+        let candidate = locale.region?.identifier.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard let candidate,
+              candidate.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else {
+            return "us"
+        }
+        return candidate.lowercased()
+    }
+
+    static func fallbackShareText(for song: Song) -> String {
+        [song.title, song.artist ?? song.albumArtist].compactMap { $0?.nonBlank }.joined(separator: " — ")
+    }
+
+    static func fallbackShareText(for album: Album) -> String {
+        [album.name, album.artist].compactMap { $0?.nonBlank }.joined(separator: " — ")
     }
 
     private static func fallbackURL(for target: SearchTarget) -> URL? {
         searchURL(term: [target.artist, target.title, target.album].compactMap { $0?.nonBlank }.joined(separator: " "))
     }
 
-    private static func searchURL(term: String) -> URL? {
-        var components = URLComponents(string: "https://music.apple.com/us/search")
+    static func searchURL(term: String, locale: Locale = .current) -> URL? {
+        var components = URLComponents(string: "https://music.apple.com/\(storefront(for: locale))/search")
         components?.queryItems = [URLQueryItem(name: "term", value: term)]
         return components?.url
     }

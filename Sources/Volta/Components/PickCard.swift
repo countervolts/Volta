@@ -3,6 +3,7 @@ import SwiftUI
 struct PickCard: View {
     let album: Album
     var cornerRadius: CGFloat = 16
+    var heroSourceID: String?
 
     @State private var accentColor: Color = Color(white: 0.1)
 
@@ -55,7 +56,7 @@ struct PickCard: View {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
         )
-        .heroSource(id: album.id)
+        .heroSource(id: heroSourceID ?? album.id)
         .animation(.easeInOut(duration: 0.4), value: accentColor.description)
     }
 }
