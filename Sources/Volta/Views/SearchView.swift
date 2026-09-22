@@ -719,17 +719,17 @@ private struct GenreHomeView: View {
 
                     if !genreData.discoverItems.isEmpty {
                         section(title: L(.home_discover)) {
-                            HorizontalMediaRow(items: genreData.discoverItems) { item, _ in
+                            HorizontalMediaRow(items: genreData.discoverItems, onSelect: { item, _ in
                                 if let album = item.albumRef { onAlbum(album) }
-                            }
+                            })
                         }
                     }
 
                     if !genreData.albumItems.isEmpty {
                         section(title: L(.media_albums)) {
-                            HorizontalMediaRow(items: genreData.albumItems) { item, _ in
+                            HorizontalMediaRow(items: genreData.albumItems, onSelect: { item, _ in
                                 if let album = item.albumRef { onAlbum(album) }
-                            }
+                            })
                         }
                     }
 

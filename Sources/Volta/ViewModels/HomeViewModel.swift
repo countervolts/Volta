@@ -353,12 +353,14 @@ final class HomeViewModel: ObservableObject {
         let primaryGenres = Set(own.compactMap { $0.genre?.lowercased() })
 
         let similarIDs = (info?.similarArtist ?? []).prefix(5).map(\.id)
-        let albumBatches = await DeveloperExperiments.runConcurrently(Array(similarIDs), defaultMaxConcurrent: similarIDs.count) { id in
-            let artist = try? await client.artist(id: id)
-            if let artist { await MainActor.run { HiddenAlbumStore.shared.register(artists: [artist]) } }
-            return HiddenAlbumStore.visibleAlbums(artist?.album ?? [])
+        var similarAlbums: [Album] = []
+        for id in similarIDs {
+            guard !Task.isCancelled else { break }
+            guard let artist = try? await client.artist(id: id) else { continue }
+            HiddenAlbumStore.shared.register(artists: [artist])
+            similarAlbums.append(contentsOf: HiddenAlbumStore.shared.visibleAlbums(artist.album ?? []))
         }
-        let similarAlbums = HiddenAlbumStore.shared.visibleAlbums(albumBatches.flatMap { $0 })
+        similarAlbums = HiddenAlbumStore.shared.visibleAlbums(similarAlbums)
 
         // Prefer similar albums that share the seed genre.
         let sortedSimilar = similarAlbums.sorted { lhs, rhs in
