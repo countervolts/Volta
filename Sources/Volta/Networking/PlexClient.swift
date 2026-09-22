@@ -485,10 +485,9 @@ final class PlexClient: MusicService, @unchecked Sendable {
     }
 
     func album(id: String) async throws -> Album? {
-        async let metaTask = try? metadata("/library/metadata/\(id)").first
-        async let tracksTask = try? metadata("/library/metadata/\(id)/children")
-        guard let meta = await metaTask ?? nil else { return nil }
-        let songs = (await tracksTask ?? nil)?.map { track(from: $0) } ?? []
+        guard let meta = try? await metadata("/library/metadata/\(id)").first else { return nil }
+        let tracks = try? await metadata("/library/metadata/\(id)/children")
+        let songs = tracks?.map { track(from: $0) } ?? []
         return meta.asAlbum(withSongs: songs)
     }
 
@@ -509,10 +508,9 @@ final class PlexClient: MusicService, @unchecked Sendable {
     }
 
     func artist(id: String) async throws -> Artist? {
-        async let metaTask = try? metadata("/library/metadata/\(id)").first
-        async let albumsTask = try? metadata("/library/metadata/\(id)/children")
-        guard let meta = await metaTask ?? nil else { return nil }
-        let albums = (await albumsTask ?? nil)?.map { $0.asAlbum } ?? []
+        guard let meta = try? await metadata("/library/metadata/\(id)").first else { return nil }
+        let albumItems = try? await metadata("/library/metadata/\(id)/children")
+        let albums = albumItems?.map { $0.asAlbum } ?? []
         return meta.asArtist(withAlbums: albums)
     }
 
@@ -616,10 +614,9 @@ final class PlexClient: MusicService, @unchecked Sendable {
     }
 
     func playlist(id: String) async throws -> Playlist? {
-        async let metaTask = try? metadata("/playlists/\(id)").first
-        async let itemsTask = try? metadata("/playlists/\(id)/items")
-        guard let meta = await metaTask ?? nil else { return nil }
-        let entries = (await itemsTask ?? nil)?.map { track(from: $0) } ?? []
+        guard let meta = try? await metadata("/playlists/\(id)").first else { return nil }
+        let items = try? await metadata("/playlists/\(id)/items")
+        let entries = items?.map { track(from: $0) } ?? []
         return meta.asPlaylist(withEntries: entries)
     }
 
@@ -728,10 +725,10 @@ final class PlexClient: MusicService, @unchecked Sendable {
             ])
             return c?.totalSize ?? c?.size ?? 0
         }
-        async let a = count(type: 8)
-        async let al = count(type: 9)
-        async let s = count(type: 10)
-        return (await a, await al, await s)
+        let artists = await count(type: 8)
+        let albums = await count(type: 9)
+        let songs = await count(type: 10)
+        return (artists, albums, songs)
     }
 
     // MARK: - Lyrics

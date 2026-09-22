@@ -16,10 +16,15 @@ final class ArtistDetailViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var isDescriptionExpanded = false
     @Published var topSongsExpanded = false
+    /// Whether the artist is favorited on the server, for the profile star.
+    @Published var isStarred: Bool
 
     init(artist: Artist) {
         self.seedArtist = artist
+        self.isStarred = artist.starred != nil
     }
+
+    func setStarred(_ value: Bool) { isStarred = value }
 
     var displayArtist: Artist { fullArtist ?? seedArtist }
     var similarArtists: [Artist] { info?.similarArtist ?? [] }
@@ -28,6 +33,35 @@ final class ArtistDetailViewModel: ObservableObject {
     var albumReleases: [Album] { albums.filter { !Self.isSingle($0) } }
     var singles: [Album] { albums.filter { Self.isSingle($0) } }
     var likedSongs: [Song] { allSongs.filter { $0.starred != nil } }
+
+    /// Newest release across albums and singles (used by the featured card).
+    var latestRelease: Album? {
+        albums.sorted {
+            ($0.year ?? Int.min, $0.createdDate ?? .distantPast) >
+            ($1.year ?? Int.min, $1.createdDate ?? .distantPast)
+        }.first
+    }
+
+    /// Albums + singles in one "Albums & Singles" shelf, newest first.
+    var albumsAndSingles: [Album] {
+        albums.sorted {
+            ($0.year ?? Int.min, $0.createdDate ?? .distantPast) >
+            ($1.year ?? Int.min, $1.createdDate ?? .distantPast)
+        }
+    }
+
+    /// Songs accumulated from every album on the profile (shown after the top
+    /// songs shelf, matching Apple Music's long artist tracklist).
+    @Published var accumulatedSongs: [Song] = []
+    @Published var accumulatedExpanded = false
+
+    var hasMoreAccumulated: Bool { accumulatedSongs.count > Self.accumulatedPageSize }
+    private static let accumulatedPageSize = 8
+    private var accumulatedVisibleCount: Int { accumulatedExpanded ? accumulatedSongs.count : Self.accumulatedPageSize }
+
+    var visibleAccumulatedSongs: [Song] { Array(accumulatedSongs.prefix(accumulatedVisibleCount)) }
+
+    func toggleAccumulated() { accumulatedExpanded.toggle() }
 
     @Published var artistImage: UIImage?
     @Published var artworkResolved = false
@@ -42,27 +76,19 @@ final class ArtistDetailViewModel: ObservableObject {
             await applyImage(from: seedArtist.artistImageUrl)
         }
 
-        if client.backendKind == .emby || DeveloperExperiments.constrainedConcurrency(default: 4) < 4 {
-            let loadedArtist = try? await client.artist(id: seedArtist.id)
-            fullArtist = loadedArtist
-            albums = Self.sortedAlbums(loadedArtist?.album ?? [])
-            info = try? await client.artistInfo(id: seedArtist.id)
-            topSongs = (try? await client.topSongs(artistName: seedArtist.name, count: 15)) ?? []
-            allSongs = (try? await client.songsForArtist(id: seedArtist.id)) ?? topSongs
-        } else {
-            async let artistReq  = client.artist(id: seedArtist.id)
-            async let infoReq    = client.artistInfo(id: seedArtist.id)
-            async let songsReq   = client.topSongs(artistName: seedArtist.name, count: 15)
-            async let allSongsReq = client.songsForArtist(id: seedArtist.id)
-            let loadedArtist = try? await artistReq
-            fullArtist = loadedArtist
-            albums = Self.sortedAlbums(loadedArtist?.album ?? [])
-            info       = try? await infoReq
-            topSongs   = (try? await songsReq) ?? []
-            allSongs   = (try? await allSongsReq) ?? topSongs
-        }
+        // Keep these requests ordered. The optimized build's sibling `async let`
+        // teardown can abort in the Swift concurrency runtime when these large,
+        // throwing results complete on different executors.
+        let loadedArtist = try? await client.artist(id: seedArtist.id)
+        fullArtist = loadedArtist
+        if let loadedArtist { isStarred = loadedArtist.starred != nil }
+        albums = Self.sortedAlbums(loadedArtist?.album ?? [])
+        info = try? await client.artistInfo(id: seedArtist.id)
+        topSongs = (try? await client.topSongs(artistName: seedArtist.name, count: 15)) ?? []
+        allSongs = (try? await client.songsForArtist(id: seedArtist.id)) ?? topSongs
         applyDownloadedFallbackIfNeeded()
         applyHiddenAlbumFilters()
+        buildAccumulatedSongs()
 
         let stripped = info?.biography?.strippingHTML
         biography = (stripped?.isEmpty == false) ? stripped : nil
@@ -106,6 +132,7 @@ final class ArtistDetailViewModel: ObservableObject {
 
         applyDownloadedFallbackIfNeeded()
         applyHiddenAlbumFilters()
+        buildAccumulatedSongs()
         artworkResolved = true
         AppLogger.shared.log(
             "Artist profile loaded offline; artistID=\(seedArtist.id); albums=\(albums.count); songs=\(allSongs.count)",
@@ -121,6 +148,29 @@ final class ArtistDetailViewModel: ObservableObject {
         if let fullArtist {
             self.fullArtist = fullArtist.replacingAlbums(albums)
         }
+    }
+
+    /// A shuffled mix of the artist's tracks (excluding the ones already shown in
+    /// Top Songs), so the "Songs" shelf feels varied rather than album-ordered.
+    private func buildAccumulatedSongs() {
+        let topIDs = Set(topSongs.map(\.id))
+
+        // Prefer the full artist song list; fall back to album tracklists when
+        // the server does not return one.
+        var pool = allSongs.filter { !topIDs.contains($0.id) }
+        if pool.count < Self.accumulatedPageSize {
+            let albumSongs = albumsAndSingles.flatMap { $0.song ?? [] }
+            var seenIDs = Set(pool.map(\.id))
+            for song in albumSongs where !topIDs.contains(song.id) && seenIDs.insert(song.id).inserted {
+                pool.append(song)
+            }
+        }
+
+        // De-duplicate by id in case the same song appears on multiple releases.
+        var seen = Set<String>()
+        let unique = pool.filter { seen.insert($0.id).inserted }
+
+        accumulatedSongs = unique.shuffled()
     }
 
     private func applyDownloadedFallbackIfNeeded() {

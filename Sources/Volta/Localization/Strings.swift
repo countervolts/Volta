@@ -423,6 +423,15 @@ enum LocKey: String, CaseIterable, Hashable, Sendable {
     case stat_years_active
     case a11y_see_all                     // "%@" = section title
 
+    // Artist profile (Apple Music style)
+    case artist_featured                   // "Featured"
+    case artist_featured_release           // section title
+    case artist_biography
+    case artist_latest_release
+    case artist_albums_and_singles
+    case artist_appears_on
+    case action_artist_info
+
     // Album detail: audio quality + info popover
     case action_less
     case quality_hires_lossless
@@ -3055,6 +3064,43 @@ enum Strings {
             en: "See all %@", es: "Ver todo: %@", fr: "Voir tout : %@", de: "Alle anzeigen: %@", pt: "Ver tudo: %@", it: "Vedi tutti: %@",
             nl: "Alles tonen: %@", ru: "Показать все: %@", pl: "Zobacz wszystko: %@", tr: "Tümünü gör: %@", sv: "Visa alla: %@", nb: "Se alle: %@",
             da: "Se alle: %@", fi: "Näytä kaikki: %@", zh: "查看全部%@", ja: "%@をすべて表示", ko: "%@ 모두 보기"
+        ),
+
+        // MARK: Artist profile (Apple Music style)
+        .artist_featured: tr(
+            en: "Featured", es: "Destacado", fr: "À la une", de: "Empfohlen", pt: "Destaque", it: "In evidenza",
+            nl: "Uitgelicht", ru: "Избранное", pl: "Wyróżnione", tr: "Öne çıkan", sv: "Utvalt", nb: "Utvalgt",
+            da: "Fremhævet", fi: "Nostot", zh: "精选", ja: "注目", ko: "추천"
+        ),
+        .artist_featured_release: tr(
+            en: "Featured Release", es: "Lanzamiento destacado", fr: "Sortie à la une", de: "Empfohlene Veröffentlichung", pt: "Lançamento em destaque", it: "Uscita in evidenza",
+            nl: "Uitgelichte release", ru: "Избранный релиз", pl: "Wyróżnione wydanie", tr: "Öne çıkan sürüm", sv: "Utvald release", nb: "Utvalgt utgivelse",
+            da: "Fremhævet udgivelse", fi: "Nostettu julkaisu", zh: "精选发行", ja: "注目のリリース", ko: "추천 발매"
+        ),
+        .artist_biography: tr(
+            en: "Biography", es: "Biografía", fr: "Biographie", de: "Biografie", pt: "Biografia", it: "Biografia",
+            nl: "Biografie", ru: "Биография", pl: "Biografia", tr: "Biyografi", sv: "Biografi", nb: "Biografi",
+            da: "Biografi", fi: "Elämäkerta", zh: "传记", ja: "バイオグラフィー", ko: "약력"
+        ),
+        .artist_latest_release: tr(
+            en: "Latest Release", es: "Último lanzamiento", fr: "Dernière sortie", de: "Neueste Veröffentlichung", pt: "Último lançamento", it: "Ultima uscita",
+            nl: "Nieuwste release", ru: "Последний релиз", pl: "Najnowsze wydanie", tr: "Son sürüm", sv: "Senaste släppet", nb: "Siste utgivelse",
+            da: "Seneste udgivelse", fi: "Uusin julkaisu", zh: "最新发行", ja: "最新リリース", ko: "최신 발매"
+        ),
+        .artist_albums_and_singles: tr(
+            en: "Albums & Singles", es: "Álbumes y sencillos", fr: "Albums et singles", de: "Alben & Singles", pt: "Álbuns e singles", it: "Album e singoli",
+            nl: "Albums en singles", ru: "Альбомы и синглы", pl: "Albumy i single", tr: "Albümler ve single'lar", sv: "Album och singlar", nb: "Album og singler",
+            da: "Albummer og singler", fi: "Albumit ja singlet", zh: "专辑与单曲", ja: "アルバムとシングル", ko: "앨범 및 싱글"
+        ),
+        .artist_appears_on: tr(
+            en: "Appears On", es: "Aparece en", fr: "Apparaît sur", de: "Erscheint auf", pt: "Aparece em", it: "Appare in",
+            nl: "Verschijnt op", ru: "Появляется на", pl: "Pojawia się na", tr: "Yer aldığı", sv: "Medverkar på", nb: "Opptrer på",
+            da: "Medvirker på", fi: "Esiintyy", zh: "参与作品", ja: "参加作品", ko: "참여"
+        ),
+        .action_artist_info: tr(
+            en: "Artist Info", es: "Información del artista", fr: "Infos sur l'artiste", de: "Künstler-Info", pt: "Informações do artista", it: "Info artista",
+            nl: "Artiestinfo", ru: "Об артисте", pl: "Informacje o wykonawcy", tr: "Sanatçı bilgisi", sv: "Artistinfo", nb: "Artistinfo",
+            da: "Kunstnerinfo", fi: "Artistin tiedot", zh: "艺人信息", ja: "アーティスト情報", ko: "아티스트 정보"
         ),
 
         // MARK: Album detail: audio quality + info popover

@@ -525,15 +525,14 @@ struct JellyfinClient: MusicService {
             let songs = tracks.Items?.map { $0.asSong } ?? []
             return meta.asAlbum(withSongs: songs)
         }
-        async let metaTask = try? get("/Users/\(userId)/Items/\(id)", as: JFItem.self)
-        async let tracksTask = try? getItems("/Users/\(userId)/Items", query: itemsQuery([
+        guard let meta = try? await get("/Users/\(userId)/Items/\(id)", as: JFItem.self) else { return nil }
+        let tracks = try? await getItems("/Users/\(userId)/Items", query: itemsQuery([
             URLQueryItem(name: "ParentId", value: id),
             URLQueryItem(name: "IncludeItemTypes", value: "Audio"),
             URLQueryItem(name: "SortBy", value: "ParentIndexNumber,IndexNumber,SortName"),
             URLQueryItem(name: "SortOrder", value: "Ascending"),
         ]))
-        guard let meta = await metaTask else { return nil }
-        let songs = (await tracksTask)?.Items?.map { $0.asSong } ?? []
+        let songs = tracks?.Items?.map { $0.asSong } ?? []
         return meta.asAlbum(withSongs: songs)
     }
 
@@ -565,15 +564,14 @@ struct JellyfinClient: MusicService {
             let albums = albumRes.Items?.map { $0.asAlbum } ?? []
             return meta.asArtist(withAlbums: albums)
         }
-        async let metaTask = try? get("/Users/\(userId)/Items/\(id)", as: JFItem.self)
-        async let albumsTask = try? getItems("/Users/\(userId)/Items", query: itemsQuery([
+        guard let meta = try? await get("/Users/\(userId)/Items/\(id)", as: JFItem.self) else { return nil }
+        let albumRes = try? await getItems("/Users/\(userId)/Items", query: itemsQuery([
             URLQueryItem(name: "AlbumArtistIds", value: id),
             URLQueryItem(name: "IncludeItemTypes", value: "MusicAlbum"),
             URLQueryItem(name: "SortBy", value: "ProductionYear,SortName"),
             URLQueryItem(name: "SortOrder", value: "Ascending"),
         ]))
-        guard let meta = await metaTask else { return nil }
-        let albums = (await albumsTask)?.Items?.map { $0.asAlbum } ?? []
+        let albums = albumRes?.Items?.map { $0.asAlbum } ?? []
         return meta.asArtist(withAlbums: albums)
     }
 
@@ -593,13 +591,12 @@ struct JellyfinClient: MusicService {
                 largeImageUrl: image
             )
         }
-        async let metaTask = try? get("/Users/\(userId)/Items/\(id)", as: JFItem.self)
-        async let similarTask = try? getItems("/Artists/\(id)/Similar", query: itemFieldsQuery([
+        let meta = try? await get("/Users/\(userId)/Items/\(id)", as: JFItem.self)
+        let similarResult = try? await getItems("/Artists/\(id)/Similar", query: itemFieldsQuery([
             URLQueryItem(name: "UserId", value: userId),
             URLQueryItem(name: "Limit", value: "20"),
         ]))
-        let meta = await metaTask
-        let similar = (await similarTask)?.Items?.map { $0.asArtist } ?? []
+        let similar = similarResult?.Items?.map { $0.asArtist } ?? []
         let image = meta.flatMap { coverArtURL(id: $0.asArtist.coverArt, size: 600)?.absoluteString }
         return ArtistInfo(
             biography: meta?.Overview,
@@ -688,12 +685,12 @@ struct JellyfinClient: MusicService {
                     albumItems.map { $0.asAlbum },
                     songItems.map { $0.asSong })
         }
-        async let artistsTask = find("MusicArtist", artistCount)
-        async let albumsTask = find("MusicAlbum", albumCount)
-        async let songsTask = find("Audio", songCount)
-        return (await artistsTask.map { $0.asArtist },
-                await albumsTask.map { $0.asAlbum },
-                await songsTask.map { $0.asSong })
+        let artistItems = await find("MusicArtist", artistCount)
+        let albumItems = await find("MusicAlbum", albumCount)
+        let songItems = await find("Audio", songCount)
+        return (artistItems.map { $0.asArtist },
+                albumItems.map { $0.asAlbum },
+                songItems.map { $0.asSong })
     }
 
     // MARK: - Playlists
@@ -707,12 +704,11 @@ struct JellyfinClient: MusicService {
     }
 
     func playlist(id: String) async throws -> Playlist? {
-        async let metaTask = try? get("/Users/\(userId)/Items/\(id)", as: JFItem.self)
-        async let itemsTask = try? getItems("/Playlists/\(id)/Items", query: itemFieldsQuery([
+        guard let meta = try? await get("/Users/\(userId)/Items/\(id)", as: JFItem.self) else { return nil }
+        let items = try? await getItems("/Playlists/\(id)/Items", query: itemFieldsQuery([
             URLQueryItem(name: "UserId", value: userId),
         ]))
-        guard let meta = await metaTask else { return nil }
-        let entries = (await itemsTask)?.Items?.map { $0.asSong } ?? []
+        let entries = items?.Items?.map { $0.asSong } ?? []
         return meta.asPlaylist(withEntries: entries)
     }
 

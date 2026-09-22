@@ -49,23 +49,14 @@ final class AlbumDetailViewModel: ObservableObject {
 
         let albumID = album.id
         let artistID = album.artistId
-        let loadedAlbum: Album?
-        let relatedAlbums: [Album]
         let loadArtistAlbums: () async -> [Album] = {
             guard let id = artistID else { return [] }
             let artist = try? await client.artist(id: id)
             return artist?.album ?? []
         }
 
-        if client.backendKind == .emby || DeveloperExperiments.constrainedConcurrency(default: 2) == 1 {
-            loadedAlbum = try? await client.album(id: albumID)
-            relatedAlbums = await loadArtistAlbums()
-        } else {
-            async let fullAlbum = client.album(id: albumID)
-            async let artistAlbums = loadArtistAlbums()
-            loadedAlbum = try? await fullAlbum
-            relatedAlbums = await artistAlbums
-        }
+        let loadedAlbum = try? await client.album(id: albumID)
+        let relatedAlbums = await loadArtistAlbums()
 
         if let loaded = loadedAlbum, !(loaded.song ?? []).isEmpty {
             album = loaded

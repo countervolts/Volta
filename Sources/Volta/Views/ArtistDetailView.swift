@@ -13,9 +13,13 @@ struct ArtistDetailView: View {
     // Local profile-photo mirror.
     @State private var profileImage: UIImage? = nil
     @StateObject private var scrollState = ArtistProfileScrollState()
+    /// Window-level (not view-level) top inset, so the floating buttons sit in
+    /// the same place no matter which screen pushed this profile.
+    @State private var windowTopInset: CGFloat?
 #if os(iOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 #endif
+    @Environment(\.dismiss) private var dismiss
 
     init(artist: Artist) {
         _vm = StateObject(wrappedValue: ArtistDetailViewModel(artist: artist))
@@ -23,6 +27,19 @@ struct ArtistDetailView: View {
 
     private var bg: Color {
         Color(ColorExtractor.backgroundVariant(of: vm.dominantColor))
+    }
+
+    /// Feathered page backdrop, drawn only BELOW the hero. Making it start at the
+    /// header's bottom edge is what removes the seam: the hero's own fade lands
+    /// on exactly `bg`, and this gradient's first stop is that same `bg`, so the
+    /// two meet on an identical colour instead of jumping to an already-darkened
+    /// tint (the previous seam).
+    private var backgroundGradient: LinearGradient {
+        LinearGradient(
+            colors: ColorExtractor.featheredBackgroundColors(for: vm.dominantColor),
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     private var showsYonkagorFish: Bool {
@@ -35,65 +52,26 @@ struct ArtistDetailView: View {
     private static let legacyScrollSpace = "artist-scroll-space"
 
     var body: some View {
-        GeometryReader { proxy in
-            let width = proxy.size.width
-            let compactLandscape = width > proxy.size.height
-            let baseHeaderHeight = compactLandscape
-                ? min(Self.headerHeight, max(180, proxy.size.height * 0.52))
-                : Self.headerHeight
-            let headerHeight = baseHeaderHeight + proxy.safeAreaInsets.top
-
-            ZStack(alignment: .top) {
-                bg.ignoresSafeArea()
-
-                if !RuntimeCompatibility.isIOS16 {
-                    ArtistProfileHeader(
-                        width: width,
-                        baseHeight: headerHeight,
-                        bg: bg,
-                        artistName: vm.displayArtist.name,
-                        profileImage: profileImage ?? vm.artistImage,
-                        fallbackAlbum: vm.artworkResolved ? vm.albums.first : nil,
-                        dominantColor: vm.dominantColor,
-                        scrollState: scrollState,
-                        onFallbackImageLoaded: { vm.setDominantColor(ColorExtractor.dominantColor(from: $0)) }
-                    )
-                }
-
-                artistScroll(width: width, headerHeight: headerHeight)
-
-                if showsYonkagorFish {
-                    YonkagorFishOverlay()
-                        // Keep the Canvas out of the status-bar area. On this profile,
-                        // extending the animated layer into that area makes iOS apply an
-                        // unwanted glass blur over the top of the header.
-                        .frame(
-                            width: width,
-                            height: max(0, proxy.size.height - proxy.safeAreaInsets.top)
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-
-                if vm.isLoading && vm.albums.isEmpty {
-                    ProgressView()
-                        .controlSize(.large)
-                        .tint(.white)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-
-                if let msg = toastMessage {
-                    VStack {
-                        Spacer()
-                        PlaybackActionToast(message: msg)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                            .padding(.bottom, 100)
-                    }
+        // The inner reader ignores the top safe area so the hero photo can bleed
+        // under the status bar; the outer one still reports the real inset for
+        // the floating back / menu buttons.
+        GeometryReader { safeProxy in
+            GeometryReader { proxy in
+                artistContent(
+                    topInset: windowTopInset ?? safeProxy.safeAreaInsets.top,
+                    proxy: proxy
+                )
+            }
+            .ignoresSafeArea(edges: .top)
+        }
+        .background(
+            WindowTopInsetReader { value in
+                if windowTopInset == nil || abs((windowTopInset ?? 0) - value) > 0.5 {
+                    windowTopInset = value
                 }
             }
-        }
-        .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+        )
         .navigationBarHidden(true)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -145,6 +123,160 @@ struct ArtistDetailView: View {
     }
 
     @ViewBuilder
+    private func artistContent(topInset: CGFloat, proxy: GeometryProxy) -> some View {
+        let width = proxy.size.width
+        let compactLandscape = width > proxy.size.height
+        let baseHeaderHeight = compactLandscape
+            ? min(Self.headerHeight, max(180, proxy.size.height * 0.52))
+            : Self.headerHeight
+        let headerHeight = baseHeaderHeight + topInset
+
+        ZStack(alignment: .top) {
+            // Solid tint behind the header, and the feathered gradient starting
+            // exactly at the header's bottom edge so the join is colour-matched.
+            bg.ignoresSafeArea()
+            VStack(spacing: 0) {
+                Color.clear.frame(height: headerHeight)
+                backgroundGradient
+            }
+            .ignoresSafeArea()
+
+            if !RuntimeCompatibility.isIOS16 {
+                ArtistProfileHeader(
+                    width: width,
+                    baseHeight: headerHeight,
+                    bg: bg,
+                    profileImage: profileImage ?? vm.artistImage,
+                    fallbackAlbum: vm.artworkResolved ? vm.albums.first : nil,
+                    dominantColor: vm.dominantColor,
+                    scrollState: scrollState,
+                    onFallbackImageLoaded: { vm.setDominantColor(ColorExtractor.dominantColor(from: $0)) }
+                )
+            }
+
+            artistScroll(width: width, headerHeight: headerHeight)
+
+            if showsYonkagorFish {
+                YonkagorFishOverlay()
+                    // Keep the Canvas out of the status-bar area. On this profile,
+                    // extending the animated layer into that area makes iOS apply an
+                    // unwanted glass blur over the top of the header.
+                    .frame(
+                        width: width,
+                        height: max(0, proxy.size.height - topInset)
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+
+            if vm.isLoading && vm.albums.isEmpty {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            artistNavOverlay(topInset: topInset)
+        }
+        // Anchored to the container's bottom edge (just above the mini player,
+        // which already removes its own height from the safe area).
+        .overlay(alignment: .bottom) {
+            if let msg = toastMessage {
+                PlaybackActionToast(message: msg)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    // MARK: - Floating nav (back button + scroll-aware compact title)
+
+    @ViewBuilder
+    private func artistNavOverlay(topInset: CGFloat) -> some View {
+        let scrolled = scrollState.offsetY
+        let collapseStart: CGFloat = 180
+        let collapseEnd: CGFloat = 280
+        let titleProgress = min(1, max(0, (scrolled - collapseStart) / (collapseEnd - collapseStart)))
+
+        ZStack(alignment: .top) {
+            if titleProgress > 0 {
+                ZStack(alignment: .bottom) {
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .opacity(titleProgress)
+                    Text(vm.displayArtist.name)
+                        .font(.headline)
+                        .foregroundStyle(Theme.primaryText)
+                        .lineLimit(1)
+                        .padding(.bottom, 8)
+                        .opacity(titleProgress)
+                }
+                .frame(height: topInset + 44)
+                .frame(maxWidth: .infinity)
+                .ignoresSafeArea(edges: .top)
+                .transition(.opacity)
+            }
+
+            HStack {
+                Button { dismissArtist() } label: {
+                    Image(systemName: Symbols.back)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .glassCircle()
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L(.action_done))
+
+                Spacer(minLength: 0)
+
+                Menu {
+                    Button {
+                        shuffleArtist()
+                    } label: {
+                        Label(L(.action_shuffle), systemImage: Symbols.shuffle)
+                    }
+                    Button {
+                        addAllToQueue()
+                    } label: {
+                        Label(L(.action_add_to_queue), systemImage: Symbols.queue)
+                    }
+                } label: {
+                    Image(systemName: Symbols.more)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .glassCircle()
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L(.action_more))
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, topInset + 4)
+        }
+        .frame(maxWidth: .infinity)
+        .animation(.easeInOut(duration: 0.2), value: titleProgress > 0)
+    }
+
+    private func dismissArtist() {
+        dismiss()
+    }
+
+    private func addAllToQueue() {
+        let songs = vm.allSongs
+        guard !songs.isEmpty else { return }
+        appState.audioPlayer.addToQueue(songs)
+        withAnimation { toastMessage = L(.notif_added_to_queue) }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            withAnimation { toastMessage = nil }
+        }
+    }
+
+    @ViewBuilder
     private func artistScroll(width: CGFloat, headerHeight: CGFloat) -> some View {
         if RuntimeCompatibility.isIOS16 {
             ios16ScrollContent(width: width, headerHeight: headerHeight)
@@ -192,7 +324,6 @@ struct ArtistDetailView: View {
                 baseHeight: headerHeight,
                 scrollSpaceName: Self.legacyScrollSpace,
                 bg: bg,
-                artistName: vm.displayArtist.name,
                 profileImage: profileImage ?? vm.artistImage,
                 fallbackAlbum: vm.artworkResolved ? vm.albums.first : nil,
                 dominantColor: vm.dominantColor,
@@ -208,14 +339,15 @@ struct ArtistDetailView: View {
 
     @ViewBuilder
     private var artistBodySections: some View {
-        artistActionRow
+        heroIdentitySection
+        featuredReleaseSection
         topSongsSection
+        accumulatedSongsSection
         likedSongsSection
         albumsSection
         singlesSection
         appearedOnSection
         similarArtistsSection
-        aboutSection
         artistStatsSection
         Color.clear.frame(height: 120)
     }
@@ -224,39 +356,75 @@ struct ArtistDetailView: View {
         scrollState.update(newValue)
     }
 
-    // MARK: - Play / shuffle this artist
+    // MARK: - Hero identity (name + Apple Music action row)
+
+    @ViewBuilder
+    private var heroIdentitySection: some View {
+        VStack(spacing: 14) {
+            Text(vm.displayArtist.name)
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .minimumScaleFactor(0.6)
+                .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+                .padding(.horizontal, 24)
+
+            artistActionRow
+        }
+        .padding(.top, 4)
+        .padding(.bottom, 6)
+    }
+
+    // MARK: - Play / shuffle / favorite / info
 
     @ViewBuilder
     private var artistActionRow: some View {
         if !vm.allSongs.isEmpty {
-            HStack(spacing: 14) {
-                Button { playArtist(shuffled: false) } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: Symbols.play).font(.system(size: 16, weight: .bold))
-                        Text(L(.action_play)).font(.headline)
-                    }
-                    .foregroundStyle(.black)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(.white, in: Capsule())
+            HStack(spacing: 26) {
+                Button { showBioSheet = true } label: {
+                    Image(systemName: Symbols.info)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 46, height: 46)
+                        .glassCircle()
                 }
                 .buttonStyle(.plain)
+                .disabled(vm.biography == nil)
+                .opacity(vm.biography == nil ? 0.45 : 1)
+                .accessibilityLabel(L(.action_artist_info))
 
-                Button { playArtist(shuffled: true) } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: Symbols.shuffle).font(.system(size: 16, weight: .semibold))
-                        Text(L(.action_shuffle)).font(.headline)
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .glassCapsule(tinted: true)
+                Button { playArtist(shuffled: false) } label: {
+                    Image(systemName: Symbols.play)
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(playFg)
+                        .frame(width: 68, height: 68)
+                        .background(.white, in: Circle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(L(.action_play))
+
+                Button { toggleFavorite() } label: {
+                    Image(systemName: vm.isStarred ? Symbols.star : Symbols.starEmpty)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(vm.isStarred ? Theme.accent : .white)
+                        .frame(width: 46, height: 46)
+                        .glassCircle()
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L(vm.isStarred ? .action_unfavorite : .action_favorite))
             }
             .padding(.horizontal, 20)
-            .padding(.top, 16)
         }
+    }
+
+    /// Readable foreground for the white play button, derived from the artist's
+    /// dominant color (never too bright, never pure black).
+    private var playFg: Color {
+        let c = vm.dominantColor
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        return Color(UIColor(hue: h, saturation: min(s, 1), brightness: max(0.25, min(b * 0.72, 0.65)), alpha: 1))
     }
 
     private func playArtist(shuffled: Bool) {
@@ -265,76 +433,173 @@ struct ArtistDetailView: View {
         appState.audioPlayer.playArtist(shuffled ? songs.shuffled() : songs, artist: vm.displayArtist)
     }
 
-    // MARK: - Top Songs
-
-    private static let rowHeight: CGFloat = 52
-    private static let pageSize = 5
-
-    private var usesLandscapeLayout: Bool {
-#if os(iOS)
-        verticalSizeClass == .compact
-#else
-        false
-#endif
+    private func toggleFavorite() {
+        let nowStarred = !vm.isStarred
+        vm.setStarred(nowStarred)
+        withAnimation { toastMessage = L(nowStarred ? .notif_added_to_favorites : .notif_removed_from_favorites) }
+        Task {
+            if nowStarred {
+                try? await appState.client?.star(id: vm.displayArtist.id)
+            } else {
+                try? await appState.client?.unstar(id: vm.displayArtist.id)
+            }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            withAnimation { toastMessage = nil }
+        }
     }
 
+    private func shuffleArtist() { playArtist(shuffled: true) }
+
+    // MARK: - Featured release card
+
     @ViewBuilder
-    private var topSongsSection: some View {
-        if !vm.topSongs.isEmpty {
-            let pages = stride(from: 0, to: vm.topSongs.count, by: Self.pageSize).map { start in
-                Array(vm.topSongs[start..<min(start + Self.pageSize, vm.topSongs.count)])
-            }
-            // Size to the tallest actual page: a single short page shrinks to fit,
-            // multi-page stays uniform (first page is always full).
-            let pageH = CGFloat(min(vm.topSongs.count, Self.pageSize)) * Self.rowHeight
-            let multi = pages.count > 1
-
+    private var featuredReleaseSection: some View {
+        if let album = vm.latestRelease {
             VStack(alignment: .leading, spacing: 0) {
-                SectionHeaderView(L(.section_top_songs))
+                Text(L(.artist_featured))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
                     .padding(.horizontal, 20)
-                    .padding(.top, 24)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, 8)
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 12) {
-                        ForEach(pages.indices, id: \.self) { pageIdx in
-                            VStack(spacing: 0) {
-                                ForEach(Array(pages[pageIdx].enumerated()), id: \.element.id) { i, song in
-                                    compactTopSongRow(song: song, index: pageIdx * Self.pageSize + i + 1)
-                                    if i < pages[pageIdx].count - 1 {
-                                        Divider().background(.white.opacity(0.06)).padding(.leading, 60)
-                                    }
-                                }
+                Button { drillAlbum = album } label: {
+                    HStack(spacing: 14) {
+                        ArtworkView(
+                            coverArtID: album.coverArt,
+                            size: 300,
+                            cornerRadius: 6,
+                            cropsImageToSquare: true
+                        )
+                        .frame(width: 74, height: 74)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            if let eyebrow = featuredEyebrow(album) {
+                                Text(eyebrow)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.white.opacity(0.55))
+                                    .lineLimit(1)
                             }
-                            .frame(height: pageH, alignment: .top)
-                            .containerRelativeFrameCompat(
-                                count: usesLandscapeLayout ? 8 : (multi ? 8 : 1),
-                                span: usesLandscapeLayout ? 5 : (multi ? 7 : 1),
-                                spacing: 12
-                            )
+                            Text(album.name)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            Text(L(.home_song_count, album.songCount ?? 0))
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.5))
+                                .lineLimit(1)
                         }
+
+                        Spacer(minLength: 8)
+
+                        Image(systemName: Symbols.play)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .glassCircle()
                     }
-                    .scrollTargetLayoutCompat()
-                    .padding(.horizontal, 20)
+                    .padding(12)
+                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(.white.opacity(0.06), lineWidth: 1)
+                    }
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                .scrollTargetBehaviorCompat()
-                .frame(height: pageH)
+                .buttonStyle(.plain)
+                .albumContextMenu(album)
+                .padding(.horizontal, 20)
+                .accessibilityLabel(L(.artist_latest_release))
+            }
+            .padding(.top, 12)
+        }
+    }
+
+    private func featuredEyebrow(_ album: Album) -> String? {
+        let isSingle = (album.songCount ?? album.song?.count ?? 0) <= 1
+        let kind = isSingle ? L(.artist_singles) : L(.media_albums)
+        if let year = album.year { return "\(kind) · \(year)" }
+        return album.createdDate.map { "\(kind) · \(Self.cardDateFormatter.string(from: $0))" }
+    }
+
+    private static let cardDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d, yyyy"
+        return f
+    }()
+
+    // MARK: - All songs across albums
+
+    @ViewBuilder
+    private var accumulatedSongsSection: some View {
+        let songs = vm.visibleAccumulatedSongs
+        if !songs.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionHeaderView(
+                    L(.media_songs),
+                    onSeeAll: vm.hasMoreAccumulated
+                        ? { withAnimation(.easeInOut(duration: 0.25)) { vm.toggleAccumulated() } }
+                        : nil
+                )
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 4)
+
+                ForEach(Array(songs.enumerated()), id: \.element.id) { i, song in
+                    artistSongRow(song: song)
+                    if i < songs.count - 1 {
+                        Divider().background(.white.opacity(0.06)).padding(.leading, 60)
+                    }
+                }
+                .padding(.horizontal, 20)
             }
             .padding(.bottom, 8)
         }
     }
 
-    private func compactTopSongRow(song: Song, index: Int) -> some View {
+    // MARK: - Top Songs
+
+    private static let rowHeight: CGFloat = 52
+    private static let topSongsCollapsedCount = 5
+
+    @ViewBuilder
+    private var topSongsSection: some View {
+        if !vm.topSongs.isEmpty {
+            let shown = vm.topSongsExpanded
+                ? vm.topSongs
+                : Array(vm.topSongs.prefix(Self.topSongsCollapsedCount))
+
+            VStack(alignment: .leading, spacing: 0) {
+                SectionHeaderView(
+                    L(.section_top_songs),
+                    onSeeAll: vm.topSongs.count > Self.topSongsCollapsedCount
+                        ? { withAnimation(.easeInOut(duration: 0.25)) { vm.toggleTopSongsExpanded() } }
+                        : nil
+                )
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 4)
+
+                ForEach(Array(shown.enumerated()), id: \.element.id) { i, song in
+                    artistSongRow(song: song)
+                    if i < shown.count - 1 {
+                        Divider().background(.white.opacity(0.06)).padding(.leading, 60)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+            .padding(.bottom, 8)
+        }
+    }
+
+    /// One song line: artwork, title, album · year, matching Apple Music's
+    /// artist tracklists.
+    private func artistSongRow(song: Song) -> some View {
         HStack(spacing: 10) {
             Button {
                 appState.audioPlayer.play(song: song)
             } label: {
                 HStack(spacing: 10) {
-                    Text("\(index)")
-                        .font(.system(size: 12, weight: .regular).monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.4))
-                        .frame(width: 16, alignment: .center)
-
                     ArtworkView(coverArtID: song.coverArt, size: 80, cornerRadius: 4)
                         .frame(width: 34, height: 34)
 
@@ -392,7 +657,7 @@ struct ArtistDetailView: View {
 
                 VStack(spacing: 0) {
                     ForEach(Array(liked.enumerated()), id: \.element.id) { i, song in
-                        compactTopSongRow(song: song, index: i + 1)
+                        artistSongRow(song: song)
                         if i < liked.count - 1 {
                             Divider().background(.white.opacity(0.06)).padding(.leading, 60)
                         }
@@ -576,36 +841,6 @@ struct ArtistDetailView: View {
 
     // MARK: - About
 
-    @ViewBuilder
-    private var aboutSection: some View {
-        // genre is shown in the Stats section below, so About only carries the bio
-        // (prevents the genre appearing twice on the profile)
-        if let bio = vm.biography {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(L(.artist_about, vm.displayArtist.name))
-                    .font(.title3.bold())
-                    .foregroundStyle(.white)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(bio)
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.65))
-                        .lineLimit(4)
-
-                    Button { showBioSheet = true } label: {
-                        Text(L(.action_more))
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Theme.accent)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 24)
-            .padding(.bottom, 16)
-        }
-    }
-
     // MARK: - Artist Stats
 
     @ViewBuilder
@@ -720,7 +955,6 @@ private struct ArtistProfileHeader: View {
     let width: CGFloat
     let baseHeight: CGFloat
     let bg: Color
-    let artistName: String
     let profileImage: UIImage?
     let fallbackAlbum: Album?
     let dominantColor: UIColor
@@ -733,33 +967,121 @@ private struct ArtistProfileHeader: View {
         let headerHeight = baseHeight + stretch
 
         // Lives outside the ScrollView so only this small header redraws on scroll.
-        ZStack(alignment: .bottomLeading) {
-            headerImage
-                .frame(width: width, height: headerHeight)
-                .clipped()
-                .overlay {
-                    LinearGradient(
-                        colors: [.clear, bg.opacity(0.6), bg],
-                        startPoint: .init(x: 0.5, y: 0.35),
-                        endPoint: .bottom
-                    )
-                }
-
-            Text(artistName)
-                .font(.system(size: 36, weight: .bold))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.4), radius: 4, x: 0, y: 2)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
-        }
-        .frame(width: width, height: headerHeight, alignment: .bottom)
+        ArtistHeroComposition(
+            width: width,
+            headerHeight: headerHeight,
+            bg: bg,
+            profileImage: profileImage,
+            fallbackAlbum: fallbackAlbum,
+            dominantColor: dominantColor,
+            onFallbackImageLoaded: onFallbackImageLoaded
+        )
         .offset(y: -shift)
         .transaction { $0.animation = nil }
         .allowsHitTesting(false)
     }
+}
+
+/// The full hero: sharp photo, a blurred copy of its lower edge laid over the
+/// image so the picture itself softens, then the tint fade carrying that blurred
+/// edge into the page background.
+private struct ArtistHeroComposition: View {
+    let width: CGFloat
+    let headerHeight: CGFloat
+    let bg: Color
+    let profileImage: UIImage?
+    let fallbackAlbum: Album?
+    let dominantColor: UIColor
+    let onFallbackImageLoaded: (UIImage) -> Void
+
+    private var blendHeight: CGFloat {
+        min(max(headerHeight * 0.48, 170), 300)
+    }
+
+    /// Where the blurred copy starts taking over, as a fraction of the header.
+    private var blurStart: CGFloat {
+        max(0, min(0.82, (headerHeight - blendHeight) / max(headerHeight, 1)))
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            heroImage
+                .frame(width: width, height: headerHeight)
+                .clipped()
+
+            // Blurred copy of the photo drawn OVER the sharp image, revealed
+            // progressively so the picture itself dissolves toward the bottom.
+            // Masking the full-size blurred image (never a clipped sub-frame)
+            // keeps the band exactly over the photo.
+            heroImage
+                .frame(width: width, height: headerHeight)
+                .clipped()
+                .blur(radius: 26, opaque: true)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0.00),
+                            .init(color: .clear, location: blurStart),
+                            .init(color: .white.opacity(0.35), location: min(1, blurStart + 0.10)),
+                            .init(color: .white.opacity(0.72), location: min(1, blurStart + 0.22)),
+                            .init(color: .white, location: 1.00),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+
+            // Carries the blurred edge the rest of the way into the page tint. The stops
+            // are eased so there is no abrupt ramp in the last few percent.
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.00),
+                    .init(color: bg.opacity(0.08), location: 0.35),
+                    .init(color: bg.opacity(0.22), location: 0.55),
+                    .init(color: bg.opacity(0.45), location: 0.72),
+                    .init(color: bg.opacity(0.72), location: 0.86),
+                    .init(color: bg.opacity(0.92), location: 0.95),
+                    .init(color: bg, location: 1.00),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: blendHeight)
+            .allowsHitTesting(false)
+        }
+        .frame(width: width, height: headerHeight, alignment: .bottom)
+        .overlay(alignment: .top) {
+            // Keeps the status-bar area readable over bright photos.
+            LinearGradient(
+                colors: [.black.opacity(0.35), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: headerHeight * 0.22)
+            .allowsHitTesting(false)
+        }
+        .clipped()
+    }
 
     @ViewBuilder
-    private var headerImage: some View {
+    private var heroImage: some View {
+        ArtistHeroImage(
+            profileImage: profileImage,
+            fallbackAlbum: fallbackAlbum,
+            dominantColor: dominantColor,
+            onFallbackImageLoaded: onFallbackImageLoaded
+        )
+    }
+}
+
+/// Shared full-bleed artist photo with graceful fallbacks.
+private struct ArtistHeroImage: View {
+    let profileImage: UIImage?
+    let fallbackAlbum: Album?
+    let dominantColor: UIColor
+    let onFallbackImageLoaded: (UIImage) -> Void
+
+    var body: some View {
         if let profileImage {
             Image(uiImage: profileImage)
                 .resizable()
@@ -774,7 +1096,7 @@ private struct ArtistProfileHeader: View {
             .aspectRatio(1, contentMode: .fill)
         } else {
             Rectangle()
-                .fill(Color(dominantColor).opacity(0.3))
+                .fill(Color(dominantColor).opacity(0.35))
                 .overlay {
                     Image(systemName: "person.fill")
                         .font(.system(size: 80, weight: .light))
@@ -789,7 +1111,6 @@ private struct IOS16ArtistProfileHeader: View {
     let baseHeight: CGFloat
     let scrollSpaceName: String
     let bg: Color
-    let artistName: String
     let profileImage: UIImage?
     let fallbackAlbum: Album?
     let dominantColor: UIColor
@@ -800,54 +1121,18 @@ private struct IOS16ArtistProfileHeader: View {
             let pullDistance = max(0, geo.frame(in: .named(scrollSpaceName)).minY)
             let headerHeight = baseHeight + pullDistance
 
-            ZStack(alignment: .bottomLeading) {
-                headerImage
-                    .frame(width: width, height: headerHeight)
-                    .clipped()
-                    .overlay {
-                        LinearGradient(
-                            colors: [.clear, bg.opacity(0.6), bg],
-                            startPoint: .init(x: 0.5, y: 0.35),
-                            endPoint: .bottom
-                        )
-                    }
-
-                Text(artistName)
-                    .font(.system(size: 36, weight: .bold))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.4), radius: 4, x: 0, y: 2)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
-            }
-            .frame(width: width, height: headerHeight, alignment: .bottom)
+            ArtistHeroComposition(
+                width: width,
+                headerHeight: headerHeight,
+                bg: bg,
+                profileImage: profileImage,
+                fallbackAlbum: fallbackAlbum,
+                dominantColor: dominantColor,
+                onFallbackImageLoaded: onFallbackImageLoaded
+            )
             .offset(y: pullDistance > 0 ? -pullDistance : 0)
             .transaction { $0.animation = nil }
             .allowsHitTesting(false)
-        }
-    }
-
-    @ViewBuilder
-    private var headerImage: some View {
-        if let profileImage {
-            Image(uiImage: profileImage)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-        } else if let fallbackAlbum {
-            ArtworkView(
-                coverArtID: fallbackAlbum.coverArt,
-                size: 800,
-                cornerRadius: 0,
-                onImageLoaded: onFallbackImageLoaded
-            )
-            .aspectRatio(1, contentMode: .fill)
-        } else {
-            Rectangle()
-                .fill(Color(dominantColor).opacity(0.3))
-                .overlay {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 80, weight: .light))
-                        .foregroundStyle(.white.opacity(0.3))
-                }
         }
     }
 }
@@ -857,6 +1142,59 @@ private struct ArtistScrollOffsetPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+/// Reports the *window's* top safe-area inset.
+///
+/// A pushed view's own `safeAreaInsets` also includes any navigation/search
+/// chrome it sits under. Search pushes artist profiles from a `NavigationStack`
+/// with an always-visible search field, so its inset was ~45pt larger than when
+/// the same profile is opened from Home or Library — which pushed the floating
+/// header buttons down only on that route.
+///
+/// The window's inset reflects just the physical status-bar/notch area, so the
+/// buttons and the photo's bleed point land identically from every entry point.
+private struct WindowTopInsetReader: UIViewRepresentable {
+    let onChange: (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let probe = ProbeView()
+        probe.onChange = onChange
+        return probe
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        (uiView as? ProbeView)?.onChange = onChange
+    }
+
+    final class ProbeView: UIView {
+        var onChange: ((CGFloat) -> Void)?
+        private var lastReported: CGFloat = -1
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            report()
+        }
+
+        override func safeAreaInsetsDidChange() {
+            super.safeAreaInsetsDidChange()
+            report()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            report()
+        }
+
+        private func report() {
+            // Deliberately the window's inset, never this view's.
+            guard let window else { return }
+            let value = window.safeAreaInsets.top
+            guard abs(value - lastReported) > 0.5 else { return }
+            lastReported = value
+            onChange?(value)
+        }
     }
 }
 
