@@ -1,5 +1,37 @@
 import Foundation
 
+/// The source the user explicitly used most recently. This is deliberately
+/// separate from the default/fallback server roles: those roles are connection
+/// policy, not a statement that a server should replace Local Files at launch.
+enum ActiveMusicSource: Codable, Equatable {
+    case server(id: String)
+    case localLibrary
+
+    private enum CodingKeys: String, CodingKey { case kind, serverID }
+    private enum Kind: String, Codable { case server, localLibrary }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .server:
+            self = .server(id: try container.decode(String.self, forKey: .serverID))
+        case .localLibrary:
+            self = .localLibrary
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .server(let id):
+            try container.encode(Kind.server, forKey: .kind)
+            try container.encode(id, forKey: .serverID)
+        case .localLibrary:
+            try container.encode(Kind.localLibrary, forKey: .kind)
+        }
+    }
+}
+
 // JSON-backed server store; xtool-friendly.
 @MainActor
 final class ServerStore {
@@ -7,6 +39,7 @@ final class ServerStore {
     private let discoverURL: URL
     private var servers: [ServerRecord] = []
     private var discoverCaches: [DiscoverCache] = []
+    private static let activeSourceKey = "activeMusicSource"
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -43,6 +76,24 @@ final class ServerStore {
             currentServer(),
             fallbackServer()
         ])
+    }
+
+    func server(id: String) -> ServerRecord? {
+        servers.first { $0.id == id }
+    }
+
+    func activeSource() -> ActiveMusicSource? {
+        guard let data = UserDefaults.standard.data(forKey: Self.activeSourceKey) else { return nil }
+        return try? JSONDecoder().decode(ActiveMusicSource.self, from: data)
+    }
+
+    func setActiveSource(_ source: ActiveMusicSource) {
+        guard let data = try? JSONEncoder().encode(source) else { return }
+        UserDefaults.standard.set(data, forKey: Self.activeSourceKey)
+    }
+
+    func clearActiveSource() {
+        UserDefaults.standard.removeObject(forKey: Self.activeSourceKey)
     }
 
     func config(for record: ServerRecord, cellular: Bool = false) -> SubsonicConfig? {
@@ -175,6 +226,9 @@ final class ServerStore {
         KeychainService.delete(for: record.id)
         KeychainService.delete(for: Self.cellularAccount(for: record.id))
         servers.removeAll { $0.id == record.id }
+        if case .server(let id) = activeSource(), id == record.id {
+            clearActiveSource()
+        }
         normalizeServerRoles()
         save()
     }

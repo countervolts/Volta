@@ -7,7 +7,7 @@ struct LibraryStatsContentView: View {
     @ObservedObject var vm: LibraryStatsViewModel
     @ObservedObject private var downloads = DownloadService.shared
     @EnvironmentObject private var appState: AppState
-    @State private var scope: LibraryStatsViewModel.Scope = .server
+    @State private var scope: LibraryStatsViewModel.Scope = .library
 
     private var loadTaskID: String {
         let serverID = appState.currentServer?.id ?? "none"
@@ -23,7 +23,7 @@ struct LibraryStatsContentView: View {
             vm.loadIfNeeded(appState: appState, scope: scope)
         }
         .onChangeCompat(of: downloads.downloadedRevision) { _, _ in
-            if scope == .local { vm.refresh(appState: appState, scope: .local) }
+            if scope == .downloads { vm.refresh(appState: appState, scope: .downloads) }
         }
     }
 
@@ -37,7 +37,7 @@ struct LibraryStatsContentView: View {
                         scope = item
                     }
                 } label: {
-                    Text(item.rawValue)
+                    Text(item.label(isLocalLibrary: appState.isLocalMode))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(scope == item ? Theme.background : Theme.primaryText)
                         .frame(maxWidth: .infinity)
@@ -71,7 +71,9 @@ struct LibraryStatsContentView: View {
                 .tint(Theme.accent)
                 .frame(width: 180)
             Text(vm.progress > 0.01 ? "Scanning library… \(Int(vm.progress * 100))%" :
-                    (scope == .local ? "Reading downloaded music…" : "Reading server library…"))
+                    (scope == .downloads
+                        ? "Reading device downloads…"
+                        : (appState.isLocalMode ? "Scanning Local Files…" : "Reading server library…")))
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondaryText)
         }
@@ -115,7 +117,7 @@ struct LibraryStatsContentView: View {
 
     private func sourceBanner(_ s: LibraryStatsData) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: scope == .local || vm.isOfflineData ? "arrow.down.circle.fill" : "music.note.house.fill")
+            Image(systemName: scope == .downloads || vm.isOfflineData ? "arrow.down.circle.fill" : "music.note.house.fill")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(Theme.accent)
                 .frame(width: 42, height: 42)

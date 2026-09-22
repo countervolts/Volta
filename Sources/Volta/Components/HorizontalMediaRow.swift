@@ -3,7 +3,11 @@ import SwiftUI
 // Horizontal row that peeks the next card.
 struct HorizontalMediaRow: View {
     let items: [MediaItem]
-    var onSelect: (MediaItem) -> Void = { _ in }
+    /// Each visible card needs its own transition identity. An album can occur
+    /// in several home rows, and using only its album ID makes the zoom choose
+    /// whichever matching source SwiftUI encounters first.
+    var heroSourceID: (MediaItem, Int) -> String = { item, _ in item.id }
+    var onSelect: (MediaItem, String) -> Void = { _, _ in }
 
 #if os(iOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -20,14 +24,15 @@ struct HorizontalMediaRow: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: Theme.Layout.gridSpacing) {
-                ForEach(items) { item in
-                    let card = MediaCard(item: item)
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    let sourceID = heroSourceID(item, index)
+                    let card = MediaCard(item: item, heroSourceID: sourceID)
                         .containerRelativeFrameCompat(
                             count: usesLandscapeCardLayout ? 8 : 5,
                             span: 2,
                             spacing: Theme.Layout.gridSpacing
                         )
-                        .onTapGesture { onSelect(item) }
+                        .onTapGesture { onSelect(item, sourceID) }
                     if let album = item.albumRef {
                         card.albumContextMenu(album)
                     } else {
@@ -45,7 +50,11 @@ struct HorizontalMediaRow: View {
 // Picks for You row: album and mix cards share the same footprint.
 struct HorizontalPickRow: View {
     let items: [PickFeedItem]
-    var onSelectAlbum: (Album) -> Void = { _ in }
+    var heroSourceID: (PickFeedItem, Int) -> String = { item, _ in
+        if case .album(let album) = item { return album.id }
+        return item.id
+    }
+    var onSelectAlbum: (Album, String) -> Void = { _, _ in }
     var onSelectMix: (MusicMix) -> Void = { _ in }
     var onSaveMix: (MusicMix) -> Void = { _ in }
     var isSavingMix: (MusicMix) -> Bool = { _ in false }
@@ -74,12 +83,13 @@ struct HorizontalPickRow: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: Theme.Layout.gridSpacing) {
-                ForEach(items) { item in
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     Group {
                         switch item {
                         case .album(let album):
-                            PickCard(album: album)
-                                .onTapGesture { onSelectAlbum(album) }
+                            let sourceID = heroSourceID(item, index)
+                            PickCard(album: album, heroSourceID: sourceID)
+                                .onTapGesture { onSelectAlbum(album, sourceID) }
                                 .albumContextMenu(album)
                         case .mix(let mix):
                             PickMixCard(mix: mix)

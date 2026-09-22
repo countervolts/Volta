@@ -25,7 +25,7 @@ final class EmbyCompatibilityTests: XCTestCase {
             XCTAssertEqual(request.url?.path, "/emby/Users/AuthenticateByName")
             XCTAssertTrue(request.value(forHTTPHeaderField: "X-Emby-Authorization")?.hasPrefix("Emby ") == true)
             XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
-            return .json([
+            return try .json([
                 "User": ["Id": "user-1"],
                 "AccessToken": "token-1",
             ])
@@ -48,7 +48,7 @@ final class EmbyCompatibilityTests: XCTestCase {
             let fields = request.url?.queryValue("Fields") ?? ""
             XCTAssertFalse(fields.contains("ImageTags"))
             XCTAssertFalse(fields.contains("PrimaryImageTag"))
-            return .json(items: [
+            return try .json(items: [
                 ["Id": "album-1", "Name": "Album", "Type": "MusicAlbum"],
             ])
         }
@@ -65,7 +65,7 @@ final class EmbyCompatibilityTests: XCTestCase {
             if request.url?.queryValue("Fields") != nil {
                 return .text(status: 400, body: #"{"error":"unsupported field"}"#)
             }
-            return .json(items: [
+            return try .json(items: [
                 ["Id": "album-1", "Name": "Album", "Type": "MusicAlbum"],
             ])
         }
@@ -93,7 +93,7 @@ final class EmbyCompatibilityTests: XCTestCase {
 
     func testEmptyEmbyMusicLibraryReturnsEmptyWithoutError() async throws {
         MockURLProtocol.handler = { _ in
-            .json(["Items": [], "TotalRecordCount": 0])
+            try .json(["Items": [], "TotalRecordCount": 0])
         }
 
         let albums = try await embyClient().allAlbums(size: 50, offset: 0)
@@ -153,7 +153,7 @@ final class EmbyCompatibilityTests: XCTestCase {
             let items = (0..<count).map { index in
                 ["Id": "album-\(start + index)", "Name": "Album \(start + index)", "Type": "MusicAlbum"]
             }
-            return .json(items: items)
+            return try .json(items: items)
         }
 
         var all: [Album] = []

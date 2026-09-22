@@ -707,7 +707,7 @@ private struct GenreHomeView: View {
                         section(title: "\(genreName) \(L(.home_picks_for_you))") {
                             HorizontalPickRow(
                                 items: pickFeed,
-                                onSelectAlbum: onAlbum,
+                                onSelectAlbum: { album, _ in onAlbum(album) },
                                 onSelectMix: onMix,
                                 onSaveMix: { saveMixAsPlaylist($0) },
                                 isSavingMix: { savingMixIDs.contains($0.id) }
@@ -719,7 +719,7 @@ private struct GenreHomeView: View {
 
                     if !genreData.discoverItems.isEmpty {
                         section(title: L(.home_discover)) {
-                            HorizontalMediaRow(items: genreData.discoverItems) { item in
+                            HorizontalMediaRow(items: genreData.discoverItems) { item, _ in
                                 if let album = item.albumRef { onAlbum(album) }
                             }
                         }
@@ -727,7 +727,7 @@ private struct GenreHomeView: View {
 
                     if !genreData.albumItems.isEmpty {
                         section(title: L(.media_albums)) {
-                            HorizontalMediaRow(items: genreData.albumItems) { item in
+                            HorizontalMediaRow(items: genreData.albumItems) { item, _ in
                                 if let album = item.albumRef { onAlbum(album) }
                             }
                         }

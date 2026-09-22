@@ -28,6 +28,8 @@ final class LocalLibraryStore: NSObject, ObservableObject, UIDocumentPickerDeleg
 
     private static let bookmarkKey = "localMusicFolderBookmark"
     private static let restoreKey = "localMusicAutoRestore"
+    private static let libraryIDKey = "localMusicLibraryID"
+    private static let rootFingerprintKey = "localMusicRootFingerprint"
 
     private var picker: UIDocumentPickerViewController?
     private var pickerContinuation: CheckedContinuation<URL?, Never>?
@@ -45,10 +47,22 @@ final class LocalLibraryStore: NSObject, ObservableObject, UIDocumentPickerDeleg
         guard folder.startAccessingSecurityScopedResource() else {
             throw LocalLibraryError.bookmarkUnavailable
         }
+        let defaults = UserDefaults.standard
+        let previousLibraryID = defaults.object(forKey: Self.libraryIDKey)
+        let previousFingerprint = defaults.object(forKey: Self.rootFingerprintKey)
+        let libraryID = libraryID(for: folder)
+        let service: LocalMusicService
+        do {
+            service = try await LocalMusicService.make(rootURL: folder, libraryID: libraryID)
+        } catch {
+            folder.stopAccessingSecurityScopedResource()
+            restore(previousLibraryID, forKey: Self.libraryIDKey, defaults: defaults)
+            restore(previousFingerprint, forKey: Self.rootFingerprintKey, defaults: defaults)
+            throw error
+        }
         stopAccessingCurrentRoot()
         accessedRoot = folder
         try saveBookmark(for: folder)
-        let service = try await LocalMusicService.make(rootURL: folder)
         UserDefaults.standard.set(true, forKey: Self.restoreKey)
         return service
     }
@@ -72,7 +86,7 @@ final class LocalLibraryStore: NSObject, ObservableObject, UIDocumentPickerDeleg
         stopAccessingCurrentRoot()
         accessedRoot = folder
         if stale { try saveBookmark(for: folder) }
-        return try await LocalMusicService.make(rootURL: folder)
+        return try await LocalMusicService.make(rootURL: folder, libraryID: restoredLibraryID(for: folder))
     }
 
     func disableAutoRestore() {
@@ -90,6 +104,50 @@ final class LocalLibraryStore: NSObject, ObservableObject, UIDocumentPickerDeleg
             relativeTo: nil
         )
         UserDefaults.standard.set(data, forKey: Self.bookmarkKey)
+    }
+
+    /// Security-scoped bookmark bytes and absolute paths may change when a
+    /// folder is moved or the bookmark is refreshed. Persist an opaque ID once
+    /// for the selected root instead, retaining it when Files identifies the
+    /// same directory again.
+    private func libraryID(for folder: URL) -> String {
+        let fingerprint = rootFingerprint(for: folder)
+        let defaults = UserDefaults.standard
+        if defaults.string(forKey: Self.rootFingerprintKey) == fingerprint,
+           let id = defaults.string(forKey: Self.libraryIDKey)?.nonBlank {
+            return id
+        }
+        let id = UUID().uuidString.lowercased()
+        defaults.set(id, forKey: Self.libraryIDKey)
+        defaults.set(fingerprint, forKey: Self.rootFingerprintKey)
+        return id
+    }
+
+    private func restoredLibraryID(for folder: URL) -> String {
+        let defaults = UserDefaults.standard
+        if let id = defaults.string(forKey: Self.libraryIDKey)?.nonBlank {
+            return id
+        }
+        // Existing installations have a bookmark but no opaque ID yet. Assign
+        // one exactly once during the first upgrade restore.
+        return libraryID(for: folder)
+    }
+
+    private func rootFingerprint(for folder: URL) -> String {
+        if let identifier = try? folder.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier {
+            return "resource:\(String(describing: identifier))"
+        }
+        // This fallback is only used when Files cannot provide a stable file
+        // identity. The generated library ID remains stable across relaunches.
+        return "path:\(folder.standardizedFileURL.path)"
+    }
+
+    private func restore(_ value: Any?, forKey key: String, defaults: UserDefaults) {
+        if let value {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     private func stopAccessingCurrentRoot() {
@@ -141,7 +199,7 @@ final class LocalLibraryStore: NSObject, ObservableObject, UIDocumentPickerDeleg
     }
 }
 
-private struct LocalMetadata: Sendable {
+private struct LocalMetadata: Codable, Sendable {
     var title: String?
     var artist: String?
     var albumArtist: String?
@@ -151,6 +209,10 @@ private struct LocalMetadata: Sendable {
     var year: Int?
     var genre: String?
     var codec: String?
+    var bitRate: Int?
+    var samplingRate: Int?
+    var bitDepth: Int?
+    var channelCount: Int?
     var duration: Int?
     var artwork: Data?
     var lyrics: String?
@@ -167,8 +229,26 @@ private struct LocalScannedTrack: Sendable {
     let artworkURL: URL?
 }
 
+/// A small, per-library cache avoids opening and parsing every media container
+/// on each launch. Source size and modification date make a changed file a
+/// cache miss; deleted files naturally disappear because only the current
+/// enumeration is written back.
+private struct LocalMetadataCache: Codable, Sendable {
+    var schemaVersion: Int
+    var entries: [String: LocalCachedTrack]
+}
+
+private struct LocalCachedTrack: Codable, Sendable {
+    let size: Int
+    let modifiedAt: Date
+    let metadata: LocalMetadata
+    let embeddedArtworkPath: String?
+    let lyricsFromSidecar: Bool
+}
+
 struct LocalLibrarySnapshot: Sendable {
     let folderName: String
+    let directories: [String]
     let songs: [Song]
     let albums: [Album]
     let artists: [Artist]
@@ -190,6 +270,8 @@ private struct LocalPlaylistRecord: Codable, Sendable {
 /// Existing library, album, search, artwork, and playback screens can therefore
 /// use metadata as their source of truth without a second UI-specific catalog.
 final class LocalMusicService: MusicService, @unchecked Sendable {
+    /// Legacy value retained only for compatibility with pre-1.4.1 callers.
+    /// Per-library persistence must use `persistenceID` below.
     static let serverID = "local-library"
 
     let config: SubsonicConfig
@@ -203,6 +285,8 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
         .playlistReordering,
     ]
     let rootURL: URL
+    let libraryID: String
+    var persistenceID: String { "local-library:\(libraryID)" }
     let folderName: String
     var songCount: Int { songs.count }
     var albumCount: Int { albums.count }
@@ -210,6 +294,7 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
     var totalBytes: Int { songs.reduce(0) { $0 + ($1.size ?? 0) } }
 
     private let songs: [Song]
+    private let directories: Set<String>
     private let albums: [Album]
     private let artists: [Artist]
     private let albumsByID: [String: Album]
@@ -222,18 +307,32 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
     private var localPlaylists: [LocalPlaylistRecord]
     private var starredIDs: Set<String>
 
-    private static var localDataDirectory: URL {
+    private static var legacyLocalDataDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Volta/LocalLibrary", isDirectory: true)
     }
 
-    private static var playlistsURL: URL {
-        localDataDirectory.appendingPathComponent("playlists.json")
+    private static func localDataDirectory(for libraryID: String) -> URL {
+        legacyLocalDataDirectory.appendingPathComponent(libraryID, isDirectory: true)
     }
 
-    private init(rootURL: URL, snapshot: LocalLibrarySnapshot) {
+    private static func playlistsURL(for libraryID: String) -> URL {
+        localDataDirectory(for: libraryID).appendingPathComponent("playlists.json")
+    }
+
+    private static func metadataCacheURL(for libraryID: String) -> URL {
+        localDataDirectory(for: libraryID).appendingPathComponent("metadata-cache.json")
+    }
+
+    private var localDataDirectory: URL { Self.localDataDirectory(for: libraryID) }
+    private var playlistsURL: URL { Self.playlistsURL(for: libraryID) }
+    private var starredDefaultsKey: String { "localMusicStarredIDs.\(libraryID)" }
+
+    private init(rootURL: URL, libraryID: String, snapshot: LocalLibrarySnapshot) {
         self.rootURL = rootURL
+        self.libraryID = libraryID
         self.folderName = snapshot.folderName
+        self.directories = Set(snapshot.directories)
         self.songs = snapshot.songs
         self.albums = snapshot.albums
         self.artists = snapshot.artists
@@ -243,8 +342,8 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
         self.songURLs = snapshot.songURLs
         self.artworkURLs = snapshot.artworkURLs
         self.lyricsBySongID = snapshot.lyricsBySongID
-        self.localPlaylists = (try? JSONDecoder().decode([LocalPlaylistRecord].self, from: Data(contentsOf: Self.playlistsURL))) ?? []
-        self.starredIDs = Set(UserDefaults.standard.stringArray(forKey: "localMusicStarredIDs") ?? [])
+        self.localPlaylists = Self.loadPlaylists(for: libraryID, songs: snapshot.songs)
+        self.starredIDs = Self.loadStarredIDs(for: libraryID, songs: snapshot.songs)
         self.config = SubsonicConfig(
             baseURL: URL(string: "https://local.volta.invalid")!,
             username: "Local Library",
@@ -252,9 +351,13 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
         )
     }
 
-    static func make(rootURL: URL) async throws -> LocalMusicService {
-        let snapshot = try await scan(rootURL: rootURL)
-        return LocalMusicService(rootURL: rootURL, snapshot: snapshot)
+    static func make(rootURL: URL, libraryID: String? = nil) async throws -> LocalMusicService {
+        // The store always supplies an opaque, bookmark-backed ID. The path
+        // fallback keeps direct/test construction deterministic without making
+        // the persisted application path part of an identity.
+        let libraryID = libraryID?.nonBlank ?? "temporary-\(Crypto.md5Hex(rootURL.standardizedFileURL.path))"
+        let snapshot = try await scan(rootURL: rootURL, libraryID: libraryID)
+        return LocalMusicService(rootURL: rootURL, libraryID: libraryID, snapshot: snapshot)
     }
 
     func ping() async throws {}
@@ -274,18 +377,30 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
     }
 
     func indexes(musicFolderId: String?) async throws -> [BrowseEntry] {
-        let folders = Set(songs.compactMap { $0.path?.split(separator: "/").first.map(String.init) })
-        return folders.sorted().map {
-            BrowseEntry(id: "local-folder:\($0)", name: $0, isDirectory: true, coverArt: nil, song: nil)
-        }
+        // `getIndexes` represents the selected music folder itself. Unlike the
+        // old implementation, a filename at the root is not promoted into a
+        // fake directory; the root can contain both tracks and folders.
+        browseEntries(in: "")
     }
 
     func musicDirectory(id: String) async throws -> [BrowseEntry] {
         guard id.hasPrefix("local-folder:") else { return [] }
-        let folder = String(id.dropFirst("local-folder:".count))
-        let prefix = folder.isEmpty ? "" : folder + "/"
+        return browseEntries(in: String(id.dropFirst("local-folder:".count)))
+    }
+
+    private func browseEntries(in directory: String) -> [BrowseEntry] {
+        let prefix = directory.isEmpty ? "" : directory + "/"
         var childFolders = Set<String>()
         var entries: [BrowseEntry] = []
+        for path in directories where path.hasPrefix(prefix) {
+            let remainder = String(path.dropFirst(prefix.count))
+            guard !remainder.isEmpty else { continue }
+            if let slash = remainder.firstIndex(of: "/") {
+                childFolders.insert(String(remainder[..<slash]))
+            } else {
+                childFolders.insert(remainder)
+            }
+        }
         for song in songs where song.path?.hasPrefix(prefix) == true {
             guard let path = song.path else { continue }
             let remainder = String(path.dropFirst(prefix.count))
@@ -296,10 +411,10 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
                 entries.append(BrowseEntry(id: song.id, name: song.title, isDirectory: false, coverArt: song.coverArt, song: song))
             }
         }
-        let folders = childFolders.sorted().map {
+        let folders = childFolders.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.map {
             BrowseEntry(id: "local-folder:\(prefix)\($0)", name: $0, isDirectory: true, coverArt: nil, song: nil)
         }
-        return folders + entries
+        return folders + entries.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     func randomAlbums(size: Int) async throws -> [Album] {
@@ -307,15 +422,19 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
     }
 
     func newestAlbums(size: Int) async throws -> [Album] {
-        Array(albums.prefix(max(0, size)))
+        // Filesystem modification time is not a release/addition date. Do not
+        // present alphabetically ordered local albums as "Newest".
+        []
     }
 
     func recentlyPlayedAlbums(size: Int) async throws -> [Album] {
-        Array(albums.prefix(max(0, size)))
+        // Local Files does not currently persist play history as a catalog
+        // statistic, so an empty result hides this remote-only shelf.
+        []
     }
 
     func frequentAlbums(size: Int) async throws -> [Album] {
-        Array(albums.prefix(max(0, size)))
+        []
     }
 
     func allAlbums(size: Int, offset: Int) async throws -> [Album] {
@@ -335,7 +454,9 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
     }
 
     func topSongs(artistName: String, count: Int) async throws -> [Song] {
-        Array(songs.filter { $0.artist == artistName || $0.albumArtist == artistName }.prefix(max(0, count)))
+        // There is no local play-count data yet. Returning file-order tracks
+        // here would make an arbitrary list look like a popularity ranking.
+        []
     }
 
     func song(id: String) async throws -> Song? { songsByID[id] }
@@ -461,7 +582,12 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
         (artists.count, albums.count, songs.count)
     }
     func scrobble(id: String, at date: Date?, submission: Bool) async throws {}
-    func lyricsBySongId(id: String) async throws -> LyricsList? { nil }
+    func lyricsBySongId(id: String) async throws -> LyricsList? {
+        guard let text = lyricsBySongID[id],
+              let parsed = LyricsParser.parse(text: text),
+              !parsed.lines.isEmpty else { return nil }
+        return parsed.lyricsList
+    }
     func lyrics(artist: String, title: String) async throws -> String? {
         songs.first {
             $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame
@@ -517,64 +643,191 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
     }
 
     private func persistLocalData() {
-        try? FileManager.default.createDirectory(at: Self.localDataDirectory, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: localDataDirectory, withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(localPlaylists) {
-            try? data.write(to: Self.playlistsURL, options: .atomic)
+            try? data.write(to: playlistsURL, options: .atomic)
         }
-        UserDefaults.standard.set(Array(starredIDs), forKey: "localMusicStarredIDs")
+        UserDefaults.standard.set(Array(starredIDs), forKey: starredDefaultsKey)
     }
 
-    private static func scan(rootURL: URL) async throws -> LocalLibrarySnapshot {
+    private static let legacyFavoritesKey = "localMusicStarredIDs"
+    private static let legacyFavoritesMigrationKey = "localMusicStarredIDsMigratedToScopedLibraries"
+    private static let legacyPlaylistsMigrationKey = "localMusicPlaylistsMigratedToScopedLibraries"
+
+    private static func loadStarredIDs(for libraryID: String, songs: [Song]) -> Set<String> {
+        let defaults = UserDefaults.standard
+        let key = "localMusicStarredIDs.\(libraryID)"
+        if let saved = defaults.stringArray(forKey: key) {
+            return Set(saved).intersection(Set(songs.map(\.id)))
+        }
+
+        // Legacy IDs contained only the relative path. They are ambiguous once
+        // another root is selected, so migrate them once to the currently
+        // restored library rather than leaking them into every later library.
+        guard !defaults.bool(forKey: legacyFavoritesMigrationKey) else { return [] }
+        let remapped = remapLegacySongIDs(defaults.stringArray(forKey: legacyFavoritesKey) ?? [], songs: songs)
+        defaults.set(Array(remapped), forKey: key)
+        defaults.set(true, forKey: legacyFavoritesMigrationKey)
+        return remapped
+    }
+
+    private static func loadPlaylists(for libraryID: String, songs: [Song]) -> [LocalPlaylistRecord] {
+        let scopedURL = playlistsURL(for: libraryID)
+        if let data = try? Data(contentsOf: scopedURL),
+           let saved = try? JSONDecoder().decode([LocalPlaylistRecord].self, from: data) {
+            return sanitizePlaylists(saved, songs: songs)
+        }
+
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: legacyPlaylistsMigrationKey),
+              let data = try? Data(contentsOf: legacyLocalDataDirectory.appendingPathComponent("playlists.json")),
+              let legacy = try? JSONDecoder().decode([LocalPlaylistRecord].self, from: data) else {
+            return []
+        }
+        let migrated = sanitizePlaylists(legacy, songs: songs)
+        defaults.set(true, forKey: legacyPlaylistsMigrationKey)
+        try? FileManager.default.createDirectory(at: localDataDirectory(for: libraryID), withIntermediateDirectories: true)
+        if let encoded = try? JSONEncoder().encode(migrated) {
+            try? encoded.write(to: scopedURL, options: .atomic)
+        }
+        return migrated
+    }
+
+    private static func sanitizePlaylists(_ records: [LocalPlaylistRecord], songs: [Song]) -> [LocalPlaylistRecord] {
+        let validIDs = Set(songs.map(\.id))
+        let legacyMap = Dictionary(uniqueKeysWithValues: songs.map { song in
+            (legacySongID(relativePath: song.path ?? ""), song.id)
+        })
+        return records.map { record in
+            var copy = record
+            var seen = Set<String>()
+            copy.songIDs = record.songIDs.compactMap { id in
+                let resolved = validIDs.contains(id) ? id : legacyMap[id]
+                guard let resolved, seen.insert(resolved).inserted else { return nil }
+                return resolved
+            }
+            return copy
+        }
+    }
+
+    private static func remapLegacySongIDs(_ ids: [String], songs: [Song]) -> Set<String> {
+        let map = Dictionary(uniqueKeysWithValues: songs.map { song in
+            (legacySongID(relativePath: song.path ?? ""), song.id)
+        })
+        return Set(ids.compactMap { map[$0] })
+    }
+
+    private static func legacySongID(relativePath: String) -> String {
+        "local-song:\(Crypto.md5Hex(relativePath))"
+    }
+
+    private static func loadMetadataCache(for libraryID: String) -> [String: LocalCachedTrack] {
+        let url = metadataCacheURL(for: libraryID)
+        guard let data = try? Data(contentsOf: url),
+              let cache = try? JSONDecoder().decode(LocalMetadataCache.self, from: data),
+              cache.schemaVersion == 1 else { return [:] }
+        return cache.entries
+    }
+
+    private static func saveMetadataCache(_ entries: [String: LocalCachedTrack], for libraryID: String) {
+        let directory = localDataDirectory(for: libraryID)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let cache = LocalMetadataCache(schemaVersion: 1, entries: entries)
+        guard let data = try? JSONEncoder().encode(cache) else { return }
+        try? data.write(to: metadataCacheURL(for: libraryID), options: .atomic)
+    }
+
+    private static func scan(rootURL: URL, libraryID: String) async throws -> LocalLibrarySnapshot {
         try await Task.detached(priority: .userInitiated) {
             let files = FileManager.default.enumerator(
                 at: rootURL,
                 includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey],
                 options: [.skipsHiddenFiles]
             )?.compactMap { $0 as? URL } ?? []
+            let directories = files.compactMap { url -> String? in
+                guard url.standardizedFileURL != rootURL.standardizedFileURL,
+                      (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
+                return relativePath(url, root: rootURL)
+            }
             let audioFiles = files.filter { isSupportedAudio($0) }.sorted { relativePath($0, root: rootURL).localizedStandardCompare(relativePath($1, root: rootURL)) == .orderedAscending }
             guard !audioFiles.isEmpty else { throw LocalLibraryError.noSupportedAudio }
 
             let imageFiles = files.filter { isSupportedImage($0) }
-            let imageByKey = Dictionary(uniqueKeysWithValues: imageFiles.map {
-                (artworkKey($0, root: rootURL), $0)
+            // Multiple formats commonly share a stem (`cover.jpg` +
+            // `cover.png`). Group first so a duplicate key cannot trap, then
+            // choose one with the same deterministic priority used for album
+            // artwork elsewhere.
+            let imageByKey = Dictionary(uniqueKeysWithValues: Dictionary(grouping: imageFiles) {
+                artworkKey($0, root: rootURL)
+            }.compactMap { key, urls in
+                preferredImage(urls).map { (key, $0) }
             })
             let imageByDirectory = Dictionary(grouping: imageFiles) { $0.deletingLastPathComponent().path }
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("Volta/LocalLibrary/Artwork", isDirectory: true)
             try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
 
+            let cachedTracks = loadMetadataCache(for: libraryID)
+            var refreshedCache: [String: LocalCachedTrack] = [:]
             var scanned: [LocalScannedTrack] = []
             var songURLs: [String: URL] = [:]
             var artworkURLs: [String: URL] = [:]
             for url in audioFiles {
                 let relative = relativePath(url, root: rootURL)
-                var metadata = await readMetadata(url)
-                let songID = "local-song:\(Crypto.md5Hex(relative))"
+                let resourceValues = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+                let modifiedAt = resourceValues?.contentModificationDate ?? .distantPast
+                let fileSize = resourceValues?.fileSize ?? 0
+                let cached = cachedTracks[relative]
+                let cachedArtworkURL = cached?.embeddedArtworkPath.map(URL.init(fileURLWithPath:))
+                let canReuseCache = cached?.size == fileSize
+                    && cached?.modifiedAt == modifiedAt
+                    && (cachedArtworkURL == nil || FileManager.default.fileExists(atPath: cachedArtworkURL!.path))
+                var metadata = canReuseCache ? (cached?.metadata ?? LocalMetadata()) : await readMetadata(url)
+                var embeddedArtworkURL = canReuseCache ? cachedArtworkURL : nil
+                var lyricsFromSidecar = canReuseCache ? (cached?.lyricsFromSidecar ?? false) : false
+                let songID = songID(for: relative, libraryID: libraryID)
                 let stem = url.deletingPathExtension().lastPathComponent
                 let directoryImages = imageByDirectory[url.deletingLastPathComponent().path] ?? []
-                if metadata.lyrics == nil {
+                if metadata.lyrics == nil || lyricsFromSidecar {
+                    var sidecarLyrics: String?
                     let sidecarExtensions = ["lrc", "ttml", "txt"]
                     for ext in sidecarExtensions {
                         let sidecar = url.deletingPathExtension().appendingPathExtension(ext)
                         if let data = try? Data(contentsOf: sidecar),
                            let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines).nonBlank {
-                            metadata.lyrics = text
+                            sidecarLyrics = text
                             break
                         }
+                    }
+                    if let sidecarLyrics {
+                        metadata.lyrics = sidecarLyrics
+                        lyricsFromSidecar = true
+                    } else if lyricsFromSidecar {
+                        // The sidecar was removed; do not keep stale lyrics.
+                        metadata.lyrics = nil
+                        lyricsFromSidecar = false
                     }
                 }
                 let sibling = imageByKey["\(url.deletingLastPathComponent().path)\u{1f}\(stem.lowercased())"]
                     ?? preferredImage(directoryImages)
                 var artworkURL = sibling
                 if let artwork = metadata.artwork {
-                    let extracted = appSupport.appendingPathComponent("\(Crypto.md5Hex(songID)).jpg")
+                    let fingerprint = Crypto.md5Hex(
+                        "\(songID)|\(fileSize)|\(modifiedAt.timeIntervalSinceReferenceDate)|\(Crypto.md5Hex(artwork))"
+                    )
+                    let extracted = appSupport.appendingPathComponent("\(fingerprint).\(imageFileExtension(for: artwork))")
                     if !FileManager.default.fileExists(atPath: extracted.path) {
                         try? artwork.write(to: extracted, options: .atomic)
                     }
-                    if FileManager.default.fileExists(atPath: extracted.path) { artworkURL = extracted }
+                    if FileManager.default.fileExists(atPath: extracted.path) {
+                        embeddedArtworkURL = extracted
+                        artworkURL = extracted
+                    }
+                } else if let embeddedArtworkURL {
+                    artworkURL = embeddedArtworkURL
                 }
-                let artworkID = artworkURL.map { "local-art:\(Crypto.md5Hex($0.path))" }
-                if let artworkID, let artworkURL { artworkURLs[artworkID] = artworkURL }
+                let artworkLookupID = artworkURL.map { Self.artworkID(for: $0, root: rootURL, libraryID: libraryID) }
+                if let artworkLookupID, let artworkURL { artworkURLs[artworkLookupID] = artworkURL }
                 let values = LocalMetadata(
                     title: metadata.title ?? stem.nonBlank,
                     artist: metadata.artist,
@@ -585,6 +838,10 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
                     year: metadata.year,
                     genre: metadata.genre,
                     codec: metadata.codec,
+                    bitRate: metadata.bitRate,
+                    samplingRate: metadata.samplingRate,
+                    bitDepth: metadata.bitDepth,
+                    channelCount: metadata.channelCount,
                     duration: metadata.duration,
                     artwork: nil,
                     lyrics: metadata.lyrics
@@ -594,28 +851,42 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
                     relativePath: relative,
                     url: url,
                     metadata: values,
-                    artworkID: artworkID
+                    artworkID: artworkLookupID
                 )
                 scanned.append(LocalScannedTrack(
                     url: url,
                     relativePath: relative,
-                    modifiedAt: (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast,
-                    size: (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0,
+                    modifiedAt: modifiedAt,
+                    size: fileSize,
                     suffix: url.pathExtension.lowercased(),
                     contentType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType,
                     metadata: values,
                     artworkURL: artworkURL
                 ))
                 songURLs[song.id] = url
+                var cacheMetadata = metadata
+                cacheMetadata.artwork = nil // large image bytes live in Artwork/ instead of JSON
+                refreshedCache[relative] = LocalCachedTrack(
+                    size: fileSize,
+                    modifiedAt: modifiedAt,
+                    metadata: cacheMetadata,
+                    embeddedArtworkPath: embeddedArtworkURL?.path,
+                    lyricsFromSidecar: lyricsFromSidecar
+                )
             }
+
+            saveMetadataCache(refreshedCache, for: libraryID)
 
             return buildSnapshot(
                 folderName: rootURL.lastPathComponent,
+                libraryID: libraryID,
+                rootURL: rootURL,
+                directories: directories,
                 tracks: scanned,
                 songURLs: songURLs,
                 artworkURLs: artworkURLs,
                 lyricsBySongID: Dictionary(uniqueKeysWithValues: scanned.compactMap { track in
-                    let id = "local-song:\(Crypto.md5Hex(track.relativePath))"
+                    let id = songID(for: track.relativePath, libraryID: libraryID)
                     return track.metadata.lyrics.map { (id, $0) }
                 })
             )
@@ -624,6 +895,9 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
 
     private static func buildSnapshot(
         folderName: String,
+        libraryID: String,
+        rootURL: URL,
+        directories: [String],
         tracks: [LocalScannedTrack],
         songURLs: [String: URL],
         artworkURLs: [String: URL],
@@ -638,17 +912,17 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
             let artist = track.metadata.artist ?? "Unknown Artist"
             let albumArtist = track.metadata.albumArtist ?? artist
             let album = track.metadata.album ?? "Unknown Album"
-            let artistID = "local-artist:\(Crypto.md5Hex(normalized(artist)))"
-            let albumArtistID = "local-artist:\(Crypto.md5Hex(normalized(albumArtist)))"
-            let albumID = "local-album:\(Crypto.md5Hex(normalized(albumArtist) + "\u{1f}" + normalized(album)))"
-            let artworkID = track.artworkURL.map { "local-art:\(Crypto.md5Hex($0.path))" }
-            let songID = "local-song:\(Crypto.md5Hex(track.relativePath))"
+            let artistID = "local-artist:\(libraryID):\(Crypto.md5Hex(normalized(artist)))"
+            let albumArtistID = "local-artist:\(libraryID):\(Crypto.md5Hex(normalized(albumArtist)))"
+            let albumID = "local-album:\(libraryID):\(Crypto.md5Hex(normalized(albumArtist) + "\u{1f}" + normalized(album)))"
+            let artworkLookupID = track.artworkURL.map { Self.artworkID(for: $0, root: rootURL, libraryID: libraryID) }
+            let songID = songID(for: track.relativePath, libraryID: libraryID)
             let song = LocalSongBuilder.song(
                 id: songID,
                 relativePath: track.relativePath,
                 url: track.url,
                 metadata: track.metadata,
-                artworkID: artworkID,
+                artworkID: artworkLookupID,
                 artist: artist,
                 albumArtist: albumArtist,
                 album: album,
@@ -665,7 +939,7 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
                 album,
                 albumArtist,
                 albumArtistID,
-                artworkID,
+                artworkLookupID,
                 max(albumValues[albumID]?.modified ?? .distantPast, track.modifiedAt)
             )
             artistNames[albumArtistID] = albumArtist
@@ -708,6 +982,7 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
 
         return LocalLibrarySnapshot(
             folderName: folderName,
+            directories: directories,
             songs: sortedSongs,
             albums: albums,
             artists: artists,
@@ -760,6 +1035,31 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
             default: break
             }
         }
+
+        // Container tags do not consistently include technical stream details.
+        // AVFoundation exposes those for the formats the current platform can
+        // decode, without guessing when a track does not report them.
+        let audioTracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
+        if let track = audioTracks.first {
+            let estimatedRate = (try? await track.load(.estimatedDataRate)) ?? 0
+            if estimatedRate.isFinite, estimatedRate > 0 {
+                result.bitRate = Int((estimatedRate / 1_000).rounded())
+            }
+            let descriptions = (try? await track.load(.formatDescriptions)) ?? []
+            for description in descriptions {
+                guard let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(description) else { continue }
+                let format = streamDescription.pointee
+                if format.mSampleRate.isFinite, format.mSampleRate > 0 {
+                    result.samplingRate = result.samplingRate ?? Int(format.mSampleRate.rounded())
+                }
+                if format.mBitsPerChannel > 0 {
+                    result.bitDepth = result.bitDepth ?? Int(format.mBitsPerChannel)
+                }
+                if format.mChannelsPerFrame > 0 {
+                    result.channelCount = result.channelCount ?? Int(format.mChannelsPerFrame)
+                }
+            }
+        }
         return result
     }
 
@@ -774,6 +1074,10 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
             year: primary.year ?? fallback.year,
             genre: primary.genre ?? fallback.genre,
             codec: primary.codec ?? fallback.codec,
+            bitRate: primary.bitRate ?? fallback.bitRate,
+            samplingRate: primary.samplingRate ?? fallback.samplingRate,
+            bitDepth: primary.bitDepth ?? fallback.bitDepth,
+            channelCount: primary.channelCount ?? fallback.channelCount,
             duration: primary.duration ?? fallback.duration,
             artwork: primary.artwork ?? fallback.artwork,
             lyrics: primary.lyrics ?? fallback.lyrics
@@ -886,7 +1190,25 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
             let end = start + length
             guard end <= bytes.count else { break }
             let block = Array(bytes[start..<end])
-            if type == 4, block.count >= 8 {
+            if type == 0, block.count >= 18 {
+                // STREAMINFO packs 20-bit sample rate, 3-bit channel count,
+                // and 5-bit bits-per-sample in bytes 10...17.
+                let packed = (UInt64(block[10]) << 56)
+                    | (UInt64(block[11]) << 48)
+                    | (UInt64(block[12]) << 40)
+                    | (UInt64(block[13]) << 32)
+                    | (UInt64(block[14]) << 24)
+                    | (UInt64(block[15]) << 16)
+                    | (UInt64(block[16]) << 8)
+                    | UInt64(block[17])
+                let sampleRate = Int((packed >> 44) & 0xFFFFF)
+                let channels = Int((packed >> 41) & 0x7) + 1
+                let bits = Int((packed >> 36) & 0x1F) + 1
+                result.codec = result.codec ?? "flac"
+                if sampleRate > 0 { result.samplingRate = result.samplingRate ?? sampleRate }
+                if channels > 0 { result.channelCount = result.channelCount ?? channels }
+                if bits > 0 { result.bitDepth = result.bitDepth ?? bits }
+            } else if type == 4, block.count >= 8 {
                 var cursor = 4 + littleEndian32(block, at: 0)
                 guard cursor + 4 <= block.count else { break }
                 let count = littleEndian32(block, at: cursor)
@@ -1092,6 +1414,27 @@ final class LocalMusicService: MusicService, @unchecked Sendable {
             : url.lastPathComponent
     }
 
+    private static func songID(for relativePath: String, libraryID: String) -> String {
+        "local-song:\(libraryID):\(Crypto.md5Hex(relativePath))"
+    }
+
+    private static func artworkID(for url: URL, root: URL, libraryID: String) -> String {
+        "local-art:\(libraryID):\(Crypto.md5Hex(relativePath(url, root: root)))"
+    }
+
+    private static func imageFileExtension(for data: Data) -> String {
+        let header = [UInt8](data.prefix(12))
+        if header.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "png" }
+        if header.starts(with: [0xFF, 0xD8, 0xFF]) { return "jpg" }
+        if header.starts(with: Array("GIF".utf8)) { return "gif" }
+        if header.count >= 12,
+           String(bytes: header[8..<12], encoding: .ascii) == "WEBP" { return "webp" }
+        // ImageIO/UIImage can still decode several valid containers without a
+        // recognizable short signature. Use a neutral binary extension rather
+        // than incorrectly claiming the bytes are JPEG.
+        return "img"
+    }
+
     private static func artworkKey(_ url: URL, root: URL) -> String {
         "\(url.deletingLastPathComponent().path)\u{1f}\(url.deletingPathExtension().lastPathComponent.lowercased())"
     }
@@ -1147,7 +1490,7 @@ private enum LocalSongBuilder {
             contentType: contentType,
             suffix: url.pathExtension.lowercased(),
             codec: metadata.codec,
-            bitRate: nil,
+            bitRate: metadata.bitRate,
             path: relativePath,
             playCount: nil,
             bpm: nil,
@@ -1155,9 +1498,9 @@ private enum LocalSongBuilder {
             starred: nil,
             contributes: nil,
             replayGain: nil,
-            samplingRate: nil,
-            bitDepth: nil,
-            channelCount: nil,
+            samplingRate: metadata.samplingRate,
+            bitDepth: metadata.bitDepth,
+            channelCount: metadata.channelCount,
             displayComposer: nil,
             contributors: nil
         )

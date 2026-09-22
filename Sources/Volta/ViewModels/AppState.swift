@@ -122,6 +122,38 @@ final class AppState: ObservableObject {
 
     private func restoreStoredSession() {
         let useCellularEndpoint = shouldUseCellularEndpoint
+        switch store.activeSource() {
+        case .localLibrary:
+            // A deliberate Local Files choice must take precedence over a
+            // remembered default server. Only fall back if the bookmark can no
+            // longer be used.
+            restoreLocalLibrary(fallingBackToServer: true)
+        case .server(let id):
+            if let record = store.server(id: id),
+               let config = store.config(for: record, cellular: useCellularEndpoint) {
+                AppLogger.shared.log("Restoring last active server: \(record.displayName)", category: .networking)
+                store.setCurrent(record)
+                applyEndpointRoute(useCellularEndpoint)
+                activate(config: config, record: record, allowFallback: true)
+            } else {
+                restoreStoredServer(useCellularEndpoint: useCellularEndpoint)
+            }
+        case nil:
+            // Existing installations have no way to express which source was
+            // used last. Preserve their previous server-first behavior, with a
+            // local bookmark as the no-server fallback. New selections persist
+            // an explicit source and therefore never take this ambiguous path.
+            restoreStoredServer(
+                useCellularEndpoint: useCellularEndpoint,
+                allowingLocalFallback: true
+            )
+        }
+    }
+
+    private func restoreStoredServer(
+        useCellularEndpoint: Bool,
+        allowingLocalFallback: Bool = false
+    ) {
         let candidates = store.startupServers()
         if let restored = candidates.compactMap({ record -> (ServerRecord, SubsonicConfig)? in
             guard let config = store.config(for: record, cellular: useCellularEndpoint) else { return nil }
@@ -137,7 +169,7 @@ final class AppState: ObservableObject {
             let activeRecord = store.currentServer() ?? record
             activate(config: config, record: activeRecord, allowFallback: true)
         } else {
-            if LocalLibraryStore.shared.shouldRestore {
+            if allowingLocalFallback, LocalLibraryStore.shared.shouldRestore {
                 restoreLocalLibrary()
             } else {
                 AppLogger.shared.log("No stored session; showing login", category: .ui)
@@ -161,13 +193,18 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func restoreLocalLibrary() {
+    private func restoreLocalLibrary(fallingBackToServer: Bool = false) {
         phase = .loading
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 guard let service = try await LocalLibraryStore.shared.restoreService() else {
-                    phase = .login
+                    if fallingBackToServer {
+                        store.clearActiveSource()
+                        restoreStoredServer(useCellularEndpoint: shouldUseCellularEndpoint)
+                    } else {
+                        phase = .login
+                    }
                     return
                 }
                 activateLocalLibrary(service)
@@ -177,7 +214,16 @@ final class AppState: ObservableObject {
                     category: .library,
                     level: .warning
                 )
-                phase = .login
+                // A stale/unavailable bookmark should not trap the app in a
+                // failed Local Files restore on every launch. A saved server is
+                // a usable fallback; otherwise Login remains the source picker.
+                LocalLibraryStore.shared.disableAutoRestore()
+                store.clearActiveSource()
+                if fallingBackToServer {
+                    restoreStoredServer(useCellularEndpoint: shouldUseCellularEndpoint)
+                } else {
+                    phase = .login
+                }
             }
         }
     }
@@ -197,7 +243,8 @@ final class AppState: ObservableObject {
         isConnectionAttemptActive = false
         sharingAvailable = false
         phase = .authenticated
-        audioPlayer.updateClient(service, serverID: LocalMusicService.serverID)
+        store.setActiveSource(.localLibrary)
+        audioPlayer.updateClient(service, serverID: service.persistenceID)
         IntentBridge.shared.setup(client: service, audioPlayer: audioPlayer)
         AppLogger.shared.log(
             "Local library activated; folder=\(service.folderName); songs=\(service.songCount)",
@@ -215,6 +262,7 @@ final class AppState: ObservableObject {
         let trimmedName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = (trimmedName?.isEmpty == false ? trimmedName : nil) ?? config.baseURL.host ?? "Server"
         let record = store.upsert(config: config, displayName: name, backend: kind)
+        store.setActiveSource(.server(id: record.id))
         // Reuse any stored cellular override for this record.
         let useCellularEndpoint = shouldUseCellularEndpoint
         let effective = store.config(for: record, cellular: useCellularEndpoint) ?? config
@@ -331,6 +379,7 @@ final class AppState: ObservableObject {
     func logout() {
         AppLogger.shared.logAlways("Logout started; server=\(currentServer?.displayName ?? "none")", category: .settings)
         if isLocalMode { LocalLibraryStore.shared.disableAutoRestore() }
+        store.clearActiveSource()
         audioPlayer.stopAndClear()
         store.clearCurrent()
         activationID = UUID()
@@ -413,6 +462,7 @@ final class AppState: ObservableObject {
             return
         }
         store.setCurrent(record)
+        store.setActiveSource(.server(id: record.id))
         applyEndpointRoute(useCellularEndpoint)
         activate(config: config, record: record)
     }
@@ -476,6 +526,7 @@ final class AppState: ObservableObject {
             currentServer = activeRecord
         }
         client = service
+        store.setActiveSource(.server(id: activeRecord.id))
         phase = .authenticated
         TrackPairingStore.shared.selectServer(activeRecord.id)
         audioPlayer.updateClient(service, serverID: activeRecord.id)

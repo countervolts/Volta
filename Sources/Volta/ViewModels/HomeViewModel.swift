@@ -39,7 +39,9 @@ final class HomeViewModel: ObservableObject {
         guard let client = appState.client else { return }
         guard !isLoading else { return }
 
-        let serverID = appState.currentServer?.id ?? client.config.baseURL.absoluteString
+        let serverID = appState.currentServer?.id
+            ?? (client as? LocalMusicService)?.persistenceID
+            ?? client.config.baseURL.absoluteString
         let serverChanged = serverID != loadedServerID
         if didFetch && !force && !serverChanged { return }
 
