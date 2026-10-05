@@ -704,13 +704,14 @@ enum Strings {
     private static func tr(
         en: String, es: String, fr: String, de: String, pt: String, it: String,
         nl: String, ru: String, pl: String, tr: String, sv: String, nb: String,
-        da: String, fi: String, zh: String, ja: String, ko: String
+        da: String, fi: String, zh: String, zhHant: String, ja: String, ko: String
     ) -> [AppLanguage: String] {
         [
             .english: en, .spanish: es, .french: fr, .german: de,
             .portuguese: pt, .italian: it, .dutch: nl, .russian: ru,
             .polish: pl, .turkish: tr, .swedish: sv, .norwegian: nb,
-            .danish: da, .finnish: fi, .chinese: zh, .japanese: ja, .korean: ko,
+            .danish: da, .finnish: fi, .chinese: zh, .traditionalChinese: zhHant,
+            .japanese: ja, .korean: ko,
         ]
     }
 
@@ -735,6 +736,7 @@ enum Strings {
             .danish: "Vælg din musikserver for at komme i gang",
             .finnish: "Valitse musiikkipalvelin aloittaaksesi",
             .chinese: "选择你的音乐服务器以开始",
+            .traditionalChinese: "選擇你的音樂伺服器以開始使用",
             .japanese: "音楽サーバーを選んで始めましょう",
             .korean: "시작하려면 음악 서버를 선택하세요",
         ],
@@ -754,6 +756,7 @@ enum Strings {
             .danish: "Du kan tilføje flere servere senere i Indstillinger.",
             .finnish: "Voit lisätä lisää palvelimia myöhemmin asetuksista.",
             .chinese: "你可以稍后在“设置”中添加更多服务器。",
+            .traditionalChinese: "你可以稍後在「設定」中加入更多伺服器。",
             .japanese: "サーバーは後で設定から追加できます。",
             .korean: "나중에 설정에서 서버를 더 추가할 수 있습니다.",
         ],
@@ -773,6 +776,7 @@ enum Strings {
             .danish: "Log ind på %@",
             .finnish: "Kirjaudu palveluun %@",
             .chinese: "登录到 %@",
+            .traditionalChinese: "登入 %@",
             .japanese: "%@ にサインイン",
             .korean: "%@에 로그인",
         ],
@@ -792,6 +796,7 @@ enum Strings {
             .danish: "Brugernavn",
             .finnish: "Käyttäjänimi",
             .chinese: "用户名",
+            .traditionalChinese: "使用者名稱",
             .japanese: "ユーザー名",
             .korean: "사용자 이름",
         ],
@@ -811,6 +816,7 @@ enum Strings {
             .danish: "Adgangskode",
             .finnish: "Salasana",
             .chinese: "密码",
+            .traditionalChinese: "密碼",
             .japanese: "パスワード",
             .korean: "비밀번호",
         ],
@@ -830,6 +836,7 @@ enum Strings {
             .danish: "Forbind",
             .finnish: "Yhdistä",
             .chinese: "连接",
+            .traditionalChinese: "連線",
             .japanese: "接続",
             .korean: "연결",
         ],
@@ -849,6 +856,7 @@ enum Strings {
             .danish: "Forbinder…",
             .finnish: "Yhdistetään…",
             .chinese: "正在连接…",
+            .traditionalChinese: "正在連線",
             .japanese: "接続中…",
             .korean: "연결 중…",
         ],
@@ -868,6 +876,7 @@ enum Strings {
             .danish: "Log ind med Plex",
             .finnish: "Kirjaudu Plexillä",
             .chinese: "使用 Plex 登录",
+            .traditionalChinese: "使用 Plex 登入",
             .japanese: "Plex でサインイン",
             .korean: "Plex로 로그인",
         ],
@@ -887,6 +896,7 @@ enum Strings {
             .danish: "Venter på Plex",
             .finnish: "Odotetaan Plexiä",
             .chinese: "正在等待 Plex",
+            .traditionalChinese: "正在等待 Plex",
             .japanese: "Plex を待っています",
             .korean: "Plex 대기 중",
         ],
@@ -906,6 +916,7 @@ enum Strings {
             .danish: "E-mail til Plex-konto",
             .finnish: "Plex-tilin sähköposti",
             .chinese: "Plex 账户邮箱",
+            .traditionalChinese: "Plex 帳號電子郵件",
             .japanese: "Plex アカウントのメール",
             .korean: "Plex 계정 이메일",
         ],
@@ -925,6 +936,7 @@ enum Strings {
             .danish: "Adgangskode eller Plex-token",
             .finnish: "Salasana tai Plex-tunnus",
             .chinese: "密码或 Plex 令牌",
+            .traditionalChinese: "密碼或 Plex 權杖",
             .japanese: "パスワードまたは Plex トークン",
             .korean: "비밀번호 또는 Plex 토큰",
         ],
@@ -944,6 +956,7 @@ enum Strings {
             .danish: "Prøv demoserveren",
             .finnish: "Kokeile demopalvelinta",
             .chinese: "试用演示服务器",
+            .traditionalChinese: "試用示範伺服器",
             .japanese: "デモサーバーを試す",
             .korean: "데모 서버 사용해 보기",
         ],
@@ -963,6 +976,7 @@ enum Strings {
             .danish: "HTTP er ikke sikkert",
             .finnish: "HTTP ei ole turvallinen",
             .chinese: "HTTP 不安全",
+            .traditionalChinese: "HTTP 不安全",
             .japanese: "HTTP は安全ではありません",
             .korean: "HTTP는 안전하지 않습니다",
         ],
@@ -982,6 +996,7 @@ enum Strings {
             .danish: "Dine loginoplysninger og musiktrafik kan være synlige på denne forbindelse. Brug HTTPS når det er muligt.",
             .finnish: "Kirjautumistietosi ja musiikkiliikenteesi voivat näkyä tässä yhteydessä. Käytä HTTPS:ää, kun mahdollista.",
             .chinese: "在此连接上，你的登录信息和音乐流量可能会被看到。请尽量使用 HTTPS。",
+            .traditionalChinese: "在此連線上，你的登入資訊和音樂傳輸內容可能會被他人看見。請盡可能使用 HTTPS。",
             .japanese: "この接続ではログイン情報や音楽の通信が見られる可能性があります。可能な場合は HTTPS を使用してください。",
             .korean: "이 연결에서는 로그인 정보와 음악 트래픽이 노출될 수 있습니다. 가능하면 HTTPS를 사용하세요.",
         ],
@@ -1001,6 +1016,7 @@ enum Strings {
             .danish: "Rediger server",
             .finnish: "Muokkaa palvelinta",
             .chinese: "编辑服务器",
+            .traditionalChinese: "編輯伺服器",
             .japanese: "サーバーを編集",
             .korean: "서버 편집",
         ],
@@ -1020,6 +1036,7 @@ enum Strings {
             .danish: "Fortsæt",
             .finnish: "Jatka",
             .chinese: "继续",
+            .traditionalChinese: "繼續",
             .japanese: "続ける",
             .korean: "계속",
         ],
@@ -1039,6 +1056,7 @@ enum Strings {
             .danish: "Annuller",
             .finnish: "Peruuta",
             .chinese: "取消",
+            .traditionalChinese: "取消",
             .japanese: "キャンセル",
             .korean: "취소",
         ],
@@ -1058,6 +1076,7 @@ enum Strings {
             .danish: "Kunne ikke nå serveren.",
             .finnish: "Palvelimeen ei saatu yhteyttä.",
             .chinese: "无法连接到服务器。",
+            .traditionalChinese: "無法連線至伺服器。",
             .japanese: "サーバーに接続できませんでした。",
             .korean: "서버에 연결할 수 없습니다.",
         ],
@@ -1077,6 +1096,7 @@ enum Strings {
             .danish: "Forkert brugernavn eller adgangskode.",
             .finnish: "Väärä käyttäjänimi tai salasana.",
             .chinese: "用户名或密码不正确。",
+            .traditionalChinese: "使用者名稱或密碼不正確。",
             .japanese: "ユーザー名またはパスワードが正しくありません。",
             .korean: "사용자 이름 또는 비밀번호가 올바르지 않습니다.",
         ],
@@ -1096,6 +1116,7 @@ enum Strings {
             .danish: "Plex-login fik timeout.",
             .finnish: "Plex-kirjautuminen aikakatkaistiin.",
             .chinese: "Plex 登录超时。",
+            .traditionalChinese: "Plex 登入逾時。",
             .japanese: "Plex のサインインがタイムアウトしました。",
             .korean: "Plex 로그인 시간이 초과되었습니다.",
         ],
@@ -1115,6 +1136,7 @@ enum Strings {
             .danish: "Kunne ikke fuldføre Plex-login.",
             .finnish: "Plex-kirjautumista ei voitu viimeistellä.",
             .chinese: "无法完成 Plex 登录。",
+            .traditionalChinese: "無法完成 Plex 登入。",
             .japanese: "Plex のサインインを完了できませんでした。",
             .korean: "Plex 로그인을 완료할 수 없습니다.",
         ],
@@ -1140,6 +1162,7 @@ enum Strings {
             .danish: "Fuldfør login med Plex",
             .finnish: "Viimeistele kirjautuminen Plexillä",
             .chinese: "完成 Plex 登录",
+            .traditionalChinese: "完成 Plex 登入",
             .japanese: "Plex でのサインインを完了してください",
             .korean: "Plex 로그인을 완료하세요",
         ],
@@ -1147,332 +1170,332 @@ enum Strings {
             .english: "Home", .spanish: "Inicio", .french: "Accueil", .german: "Start",
             .portuguese: "Início", .italian: "Home", .dutch: "Start", .russian: "Главная",
             .polish: "Główna", .turkish: "Ana sayfa", .swedish: "Hem", .norwegian: "Hjem",
-            .danish: "Hjem", .finnish: "Koti", .chinese: "主页", .japanese: "ホーム", .korean: "홈",
+            .danish: "Hjem", .finnish: "Koti", .chinese: "主页", .traditionalChinese: "首頁", .japanese: "ホーム", .korean: "홈",
         ],
         .tab_library: [
             .english: "Library", .spanish: "Biblioteca", .french: "Bibliothèque", .german: "Mediathek",
             .portuguese: "Biblioteca", .italian: "Libreria", .dutch: "Bibliotheek", .russian: "Медиатека",
             .polish: "Biblioteka", .turkish: "Kitaplık", .swedish: "Bibliotek", .norwegian: "Bibliotek",
-            .danish: "Bibliotek", .finnish: "Kirjasto", .chinese: "音乐库", .japanese: "ライブラリ", .korean: "보관함",
+            .danish: "Bibliotek", .finnish: "Kirjasto", .chinese: "音乐库", .traditionalChinese: "資料庫", .japanese: "ライブラリ", .korean: "보관함",
         ],
         .tab_playlists: [
             .english: "Playlists", .spanish: "Listas", .french: "Playlists", .german: "Playlists",
             .portuguese: "Listas", .italian: "Playlist", .dutch: "Afspeellijsten", .russian: "Плейлисты",
             .polish: "Playlisty", .turkish: "Çalma listeleri", .swedish: "Spellistor", .norwegian: "Spillelister",
-            .danish: "Spillelister", .finnish: "Soittolistat", .chinese: "播放列表", .japanese: "プレイリスト", .korean: "재생목록",
+            .danish: "Spillelister", .finnish: "Soittolistat", .chinese: "播放列表", .traditionalChinese: "播放列表", .japanese: "プレイリスト", .korean: "재생목록",
         ],
         .tab_stats: [
             .english: "Stats", .spanish: "Estadísticas", .french: "Stats", .german: "Statistik",
             .portuguese: "Estatísticas", .italian: "Statistiche", .dutch: "Statistieken", .russian: "Статистика",
             .polish: "Statystyki", .turkish: "İstatistik", .swedish: "Statistik", .norwegian: "Statistikk",
-            .danish: "Statistik", .finnish: "Tilastot", .chinese: "统计", .japanese: "統計", .korean: "통계",
+            .danish: "Statistik", .finnish: "Tilastot", .chinese: "统计", .traditionalChinese: "統計資料", .japanese: "統計", .korean: "통계",
         ],
         .tab_search: [
             .english: "Search", .spanish: "Buscar", .french: "Rechercher", .german: "Suche",
             .portuguese: "Pesquisar", .italian: "Cerca", .dutch: "Zoeken", .russian: "Поиск",
             .polish: "Szukaj", .turkish: "Ara", .swedish: "Sök", .norwegian: "Søk",
-            .danish: "Søg", .finnish: "Haku", .chinese: "搜索", .japanese: "検索", .korean: "검색",
+            .danish: "Søg", .finnish: "Haku", .chinese: "搜索", .traditionalChinese: "搜尋", .japanese: "検索", .korean: "검색",
         ],
         .action_ok: [
             .english: "OK", .spanish: "OK", .french: "OK", .german: "OK",
             .portuguese: "OK", .italian: "OK", .dutch: "OK", .russian: "ОК",
             .polish: "OK", .turkish: "Tamam", .swedish: "OK", .norwegian: "OK",
-            .danish: "OK", .finnish: "OK", .chinese: "确定", .japanese: "OK", .korean: "확인",
+            .danish: "OK", .finnish: "OK", .chinese: "确定", .traditionalChinese: "好", .japanese: "OK", .korean: "확인",
         ],
         .action_done: [
             .english: "Done", .spanish: "Listo", .french: "Terminé", .german: "Fertig",
             .portuguese: "Concluído", .italian: "Fine", .dutch: "Klaar", .russian: "Готово",
             .polish: "Gotowe", .turkish: "Bitti", .swedish: "Klar", .norwegian: "Ferdig",
-            .danish: "Færdig", .finnish: "Valmis", .chinese: "完成", .japanese: "完了", .korean: "완료",
+            .danish: "Færdig", .finnish: "Valmis", .chinese: "完成", .traditionalChinese: "完成", .japanese: "完了", .korean: "완료",
         ],
         .action_save: [
             .english: "Save", .spanish: "Guardar", .french: "Enregistrer", .german: "Speichern",
             .portuguese: "Guardar", .italian: "Salva", .dutch: "Opslaan", .russian: "Сохранить",
             .polish: "Zapisz", .turkish: "Kaydet", .swedish: "Spara", .norwegian: "Lagre",
-            .danish: "Gem", .finnish: "Tallenna", .chinese: "保存", .japanese: "保存", .korean: "저장",
+            .danish: "Gem", .finnish: "Tallenna", .chinese: "保存", .traditionalChinese: "儲存", .japanese: "保存", .korean: "저장",
         ],
         .action_delete: [
             .english: "Delete", .spanish: "Eliminar", .french: "Supprimer", .german: "Löschen",
             .portuguese: "Eliminar", .italian: "Elimina", .dutch: "Verwijderen", .russian: "Удалить",
             .polish: "Usuń", .turkish: "Sil", .swedish: "Radera", .norwegian: "Slett",
-            .danish: "Slet", .finnish: "Poista", .chinese: "删除", .japanese: "削除", .korean: "삭제",
+            .danish: "Slet", .finnish: "Poista", .chinese: "删除", .traditionalChinese: "刪除", .japanese: "削除", .korean: "삭제",
         ],
         .action_clear: [
             .english: "Clear", .spanish: "Borrar", .french: "Effacer", .german: "Löschen",
             .portuguese: "Limpar", .italian: "Cancella", .dutch: "Wissen", .russian: "Очистить",
             .polish: "Wyczyść", .turkish: "Temizle", .swedish: "Rensa", .norwegian: "Tøm",
-            .danish: "Ryd", .finnish: "Tyhjennä", .chinese: "清除", .japanese: "消去", .korean: "지우기",
+            .danish: "Ryd", .finnish: "Tyhjennä", .chinese: "清除", .traditionalChinese: "清除", .japanese: "消去", .korean: "지우기",
         ],
         .action_remove: [
             .english: "Remove", .spanish: "Quitar", .french: "Retirer", .german: "Entfernen",
             .portuguese: "Remover", .italian: "Rimuovi", .dutch: "Verwijderen", .russian: "Убрать",
             .polish: "Usuń", .turkish: "Kaldır", .swedish: "Ta bort", .norwegian: "Fjern",
-            .danish: "Fjern", .finnish: "Poista", .chinese: "移除", .japanese: "削除", .korean: "제거",
+            .danish: "Fjern", .finnish: "Poista", .chinese: "移除", .traditionalChinese: "移除", .japanese: "削除", .korean: "제거",
         ],
         .action_set: [
             .english: "Set", .spanish: "Establecer", .french: "Définir", .german: "Festlegen",
             .portuguese: "Definir", .italian: "Imposta", .dutch: "Instellen", .russian: "Задать",
             .polish: "Ustaw", .turkish: "Ayarla", .swedish: "Ange", .norwegian: "Angi",
-            .danish: "Indstil", .finnish: "Aseta", .chinese: "设置", .japanese: "設定", .korean: "설정",
+            .danish: "Indstil", .finnish: "Aseta", .chinese: "设置", .traditionalChinese: "設定", .japanese: "設定", .korean: "설정",
         ],
         .action_logout: [
             .english: "Log Out", .spanish: "Cerrar sesión", .french: "Se déconnecter", .german: "Abmelden",
             .portuguese: "Terminar sessão", .italian: "Esci", .dutch: "Uitloggen", .russian: "Выйти",
             .polish: "Wyloguj", .turkish: "Çıkış yap", .swedish: "Logga ut", .norwegian: "Logg ut",
-            .danish: "Log ud", .finnish: "Kirjaudu ulos", .chinese: "退出登录", .japanese: "ログアウト", .korean: "로그아웃",
+            .danish: "Log ud", .finnish: "Kirjaudu ulos", .chinese: "退出登录", .traditionalChinese: "登出", .japanese: "ログアウト", .korean: "로그아웃",
         ],
         .action_download: [
             .english: "Download", .spanish: "Descargar", .french: "Télécharger", .german: "Laden",
             .portuguese: "Transferir", .italian: "Scarica", .dutch: "Downloaden", .russian: "Скачать",
             .polish: "Pobierz", .turkish: "İndir", .swedish: "Ladda ner", .norwegian: "Last ned",
-            .danish: "Hent", .finnish: "Lataa", .chinese: "下载", .japanese: "ダウンロード", .korean: "다운로드",
+            .danish: "Hent", .finnish: "Lataa", .chinese: "下载", .traditionalChinese: "下載", .japanese: "ダウンロード", .korean: "다운로드",
         ],
         .action_play: tr(
             en: "Play", es: "Reproducir", fr: "Lire", de: "Abspielen", pt: "Reproduzir", it: "Riproduci",
             nl: "Afspelen", ru: "Воспроизвести", pl: "Odtwórz", tr: "Çal", sv: "Spela", nb: "Spill",
-            da: "Afspil", fi: "Toista", zh: "播放", ja: "再生", ko: "재생"
+            da: "Afspil", fi: "Toista", zh: "播放", zhHant: "播放", ja: "再生", ko: "재생"
         ),
         .action_shuffle: tr(
             en: "Shuffle", es: "Aleatorio", fr: "Aléatoire", de: "Zufällig", pt: "Aleatório", it: "Casuale",
             nl: "Shuffle", ru: "Перемешать", pl: "Losowo", tr: "Karıştır", sv: "Blanda", nb: "Bland",
-            da: "Bland", fi: "Sekoita", zh: "随机播放", ja: "シャッフル", ko: "셔플"
+            da: "Bland", fi: "Sekoita", zh: "随机播放", zhHant: "隨機播放", ja: "シャッフル", ko: "셔플"
         ),
         .action_play_next: tr(
             en: "Play Next", es: "Reproducir después", fr: "Lire ensuite", de: "Als Nächstes", pt: "Reproduzir a seguir", it: "Riproduci dopo",
             nl: "Speel hierna", ru: "Далее", pl: "Odtwórz następne", tr: "Sonra çal", sv: "Spela härnäst", nb: "Spill neste",
-            da: "Afspil næste", fi: "Toista seuraavaksi", zh: "下一首播放", ja: "次に再生", ko: "다음에 재생"
+            da: "Afspil næste", fi: "Toista seuraavaksi", zh: "下一首播放", zhHant: "插播", ja: "次に再生", ko: "다음에 재생"
         ),
         .action_play_last: tr(
             en: "Play Last", es: "Reproducir al final", fr: "Lire en dernier", de: "Zuletzt abspielen", pt: "Reproduzir por último", it: "Riproduci per ultimo",
             nl: "Speel als laatste", ru: "В конец очереди", pl: "Odtwórz na końcu", tr: "En son çal", sv: "Spela sist", nb: "Spill sist",
-            da: "Afspil sidst", fi: "Toista viimeisenä", zh: "最后播放", ja: "最後に再生", ko: "마지막에 재생"
+            da: "Afspil sidst", fi: "Toista viimeisenä", zh: "最后播放", zhHant: "最後播放", ja: "最後に再生", ko: "마지막에 재생"
         ),
         .action_add_to_queue: tr(
             en: "Add to Queue", es: "Añadir a la cola", fr: "Ajouter à la file", de: "Zur Warteschlange", pt: "Adicionar à fila", it: "Aggiungi alla coda",
             nl: "Aan wachtrij toevoegen", ru: "Добавить в очередь", pl: "Dodaj do kolejki", tr: "Sıraya ekle", sv: "Lägg till i kön", nb: "Legg til i køen",
-            da: "Føj til køen", fi: "Lisää jonoon", zh: "加入队列", ja: "キューに追加", ko: "대기열에 추가"
+            da: "Føj til køen", fi: "Lisää jonoon", zh: "加入队列", zhHant: "加入待播清單", ja: "キューに追加", ko: "대기열에 추가"
         ),
         .action_add_to_playlist: tr(
             en: "Add to Playlist", es: "Añadir a lista", fr: "Ajouter à une playlist", de: "Zur Playlist", pt: "Adicionar à lista", it: "Aggiungi a playlist",
             nl: "Aan afspeellijst toevoegen", ru: "Добавить в плейлист", pl: "Dodaj do playlisty", tr: "Listeye ekle", sv: "Lägg till i spellista", nb: "Legg til i spilleliste",
-            da: "Føj til playliste", fi: "Lisää soittolistaan", zh: "加入播放列表", ja: "プレイリストに追加", ko: "재생목록에 추가"
+            da: "Føj til playliste", fi: "Lisää soittolistaan", zh: "加入播放列表", zhHant: "加入播放列表", ja: "プレイリストに追加", ko: "재생목록에 추가"
         ),
         .action_save_as_playlist: tr(
             en: "Save as Playlist", es: "Guardar como lista", fr: "Enregistrer en playlist", de: "Als Playlist sichern", pt: "Guardar como lista", it: "Salva come playlist",
             nl: "Opslaan als afspeellijst", ru: "Сохранить как плейлист", pl: "Zapisz jako playlistę", tr: "Liste olarak kaydet", sv: "Spara som spellista", nb: "Lagre som spilleliste",
-            da: "Gem som playliste", fi: "Tallenna soittolistaksi", zh: "存为播放列表", ja: "プレイリストとして保存", ko: "재생목록으로 저장"
+            da: "Gem som playliste", fi: "Tallenna soittolistaksi", zh: "存为播放列表", zhHant: "儲存為播放列表", ja: "プレイリストとして保存", ko: "재생목록으로 저장"
         ),
         .action_saving: tr(
             en: "Saving...", es: "Guardando...", fr: "Enregistrement...", de: "Speichern...", pt: "A guardar...", it: "Salvataggio...",
             nl: "Opslaan...", ru: "Сохранение...", pl: "Zapisywanie...", tr: "Kaydediliyor...", sv: "Sparar...", nb: "Lagrer...",
-            da: "Gemmer...", fi: "Tallennetaan...", zh: "正在保存...", ja: "保存中...", ko: "저장 중..."
+            da: "Gemmer...", fi: "Tallennetaan...", zh: "正在保存...", zhHant: "正在儲存…", ja: "保存中...", ko: "저장 중..."
         ),
         .action_favorite: tr(
             en: "Favorite", es: "Favorito", fr: "Favori", de: "Favorit", pt: "Favorito", it: "Preferito",
             nl: "Favoriet", ru: "В избранное", pl: "Ulubione", tr: "Favori", sv: "Favorit", nb: "Favoritt",
-            da: "Favorit", fi: "Suosikki", zh: "收藏", ja: "お気に入り", ko: "즐겨찾기"
+            da: "Favorit", fi: "Suosikki", zh: "收藏", zhHant: "收藏", ja: "お気に入り", ko: "즐겨찾기"
         ),
         .action_unfavorite: tr(
             en: "Unfavorite", es: "Quitar favorito", fr: "Retirer des favoris", de: "Favorit entfernen", pt: "Remover favorito", it: "Rimuovi preferito",
             nl: "Favoriet verwijderen", ru: "Убрать из избранного", pl: "Usuń z ulubionych", tr: "Favoriden çıkar", sv: "Ta bort favorit", nb: "Fjern favoritt",
-            da: "Fjern favorit", fi: "Poista suosikki", zh: "取消收藏", ja: "お気に入り解除", ko: "즐겨찾기 해제"
+            da: "Fjern favorit", fi: "Poista suosikki", zh: "取消收藏", zhHant: "取消收藏", ja: "お気に入り解除", ko: "즐겨찾기 해제"
         ),
         .action_love: tr(
             en: "Love", es: "Me gusta", fr: "J'aime", de: "Lieben", pt: "Adorar", it: "Mi piace",
             nl: "Leuk vinden", ru: "Нравится", pl: "Lubię", tr: "Beğen", sv: "Gilla", nb: "Lik",
-            da: "Synes om", fi: "Tykkää", zh: "喜欢", ja: "ラブ", ko: "좋아요"
+            da: "Synes om", fi: "Tykkää", zh: "喜欢", zhHant: "喜愛", ja: "ラブ", ko: "좋아요"
         ),
         .action_unlove: tr(
             en: "Unlove", es: "Quitar me gusta", fr: "Ne plus aimer", de: "Nicht mehr lieben", pt: "Remover gosto", it: "Non mi piace più",
             nl: "Niet meer leuk", ru: "Убрать отметку", pl: "Cofnij polubienie", tr: "Beğeniyi kaldır", sv: "Sluta gilla", nb: "Fjern liker",
-            da: "Fjern synes om", fi: "Poista tykkäys", zh: "取消喜欢", ja: "ラブを解除", ko: "좋아요 취소"
+            da: "Fjern synes om", fi: "Poista tykkäys", zh: "取消喜欢", zhHant: "取消喜愛", ja: "ラブを解除", ko: "좋아요 취소"
         ),
         .action_dislike: tr(
             en: "Dislike", es: "No me gusta", fr: "Je n'aime pas", de: "Nicht mögen", pt: "Não gosto", it: "Non mi piace",
             nl: "Niet leuk", ru: "Не нравится", pl: "Nie lubię", tr: "Beğenme", sv: "Ogilla", nb: "Mislik",
-            da: "Synes ikke om", fi: "En tykkää", zh: "不喜欢", ja: "低評価", ko: "싫어요"
+            da: "Synes ikke om", fi: "En tykkää", zh: "不喜欢", zhHant: "不喜歡", ja: "低評価", ko: "싫어요"
         ),
         .action_remove_dislike: tr(
             en: "Remove Dislike", es: "Quitar no me gusta", fr: "Retirer le rejet", de: "Ablehnung entfernen", pt: "Remover não gosto", it: "Rimuovi non mi piace",
             nl: "Afkeer verwijderen", ru: "Убрать дизлайк", pl: "Usuń nie lubię", tr: "Beğenmeme kaldır", sv: "Ta bort ogilla", nb: "Fjern mislik",
-            da: "Fjern synes ikke om", fi: "Poista en tykkää", zh: "取消不喜欢", ja: "低評価を解除", ko: "싫어요 취소"
+            da: "Fjern synes ikke om", fi: "Poista en tykkää", zh: "取消不喜欢", zhHant: "取消不喜歡", ja: "低評価を解除", ko: "싫어요 취소"
         ),
         .action_info: tr(
             en: "Info", es: "Información", fr: "Infos", de: "Info", pt: "Info", it: "Info",
             nl: "Info", ru: "Сведения", pl: "Info", tr: "Bilgi", sv: "Info", nb: "Info",
-            da: "Info", fi: "Tiedot", zh: "信息", ja: "情報", ko: "정보"
+            da: "Info", fi: "Tiedot", zh: "信息", zhHant: "資訊", ja: "情報", ko: "정보"
         ),
         .action_go_to_album: tr(
             en: "Go to Album", es: "Ir al álbum", fr: "Aller à l'album", de: "Zum Album", pt: "Ir para o álbum", it: "Vai all'album",
             nl: "Ga naar album", ru: "К альбому", pl: "Przejdź do albumu", tr: "Albüme git", sv: "Gå till album", nb: "Gå til album",
-            da: "Gå til album", fi: "Siirry albumiin", zh: "前往专辑", ja: "アルバムへ移動", ko: "앨범으로 이동"
+            da: "Gå til album", fi: "Siirry albumiin", zh: "前往专辑", zhHant: "前往專輯", ja: "アルバムへ移動", ko: "앨범으로 이동"
         ),
         .action_go_to_artist: tr(
             en: "Go to Artist", es: "Ir al artista", fr: "Aller à l'artiste", de: "Zum Künstler", pt: "Ir para o artista", it: "Vai all'artista",
             nl: "Ga naar artiest", ru: "К исполнителю", pl: "Przejdź do wykonawcy", tr: "Sanatçıya git", sv: "Gå till artist", nb: "Gå til artist",
-            da: "Gå til kunstner", fi: "Siirry artistiin", zh: "前往艺人", ja: "アーティストへ移動", ko: "아티스트로 이동"
+            da: "Gå til kunstner", fi: "Siirry artistiin", zh: "前往艺人", zhHant: "前往藝人", ja: "アーティストへ移動", ko: "아티스트로 이동"
         ),
         .action_view_credits: tr(
             en: "View Credits", es: "Ver créditos", fr: "Voir les crédits", de: "Credits anzeigen", pt: "Ver créditos", it: "Vedi crediti",
             nl: "Credits bekijken", ru: "Показать кредиты", pl: "Pokaż autorów", tr: "Katkıları gör", sv: "Visa medverkande", nb: "Vis medvirkende",
-            da: "Vis krediteringer", fi: "Näytä tekijät", zh: "查看制作名单", ja: "クレジットを表示", ko: "크레딧 보기"
+            da: "Vis krediteringer", fi: "Näytä tekijät", zh: "查看制作名单", zhHant: "檢視製作人員名單", ja: "クレジットを表示", ko: "크레딧 보기"
         ),
         .action_share: tr(
             en: "Share", es: "Compartir", fr: "Partager", de: "Teilen", pt: "Partilhar", it: "Condividi",
             nl: "Delen", ru: "Поделиться", pl: "Udostępnij", tr: "Paylaş", sv: "Dela", nb: "Del",
-            da: "Del", fi: "Jaa", zh: "分享", ja: "共有", ko: "공유"
+            da: "Del", fi: "Jaa", zh: "分享", zhHant: "分享", ja: "共有", ko: "공유"
         ),
         .action_remove_download: tr(
             en: "Remove Download", es: "Eliminar descarga", fr: "Supprimer le téléchargement", de: "Download entfernen", pt: "Remover transferência", it: "Rimuovi download",
             nl: "Download verwijderen", ru: "Удалить загрузку", pl: "Usuń pobranie", tr: "İndirmeyi kaldır", sv: "Ta bort nedladdning", nb: "Fjern nedlasting",
-            da: "Fjern download", fi: "Poista lataus", zh: "移除下载", ja: "ダウンロードを削除", ko: "다운로드 제거"
+            da: "Fjern download", fi: "Poista lataus", zh: "移除下载", zhHant: "移除下載項目", ja: "ダウンロードを削除", ko: "다운로드 제거"
         ),
         .action_view_stats: tr(
             en: "View Stats", es: "Ver estadísticas", fr: "Voir les stats", de: "Statistiken anzeigen", pt: "Ver estatísticas", it: "Vedi statistiche",
             nl: "Statistieken bekijken", ru: "Показать статистику", pl: "Pokaż statystyki", tr: "İstatistikleri gör", sv: "Visa statistik", nb: "Vis statistikk",
-            da: "Vis statistik", fi: "Näytä tilastot", zh: "查看统计", ja: "統計を表示", ko: "통계 보기"
+            da: "Vis statistik", fi: "Näytä tilastot", zh: "查看统计", zhHant: "檢視統計資料", ja: "統計を表示", ko: "통계 보기"
         ),
         .action_retry_connection: tr(
             en: "Retry Connection", es: "Reintentar conexión", fr: "Réessayer la connexion", de: "Verbindung erneut versuchen", pt: "Tentar ligação novamente", it: "Riprova connessione",
             nl: "Verbinding opnieuw proberen", ru: "Повторить подключение", pl: "Ponów połączenie", tr: "Bağlantıyı yeniden dene", sv: "Försök ansluta igen", nb: "Prøv tilkobling igjen",
-            da: "Prøv forbindelse igen", fi: "Yritä yhteyttä uudelleen", zh: "重试连接", ja: "接続を再試行", ko: "연결 다시 시도"
+            da: "Prøv forbindelse igen", fi: "Yritä yhteyttä uudelleen", zh: "重试连接", zhHant: "重試連線", ja: "接続を再試行", ko: "연결 다시 시도"
         ),
 
         // Home
         .home_offline: tr(
             en: "Offline", es: "Sin conexión", fr: "Hors ligne", de: "Offline", pt: "Offline", it: "Offline",
             nl: "Offline", ru: "Офлайн", pl: "Offline", tr: "Çevrimdışı", sv: "Offline", nb: "Frakoblet",
-            da: "Offline", fi: "Offline", zh: "离线", ja: "オフライン", ko: "오프라인"
+            da: "Offline", fi: "Offline", zh: "离线", zhHant: "離線", ja: "オフライン", ko: "오프라인"
         ),
         .home_downloaded_music: tr(
             en: "Your downloaded music", es: "Tu música descargada", fr: "Votre musique téléchargée", de: "Deine geladene Musik", pt: "A sua música transferida", it: "La tua musica scaricata",
             nl: "Je gedownloade muziek", ru: "Ваша загруженная музыка", pl: "Twoja pobrana muzyka", tr: "İndirilen müziğin", sv: "Din nedladdade musik", nb: "Din nedlastede musikk",
-            da: "Din hentede musik", fi: "Ladattu musiikkisi", zh: "你下载的音乐", ja: "ダウンロード済みの音楽", ko: "다운로드한 음악"
+            da: "Din hentede musik", fi: "Ladattu musiikkisi", zh: "你下载的音乐", zhHant: "你下載的音樂", ja: "ダウンロード済みの音楽", ko: "다운로드한 음악"
         ),
         .home_downloaded_albums: tr(
             en: "Downloaded Albums", es: "Álbumes descargados", fr: "Albums téléchargés", de: "Geladene Alben", pt: "Álbuns transferidos", it: "Album scaricati",
             nl: "Gedownloade albums", ru: "Загруженные альбомы", pl: "Pobrane albumy", tr: "İndirilen albümler", sv: "Nedladdade album", nb: "Nedlastede album",
-            da: "Hentede album", fi: "Ladatut albumit", zh: "已下载专辑", ja: "ダウンロード済みアルバム", ko: "다운로드한 앨범"
+            da: "Hentede album", fi: "Ladatut albumit", zh: "已下载专辑", zhHant: "已下載的專輯", ja: "ダウンロード済みアルバム", ko: "다운로드한 앨범"
         ),
         .home_downloaded_songs: tr(
             en: "Downloaded Songs", es: "Canciones descargadas", fr: "Titres téléchargés", de: "Geladene Songs", pt: "Músicas transferidas", it: "Brani scaricati",
             nl: "Gedownloade nummers", ru: "Загруженные песни", pl: "Pobrane utwory", tr: "İndirilen şarkılar", sv: "Nedladdade låtar", nb: "Nedlastede låter",
-            da: "Hentede sange", fi: "Ladatut kappaleet", zh: "已下载歌曲", ja: "ダウンロード済みの曲", ko: "다운로드한 곡"
+            da: "Hentede sange", fi: "Ladatut kappaleet", zh: "已下载歌曲", zhHant: "已下載的歌曲", ja: "ダウンロード済みの曲", ko: "다운로드한 곡"
         ),
         .home_picks_for_you: tr(
             en: "Picks for You", es: "Para ti", fr: "Sélection pour vous", de: "Für dich", pt: "Escolhas para si", it: "Scelte per te",
             nl: "Aanraders voor jou", ru: "Подборка для вас", pl: "Propozycje dla Ciebie", tr: "Senin için seçtiklerimiz", sv: "Tips för dig", nb: "Anbefalt for deg",
-            da: "Anbefalet til dig", fi: "Sinulle valitut", zh: "为你推荐", ja: "あなたへのおすすめ", ko: "추천 항목"
+            da: "Anbefalet til dig", fi: "Sinulle valitut", zh: "为你推荐", zhHant: "為你推薦", ja: "あなたへのおすすめ", ko: "추천 항목"
         ),
         .home_recently_played: tr(
             en: "Recently Played", es: "Reproducido recientemente", fr: "Écouté récemment", de: "Zuletzt gespielt", pt: "Reproduzido recentemente", it: "Ascoltati di recente",
             nl: "Recent afgespeeld", ru: "Недавно прослушано", pl: "Ostatnio odtwarzane", tr: "Son çalınanlar", sv: "Nyligen spelat", nb: "Nylig spilt",
-            da: "Afspillet for nylig", fi: "Viimeksi toistetut", zh: "最近播放", ja: "最近再生", ko: "최근 재생"
+            da: "Afspillet for nylig", fi: "Viimeksi toistetut", zh: "最近播放", zhHant: "最近播放", ja: "最近再生", ko: "최근 재생"
         ),
         .home_recently_added: tr(
             en: "Recently Added", es: "Añadido recientemente", fr: "Ajouté récemment", de: "Zuletzt hinzugefügt", pt: "Adicionado recentemente", it: "Aggiunti di recente",
             nl: "Recent toegevoegd", ru: "Недавно добавлено", pl: "Ostatnio dodane", tr: "Son eklenenler", sv: "Nyligen tillagt", nb: "Nylig lagt til",
-            da: "Tilføjet for nylig", fi: "Viimeksi lisätyt", zh: "最近添加", ja: "最近追加", ko: "최근 추가"
+            da: "Tilføjet for nylig", fi: "Viimeksi lisätyt", zh: "最近添加", zhHant: "最近加入", ja: "最近追加", ko: "최근 추가"
         ),
         .home_artists: tr(
             en: "Artists", es: "Artistas", fr: "Artistes", de: "Künstler", pt: "Artistas", it: "Artisti",
             nl: "Artiesten", ru: "Исполнители", pl: "Wykonawcy", tr: "Sanatçılar", sv: "Artister", nb: "Artister",
-            da: "Kunstnere", fi: "Artistit", zh: "艺人", ja: "アーティスト", ko: "아티스트"
+            da: "Kunstnere", fi: "Artistit", zh: "艺人", zhHant: "藝人", ja: "アーティスト", ko: "아티스트"
         ),
         .home_more_like: tr(
             en: "More Like %@", es: "Más como %@", fr: "Plus comme %@", de: "Mehr wie %@", pt: "Mais como %@", it: "Altro come %@",
             nl: "Meer zoals %@", ru: "Похоже на %@", pl: "Więcej jak %@", tr: "%@ benzerleri", sv: "Mer som %@", nb: "Mer som %@",
-            da: "Mere som %@", fi: "Lisää kuten %@", zh: "更多类似 %@", ja: "%@ に似た作品", ko: "%@ 비슷한 항목"
+            da: "Mere som %@", fi: "Lisää kuten %@", zh: "更多类似 %@", zhHant: "更多類似 %@ 的內容", ja: "%@ に似た作品", ko: "%@ 비슷한 항목"
         ),
         .home_discover: tr(
             en: "Discover", es: "Descubrir", fr: "Découvrir", de: "Entdecken", pt: "Descobrir", it: "Scopri",
             nl: "Ontdekken", ru: "Открытия", pl: "Odkrywaj", tr: "Keşfet", sv: "Upptäck", nb: "Oppdag",
-            da: "Opdag", fi: "Löydä", zh: "发现", ja: "見つける", ko: "발견"
+            da: "Opdag", fi: "Löydä", zh: "发现", zhHant: "探索", ja: "見つける", ko: "발견"
         ),
         .home_nothing_here: tr(
             en: "Nothing here yet", es: "Aún no hay nada", fr: "Rien ici pour l'instant", de: "Noch nichts hier", pt: "Ainda não há nada", it: "Ancora niente qui",
             nl: "Nog niets hier", ru: "Здесь пока ничего", pl: "Jeszcze nic tu nie ma", tr: "Henüz bir şey yok", sv: "Inget här än", nb: "Ingenting her ennå",
-            da: "Intet her endnu", fi: "Ei vielä mitään", zh: "这里还没有内容", ja: "まだ何もありません", ko: "아직 아무것도 없음"
+            da: "Intet her endnu", fi: "Ei vielä mitään", zh: "这里还没有内容", zhHant: "這裡還沒有內容", ja: "まだ何もありません", ko: "아직 아무것도 없음"
         ),
         .home_empty_message: tr(
             en: "Your library looks empty or the server is unreachable.", es: "Tu biblioteca parece vacía o el servidor no responde.", fr: "Votre bibliothèque semble vide ou le serveur est inaccessible.", de: "Deine Mediathek ist leer oder der Server ist nicht erreichbar.", pt: "A biblioteca parece vazia ou o servidor está indisponível.", it: "La libreria sembra vuota o il server non è raggiungibile.",
             nl: "Je bibliotheek lijkt leeg of de server is onbereikbaar.", ru: "Медиатека пуста или сервер недоступен.", pl: "Biblioteka jest pusta albo serwer jest niedostępny.", tr: "Kitaplığın boş görünüyor veya sunucuya ulaşılamıyor.", sv: "Biblioteket verkar tomt eller servern kan inte nås.", nb: "Biblioteket ser tomt ut, eller serveren kan ikke nås.",
-            da: "Biblioteket ser tomt ud, eller serveren kan ikke nås.", fi: "Kirjastosi näyttää tyhjältä tai palvelimeen ei saada yhteyttä.", zh: "你的音乐库似乎为空，或服务器无法访问。", ja: "ライブラリが空か、サーバーに接続できません。", ko: "보관함이 비었거나 서버에 연결할 수 없습니다."
+            da: "Biblioteket ser tomt ud, eller serveren kan ikke nås.", fi: "Kirjastosi näyttää tyhjältä tai palvelimeen ei saada yhteyttä.", zh: "你的音乐库似乎为空，或服务器无法访问。", zhHant: "你的資料庫似乎是空的，或無法連線至伺服器。", ja: "ライブラリが空か、サーバーに接続できません。", ko: "보관함이 비었거나 서버에 연결할 수 없습니다."
         ),
         .home_server_unreachable: tr(
             en: "Server Unreachable", es: "Servidor inaccesible", fr: "Serveur inaccessible", de: "Server nicht erreichbar", pt: "Servidor indisponível", it: "Server non raggiungibile",
             nl: "Server onbereikbaar", ru: "Сервер недоступен", pl: "Serwer niedostępny", tr: "Sunucuya ulaşılamıyor", sv: "Servern kan inte nås", nb: "Serveren kan ikke nås",
-            da: "Serveren kan ikke nås", fi: "Palvelimeen ei saada yhteyttä", zh: "服务器无法访问", ja: "サーバーに接続できません", ko: "서버에 연결할 수 없음"
+            da: "Serveren kan ikke nås", fi: "Palvelimeen ei saada yhteyttä", zh: "服务器无法访问", zhHant: "無法連線至伺服器", ja: "サーバーに接続できません", ko: "서버에 연결할 수 없음"
         ),
         .home_server_unreachable_message: tr(
             en: "Picks for You needs the server. Try reconnecting, or listen to downloaded music from the Library tab.", es: "Para ti necesita el servidor. Intenta reconectar o escucha música descargada desde la pestaña Biblioteca.", fr: "La sélection a besoin du serveur. Réessayez la connexion ou écoutez la musique téléchargée dans Bibliothèque.", de: "Für dich braucht den Server. Verbinde dich erneut oder höre geladene Musik in der Mediathek.", pt: "As escolhas precisam do servidor. Tente ligar novamente ou ouça música transferida na Biblioteca.", it: "Le scelte richiedono il server. Riprova la connessione o ascolta musica scaricata dalla Libreria.",
             nl: "Aanraders hebben de server nodig. Probeer opnieuw te verbinden of luister naar downloads in Bibliotheek.", ru: "Для подборок нужен сервер. Подключитесь снова или слушайте загруженную музыку в медиатеке.", pl: "Propozycje wymagają serwera. Połącz ponownie albo słuchaj pobranej muzyki w Bibliotece.", tr: "Seçkiler için sunucu gerekir. Yeniden bağlanmayı dene veya indirilen müziği Kitaplık'tan dinle.", sv: "Tipsen behöver servern. Försök ansluta igen eller lyssna på nedladdad musik i Bibliotek.", nb: "Anbefalinger trenger serveren. Prøv å koble til igjen, eller lytt til nedlastet musikk i Bibliotek.",
-            da: "Anbefalinger kræver serveren. Prøv at forbinde igen, eller lyt til hentet musik i Bibliotek.", fi: "Suositukset tarvitsevat palvelimen. Yritä yhdistää uudelleen tai kuuntele ladattua musiikkia Kirjastosta.", zh: "推荐内容需要服务器。请尝试重新连接，或在音乐库中收听已下载音乐。", ja: "おすすめにはサーバーが必要です。再接続するか、ライブラリでダウンロード済みの音楽を聴いてください。", ko: "추천 항목에는 서버가 필요합니다. 다시 연결하거나 보관함에서 다운로드한 음악을 들어보세요."
+            da: "Anbefalinger kræver serveren. Prøv at forbinde igen, eller lyt til hentet musik i Bibliotek.", fi: "Suositukset tarvitsevat palvelimen. Yritä yhdistää uudelleen tai kuuntele ladattua musiikkia Kirjastosta.", zh: "推荐内容需要服务器。请尝试重新连接，或在音乐库中收听已下载音乐。", zhHant: "「為你推薦」需要連線至伺服器。請嘗試重新連線，或從「資料庫」標籤頁收聽已下載的音樂。", ja: "おすすめにはサーバーが必要です。再接続するか、ライブラリでダウンロード済みの音楽を聴いてください。", ko: "추천 항목에는 서버가 필요합니다. 다시 연결하거나 보관함에서 다운로드한 음악을 들어보세요."
         ),
         .home_mix_badge: tr(
             en: "MIX", es: "MIX", fr: "MIX", de: "MIX", pt: "MIX", it: "MIX",
             nl: "MIX", ru: "МИКС", pl: "MIX", tr: "MIX", sv: "MIX", nb: "MIX",
-            da: "MIX", fi: "MIX", zh: "混音", ja: "ミックス", ko: "믹스"
+            da: "MIX", fi: "MIX", zh: "混音", zhHant: "精選", ja: "ミックス", ko: "믹스"
         ),
         .home_song_count: tr(
             en: "%d songs", es: "%d canciones", fr: "%d titres", de: "%d Songs", pt: "%d músicas", it: "%d brani",
             nl: "%d nummers", ru: "%d песен", pl: "%d utworów", tr: "%d şarkı", sv: "%d låtar", nb: "%d låter",
-            da: "%d sange", fi: "%d kappaletta", zh: "%d 首歌曲", ja: "%d 曲", ko: "%d곡"
+            da: "%d sange", fi: "%d kappaletta", zh: "%d 首歌曲", zhHant: "%d 首歌曲", ja: "%d 曲", ko: "%d곡"
         ),
         .home_saving_mix: tr(
             en: "Saving %@", es: "Guardando %@", fr: "Enregistrement de %@", de: "%@ wird gespeichert", pt: "A guardar %@", it: "Salvataggio di %@",
             nl: "%@ opslaan", ru: "Сохранение %@", pl: "Zapisywanie %@", tr: "%@ kaydediliyor", sv: "Sparar %@", nb: "Lagrer %@",
-            da: "Gemmer %@", fi: "Tallennetaan %@", zh: "正在保存 %@", ja: "%@ を保存中", ko: "%@ 저장 중"
+            da: "Gemmer %@", fi: "Tallennetaan %@", zh: "正在保存 %@", zhHant: "正在儲存 %@", ja: "%@ を保存中", ko: "%@ 저장 중"
         ),
         .home_saved_to: tr(
             en: "Saved to %@", es: "Guardado en %@", fr: "Enregistré dans %@", de: "Gespeichert in %@", pt: "Guardado em %@", it: "Salvato in %@",
             nl: "Opgeslagen in %@", ru: "Сохранено в %@", pl: "Zapisano w %@", tr: "%@ içine kaydedildi", sv: "Sparat i %@", nb: "Lagret i %@",
-            da: "Gemt i %@", fi: "Tallennettu kohteeseen %@", zh: "已保存到 %@", ja: "%@ に保存しました", ko: "%@에 저장됨"
+            da: "Gemt i %@", fi: "Tallennettu kohteeseen %@", zh: "已保存到 %@", zhHant: "已儲存至 %@", ja: "%@ に保存しました", ko: "%@에 저장됨"
         ),
         .home_save_mix_failed: tr(
             en: "Couldn't save mix", es: "No se pudo guardar el mix", fr: "Impossible d'enregistrer le mix", de: "Mix konnte nicht gespeichert werden", pt: "Não foi possível guardar o mix", it: "Impossibile salvare il mix",
             nl: "Mix opslaan mislukt", ru: "Не удалось сохранить микс", pl: "Nie udało się zapisać miksu", tr: "Mix kaydedilemedi", sv: "Kunde inte spara mixen", nb: "Kunne ikke lagre miksen",
-            da: "Kunne ikke gemme mixet", fi: "Miksin tallennus epäonnistui", zh: "无法保存混音", ja: "ミックスを保存できませんでした", ko: "믹스를 저장할 수 없음"
+            da: "Kunne ikke gemme mixet", fi: "Miksin tallennus epäonnistui", zh: "无法保存混音", zhHant: "無法儲存精選集", ja: "ミックスを保存できませんでした", ko: "믹스를 저장할 수 없음"
         ),
         .home_genre_mix_title: tr(
             en: "%@ Mix", es: "Mix de %@", fr: "Mix %@", de: "%@-Mix", pt: "Mix de %@", it: "Mix %@",
             nl: "%@-mix", ru: "Микс: %@", pl: "Miks %@", tr: "%@ Mix", sv: "%@-mix", nb: "%@-miks",
-            da: "%@-mix", fi: "%@-miksaus", zh: "%@ 混音", ja: "%@ ミックス", ko: "%@ 믹스"
+            da: "%@-mix", fi: "%@-miksaus", zh: "%@ 混音", zhHant: "%@ 精選", ja: "%@ ミックス", ko: "%@ 믹스"
         ),
         .home_genre_mix_subtitle: tr(
             en: "Daily %@ mix", es: "Mix diario de %@", fr: "Mix %@ du jour", de: "Täglicher %@-Mix", pt: "Mix diário de %@", it: "Mix %@ giornaliero",
             nl: "Dagelijkse %@-mix", ru: "Ежедневный микс %@", pl: "Codzienny miks %@", tr: "Günlük %@ mix", sv: "Daglig %@-mix", nb: "Daglig %@-miks",
-            da: "Dagligt %@-mix", fi: "Päivän %@-miksaus", zh: "每日 %@ 混音", ja: "今日の %@ ミックス", ko: "오늘의 %@ 믹스"
+            da: "Dagligt %@-mix", fi: "Päivän %@-miksaus", zh: "每日 %@ 混音", zhHant: "每日 %@ 精選", ja: "今日の %@ ミックス", ko: "오늘의 %@ 믹스"
         ),
         .home_artist_mix_title: tr(
             en: "%@ Mix", es: "Mix de %@", fr: "Mix %@", de: "%@-Mix", pt: "Mix de %@", it: "Mix %@",
             nl: "%@-mix", ru: "Микс: %@", pl: "Miks %@", tr: "%@ Mix", sv: "%@-mix", nb: "%@-miks",
-            da: "%@-mix", fi: "%@-miksaus", zh: "%@ 混音", ja: "%@ ミックス", ko: "%@ 믹스"
+            da: "%@-mix", fi: "%@-miksaus", zh: "%@ 混音", zhHant: "%@ 精選", ja: "%@ ミックス", ko: "%@ 믹스"
         ),
         .home_artist_mix_subtitle: tr(
             en: "Based on %@", es: "Basado en %@", fr: "Inspiré de %@", de: "Basierend auf %@", pt: "Baseado em %@", it: "Basato su %@",
             nl: "Gebaseerd op %@", ru: "На основе %@", pl: "Na podstawie %@", tr: "%@ temel alınarak", sv: "Baserat på %@", nb: "Basert på %@",
-            da: "Baseret på %@", fi: "Perustuu artistiin %@", zh: "基于 %@", ja: "%@ をもとに作成", ko: "%@ 기반"
+            da: "Baseret på %@", fi: "Perustuu artistiin %@", zh: "基于 %@", zhHant: "根據 %@", ja: "%@ をもとに作成", ko: "%@ 기반"
         ),
         .home_discovery_station: tr(
             en: "Discovery Station", es: "Estación de descubrimiento", fr: "Station découverte", de: "Entdeckungsstation", pt: "Estação de descoberta", it: "Stazione scoperta",
             nl: "Ontdekstation", ru: "Станция открытий", pl: "Stacja odkryć", tr: "Keşif İstasyonu", sv: "Upptäcktsstation", nb: "Oppdagelsesstasjon",
-            da: "Opdagelsesstation", fi: "Löytöasema", zh: "发现电台", ja: "ディスカバリーステーション", ko: "발견 스테이션"
+            da: "Opdagelsesstation", fi: "Löytöasema", zh: "发现电台", zhHant: "探索電台", ja: "ディスカバリーステーション", ko: "발견 스테이션"
         ),
         .home_discovery_station_subtitle: tr(
             en: "Fresh picks for today", es: "Novedades para hoy", fr: "Sélection fraîche du jour", de: "Frische Tipps für heute", pt: "Escolhas frescas para hoje", it: "Scelte fresche per oggi",
             nl: "Verse tips voor vandaag", ru: "Свежая подборка на сегодня", pl: "Świeże propozycje na dziś", tr: "Bugünün yeni seçimleri", sv: "Färska tips för idag", nb: "Friske tips for i dag",
-            da: "Friske valg til i dag", fi: "Tuoreita poimintoja tälle päivälle", zh: "今天的新鲜推荐", ja: "今日の新しいおすすめ", ko: "오늘의 새로운 추천"
+            da: "Friske valg til i dag", fi: "Tuoreita poimintoja tälle päivälle", zh: "今天的新鲜推荐", zhHant: "今日新鮮推薦", ja: "今日の新しいおすすめ", ko: "오늘의 새로운 추천"
         ),
         .home_heavy_rotation: tr(
             en: "Heavy Rotation", es: "En rotación", fr: "En boucle", de: "Heavy Rotation", pt: "Rotação frequente", it: "In rotazione",
             nl: "Veel gedraaid", ru: "Часто слушаете", pl: "Często odtwarzane", tr: "Sık Çalınanlar", sv: "Ofta spelat", nb: "Ofte spilt",
-            da: "Ofte afspillet", fi: "Ahkerassa soitossa", zh: "常听循环", ja: "よく聴く曲", ko: "자주 듣는 곡"
+            da: "Ofte afspillet", fi: "Ahkerassa soitossa", zh: "常听循环", zhHant: "反覆聆聽", ja: "よく聴く曲", ko: "자주 듣는 곡"
         ),
         .home_heavy_rotation_subtitle: tr(
             en: "Songs you keep coming back to", es: "Canciones a las que siempre vuelves", fr: "Les titres que vous réécoutez", de: "Songs, zu denen du zurückkehrst", pt: "Músicas a que volta sempre", it: "Brani a cui torni spesso",
             nl: "Nummers waar je op terugkomt", ru: "Песни, к которым вы возвращаетесь", pl: "Utwory, do których wracasz", tr: "Tekrar tekrar dinlediğin şarkılar", sv: "Låtar du återvänder till", nb: "Låter du stadig vender tilbake til",
-            da: "Sange du vender tilbage til", fi: "Kappaleet, joihin palaat", zh: "你反复回听的歌曲", ja: "何度も戻ってくる曲", ko: "계속 다시 듣는 곡"
+            da: "Sange du vender tilbage til", fi: "Kappaleet, joihin palaat", zh: "你反复回听的歌曲", zhHant: "你一聽再聽的歌曲", ja: "何度も戻ってくる曲", ko: "계속 다시 듣는 곡"
         ),
         .home_customize: en("Customize Home"),
         .home_sections: en("Home Sections"),
@@ -1499,37 +1522,37 @@ enum Strings {
         .home_mix_reset: en("Reset Mixes"),
 
         // Media metadata / sheets
-        .media_title: tr(en: "Title", es: "Título", fr: "Titre", de: "Titel", pt: "Título", it: "Titolo", nl: "Titel", ru: "Название", pl: "Tytuł", tr: "Başlık", sv: "Titel", nb: "Tittel", da: "Titel", fi: "Nimi", zh: "标题", ja: "タイトル", ko: "제목"),
-        .media_artist: tr(en: "Artist", es: "Artista", fr: "Artiste", de: "Künstler", pt: "Artista", it: "Artista", nl: "Artiest", ru: "Исполнитель", pl: "Wykonawca", tr: "Sanatçı", sv: "Artist", nb: "Artist", da: "Kunstner", fi: "Artisti", zh: "艺人", ja: "アーティスト", ko: "아티스트"),
-        .media_album: tr(en: "Album", es: "Álbum", fr: "Album", de: "Album", pt: "Álbum", it: "Album", nl: "Album", ru: "Альбом", pl: "Album", tr: "Albüm", sv: "Album", nb: "Album", da: "Album", fi: "Albumi", zh: "专辑", ja: "アルバム", ko: "앨범"),
-        .media_songs: tr(en: "Songs", es: "Canciones", fr: "Titres", de: "Songs", pt: "Músicas", it: "Brani", nl: "Nummers", ru: "Песни", pl: "Utwory", tr: "Şarkılar", sv: "Låtar", nb: "Låter", da: "Sange", fi: "Kappaleet", zh: "歌曲", ja: "曲", ko: "곡"),
-        .media_duration: tr(en: "Duration", es: "Duración", fr: "Durée", de: "Dauer", pt: "Duração", it: "Durata", nl: "Duur", ru: "Длительность", pl: "Czas trwania", tr: "Süre", sv: "Längd", nb: "Varighet", da: "Varighed", fi: "Kesto", zh: "时长", ja: "長さ", ko: "길이"),
-        .media_plays: tr(en: "Plays", es: "Reproducciones", fr: "Lectures", de: "Wiedergaben", pt: "Reproduções", it: "Riproduzioni", nl: "Afspelingen", ru: "Прослушивания", pl: "Odtworzenia", tr: "Çalma", sv: "Spelningar", nb: "Avspillinger", da: "Afspilninger", fi: "Toistot", zh: "播放次数", ja: "再生回数", ko: "재생"),
-        .media_year: tr(en: "Year", es: "Año", fr: "Année", de: "Jahr", pt: "Ano", it: "Anno", nl: "Jaar", ru: "Год", pl: "Rok", tr: "Yıl", sv: "År", nb: "År", da: "År", fi: "Vuosi", zh: "年份", ja: "年", ko: "연도"),
-        .media_genre: tr(en: "Genre", es: "Género", fr: "Genre", de: "Genre", pt: "Género", it: "Genere", nl: "Genre", ru: "Жанр", pl: "Gatunek", tr: "Tür", sv: "Genre", nb: "Sjanger", da: "Genre", fi: "Genre", zh: "流派", ja: "ジャンル", ko: "장르"),
-        .media_added: tr(en: "Added", es: "Añadido", fr: "Ajouté", de: "Hinzugefügt", pt: "Adicionado", it: "Aggiunto", nl: "Toegevoegd", ru: "Добавлено", pl: "Dodano", tr: "Eklendi", sv: "Tillagt", nb: "Lagt til", da: "Tilføjet", fi: "Lisätty", zh: "已添加", ja: "追加日", ko: "추가됨"),
-        .media_label: tr(en: "Label", es: "Sello", fr: "Label", de: "Label", pt: "Editora", it: "Etichetta", nl: "Label", ru: "Лейбл", pl: "Wytwórnia", tr: "Plak şirketi", sv: "Skivbolag", nb: "Plateselskap", da: "Pladeselskab", fi: "Levy-yhtiö", zh: "厂牌", ja: "レーベル", ko: "레이블"),
-        .media_bit_rate: tr(en: "Bit Rate", es: "Tasa de bits", fr: "Débit", de: "Bitrate", pt: "Taxa de bits", it: "Bitrate", nl: "Bitsnelheid", ru: "Битрейт", pl: "Szybkość bitowa", tr: "Bit hızı", sv: "Bithastighet", nb: "Bithastighet", da: "Bithastighed", fi: "Bittinopeus", zh: "比特率", ja: "ビットレート", ko: "비트 전송률"),
-        .media_sample_rate: tr(en: "Sample Rate", es: "Frecuencia de muestreo", fr: "Fréquence d'échantillonnage", de: "Samplerate", pt: "Taxa de amostragem", it: "Frequenza di campionamento", nl: "Samplefrequentie", ru: "Частота дискретизации", pl: "Częstotliwość próbkowania", tr: "Örnekleme hızı", sv: "Samplingsfrekvens", nb: "Samplingsrate", da: "Samplingsfrekvens", fi: "Näytteenottotaajuus", zh: "采样率", ja: "サンプルレート", ko: "샘플 레이트"),
-        .media_bit_depth: tr(en: "Bit Depth", es: "Profundidad de bits", fr: "Profondeur de bits", de: "Bittiefe", pt: "Profundidade de bits", it: "Profondità bit", nl: "Bitdiepte", ru: "Битовая глубина", pl: "Głębia bitowa", tr: "Bit derinliği", sv: "Bitdjup", nb: "Bitdybde", da: "Bitdybde", fi: "Bittisyvyys", zh: "位深", ja: "ビット深度", ko: "비트 깊이"),
-        .media_format: tr(en: "Format", es: "Formato", fr: "Format", de: "Format", pt: "Formato", it: "Formato", nl: "Formaat", ru: "Формат", pl: "Format", tr: "Biçim", sv: "Format", nb: "Format", da: "Format", fi: "Muoto", zh: "格式", ja: "形式", ko: "형식"),
-        .media_file_type: tr(en: "File Type", es: "Tipo de archivo", fr: "Type de fichier", de: "Dateityp", pt: "Tipo de ficheiro", it: "Tipo file", nl: "Bestandstype", ru: "Тип файла", pl: "Typ pliku", tr: "Dosya türü", sv: "Filtyp", nb: "Filtype", da: "Filtype", fi: "Tiedostotyyppi", zh: "文件类型", ja: "ファイル形式", ko: "파일 유형"),
-        .media_file_size: tr(en: "File Size", es: "Tamaño de archivo", fr: "Taille du fichier", de: "Dateigröße", pt: "Tamanho do ficheiro", it: "Dimensione file", nl: "Bestandsgrootte", ru: "Размер файла", pl: "Rozmiar pliku", tr: "Dosya boyutu", sv: "Filstorlek", nb: "Filstørrelse", da: "Filstørrelse", fi: "Tiedoston koko", zh: "文件大小", ja: "ファイルサイズ", ko: "파일 크기"),
-        .media_play_count: tr(en: "Play Count", es: "Reproducciones", fr: "Nombre de lectures", de: "Wiedergaben", pt: "Contagem de reproduções", it: "Numero riproduzioni", nl: "Aantal keren afgespeeld", ru: "Счётчик прослушиваний", pl: "Liczba odtworzeń", tr: "Çalma sayısı", sv: "Antal spelningar", nb: "Antall avspillinger", da: "Antal afspilninger", fi: "Toistokerrat", zh: "播放次数", ja: "再生回数", ko: "재생 횟수"),
-        .media_path: tr(en: "Path", es: "Ruta", fr: "Chemin", de: "Pfad", pt: "Caminho", it: "Percorso", nl: "Pad", ru: "Путь", pl: "Ścieżka", tr: "Yol", sv: "Sökväg", nb: "Sti", da: "Sti", fi: "Polku", zh: "路径", ja: "パス", ko: "경로"),
-        .song_info_title: tr(en: "Song Info", es: "Información de la canción", fr: "Infos du titre", de: "Song-Info", pt: "Info da música", it: "Info brano", nl: "Nummerinfo", ru: "Сведения о песне", pl: "Informacje o utworze", tr: "Şarkı bilgisi", sv: "Låtinfo", nb: "Låtinfo", da: "Sanginfo", fi: "Kappaleen tiedot", zh: "歌曲信息", ja: "曲の情報", ko: "곡 정보"),
-        .album_stats_title: tr(en: "Album Stats", es: "Estadísticas del álbum", fr: "Stats de l'album", de: "Albumstatistik", pt: "Estatísticas do álbum", it: "Statistiche album", nl: "Albumstatistieken", ru: "Статистика альбома", pl: "Statystyki albumu", tr: "Albüm istatistikleri", sv: "Albumstatistik", nb: "Albumstatistikk", da: "Albumstatistik", fi: "Albumin tilastot", zh: "专辑统计", ja: "アルバム統計", ko: "앨범 통계"),
+        .media_title: tr(en: "Title", es: "Título", fr: "Titre", de: "Titel", pt: "Título", it: "Titolo", nl: "Titel", ru: "Название", pl: "Tytuł", tr: "Başlık", sv: "Titel", nb: "Tittel", da: "Titel", fi: "Nimi", zh: "标题", zhHant: "標題", ja: "タイトル", ko: "제목"),
+        .media_artist: tr(en: "Artist", es: "Artista", fr: "Artiste", de: "Künstler", pt: "Artista", it: "Artista", nl: "Artiest", ru: "Исполнитель", pl: "Wykonawca", tr: "Sanatçı", sv: "Artist", nb: "Artist", da: "Kunstner", fi: "Artisti", zh: "艺人", zhHant: "藝人", ja: "アーティスト", ko: "아티스트"),
+        .media_album: tr(en: "Album", es: "Álbum", fr: "Album", de: "Album", pt: "Álbum", it: "Album", nl: "Album", ru: "Альбом", pl: "Album", tr: "Albüm", sv: "Album", nb: "Album", da: "Album", fi: "Albumi", zh: "专辑", zhHant: "專輯", ja: "アルバム", ko: "앨범"),
+        .media_songs: tr(en: "Songs", es: "Canciones", fr: "Titres", de: "Songs", pt: "Músicas", it: "Brani", nl: "Nummers", ru: "Песни", pl: "Utwory", tr: "Şarkılar", sv: "Låtar", nb: "Låter", da: "Sange", fi: "Kappaleet", zh: "歌曲", zhHant: "歌曲", ja: "曲", ko: "곡"),
+        .media_duration: tr(en: "Duration", es: "Duración", fr: "Durée", de: "Dauer", pt: "Duração", it: "Durata", nl: "Duur", ru: "Длительность", pl: "Czas trwania", tr: "Süre", sv: "Längd", nb: "Varighet", da: "Varighed", fi: "Kesto", zh: "时长", zhHant: "長度", ja: "長さ", ko: "길이"),
+        .media_plays: tr(en: "Plays", es: "Reproducciones", fr: "Lectures", de: "Wiedergaben", pt: "Reproduções", it: "Riproduzioni", nl: "Afspelingen", ru: "Прослушивания", pl: "Odtworzenia", tr: "Çalma", sv: "Spelningar", nb: "Avspillinger", da: "Afspilninger", fi: "Toistot", zh: "播放次数", zhHant: "播放次數", ja: "再生回数", ko: "재생"),
+        .media_year: tr(en: "Year", es: "Año", fr: "Année", de: "Jahr", pt: "Ano", it: "Anno", nl: "Jaar", ru: "Год", pl: "Rok", tr: "Yıl", sv: "År", nb: "År", da: "År", fi: "Vuosi", zh: "年份", zhHant: "年份", ja: "年", ko: "연도"),
+        .media_genre: tr(en: "Genre", es: "Género", fr: "Genre", de: "Genre", pt: "Género", it: "Genere", nl: "Genre", ru: "Жанр", pl: "Gatunek", tr: "Tür", sv: "Genre", nb: "Sjanger", da: "Genre", fi: "Genre", zh: "流派", zhHant: "類型", ja: "ジャンル", ko: "장르"),
+        .media_added: tr(en: "Added", es: "Añadido", fr: "Ajouté", de: "Hinzugefügt", pt: "Adicionado", it: "Aggiunto", nl: "Toegevoegd", ru: "Добавлено", pl: "Dodano", tr: "Eklendi", sv: "Tillagt", nb: "Lagt til", da: "Tilføjet", fi: "Lisätty", zh: "已添加", zhHant: "加入日期", ja: "追加日", ko: "추가됨"),
+        .media_label: tr(en: "Label", es: "Sello", fr: "Label", de: "Label", pt: "Editora", it: "Etichetta", nl: "Label", ru: "Лейбл", pl: "Wytwórnia", tr: "Plak şirketi", sv: "Skivbolag", nb: "Plateselskap", da: "Pladeselskab", fi: "Levy-yhtiö", zh: "厂牌", zhHant: "唱片公司", ja: "レーベル", ko: "레이블"),
+        .media_bit_rate: tr(en: "Bit Rate", es: "Tasa de bits", fr: "Débit", de: "Bitrate", pt: "Taxa de bits", it: "Bitrate", nl: "Bitsnelheid", ru: "Битрейт", pl: "Szybkość bitowa", tr: "Bit hızı", sv: "Bithastighet", nb: "Bithastighet", da: "Bithastighed", fi: "Bittinopeus", zh: "比特率", zhHant: "位元率", ja: "ビットレート", ko: "비트 전송률"),
+        .media_sample_rate: tr(en: "Sample Rate", es: "Frecuencia de muestreo", fr: "Fréquence d'échantillonnage", de: "Samplerate", pt: "Taxa de amostragem", it: "Frequenza di campionamento", nl: "Samplefrequentie", ru: "Частота дискретизации", pl: "Częstotliwość próbkowania", tr: "Örnekleme hızı", sv: "Samplingsfrekvens", nb: "Samplingsrate", da: "Samplingsfrekvens", fi: "Näytteenottotaajuus", zh: "采样率", zhHant: "取樣率", ja: "サンプルレート", ko: "샘플 레이트"),
+        .media_bit_depth: tr(en: "Bit Depth", es: "Profundidad de bits", fr: "Profondeur de bits", de: "Bittiefe", pt: "Profundidade de bits", it: "Profondità bit", nl: "Bitdiepte", ru: "Битовая глубина", pl: "Głębia bitowa", tr: "Bit derinliği", sv: "Bitdjup", nb: "Bitdybde", da: "Bitdybde", fi: "Bittisyvyys", zh: "位深", zhHant: "位元深度", ja: "ビット深度", ko: "비트 깊이"),
+        .media_format: tr(en: "Format", es: "Formato", fr: "Format", de: "Format", pt: "Formato", it: "Formato", nl: "Formaat", ru: "Формат", pl: "Format", tr: "Biçim", sv: "Format", nb: "Format", da: "Format", fi: "Muoto", zh: "格式", zhHant: "格式", ja: "形式", ko: "형식"),
+        .media_file_type: tr(en: "File Type", es: "Tipo de archivo", fr: "Type de fichier", de: "Dateityp", pt: "Tipo de ficheiro", it: "Tipo file", nl: "Bestandstype", ru: "Тип файла", pl: "Typ pliku", tr: "Dosya türü", sv: "Filtyp", nb: "Filtype", da: "Filtype", fi: "Tiedostotyyppi", zh: "文件类型", zhHant: "檔案類型", ja: "ファイル形式", ko: "파일 유형"),
+        .media_file_size: tr(en: "File Size", es: "Tamaño de archivo", fr: "Taille du fichier", de: "Dateigröße", pt: "Tamanho do ficheiro", it: "Dimensione file", nl: "Bestandsgrootte", ru: "Размер файла", pl: "Rozmiar pliku", tr: "Dosya boyutu", sv: "Filstorlek", nb: "Filstørrelse", da: "Filstørrelse", fi: "Tiedoston koko", zh: "文件大小", zhHant: "檔案大小", ja: "ファイルサイズ", ko: "파일 크기"),
+        .media_play_count: tr(en: "Play Count", es: "Reproducciones", fr: "Nombre de lectures", de: "Wiedergaben", pt: "Contagem de reproduções", it: "Numero riproduzioni", nl: "Aantal keren afgespeeld", ru: "Счётчик прослушиваний", pl: "Liczba odtworzeń", tr: "Çalma sayısı", sv: "Antal spelningar", nb: "Antall avspillinger", da: "Antal afspilninger", fi: "Toistokerrat", zh: "播放次数", zhHant: "播放次數", ja: "再生回数", ko: "재생 횟수"),
+        .media_path: tr(en: "Path", es: "Ruta", fr: "Chemin", de: "Pfad", pt: "Caminho", it: "Percorso", nl: "Pad", ru: "Путь", pl: "Ścieżka", tr: "Yol", sv: "Sökväg", nb: "Sti", da: "Sti", fi: "Polku", zh: "路径", zhHant: "路徑", ja: "パス", ko: "경로"),
+        .song_info_title: tr(en: "Song Info", es: "Información de la canción", fr: "Infos du titre", de: "Song-Info", pt: "Info da música", it: "Info brano", nl: "Nummerinfo", ru: "Сведения о песне", pl: "Informacje o utworze", tr: "Şarkı bilgisi", sv: "Låtinfo", nb: "Låtinfo", da: "Sanginfo", fi: "Kappaleen tiedot", zh: "歌曲信息", zhHant: "歌曲資訊", ja: "曲の情報", ko: "곡 정보"),
+        .album_stats_title: tr(en: "Album Stats", es: "Estadísticas del álbum", fr: "Stats de l'album", de: "Albumstatistik", pt: "Estatísticas do álbum", it: "Statistiche album", nl: "Albumstatistieken", ru: "Статистика альбома", pl: "Statystyki albumu", tr: "Albüm istatistikleri", sv: "Albumstatistik", nb: "Albumstatistikk", da: "Albumstatistik", fi: "Albumin tilastot", zh: "专辑统计", zhHant: "專輯統計資料", ja: "アルバム統計", ko: "앨범 통계"),
         .settings_title: [
             .english: "Settings", .spanish: "Ajustes", .french: "Réglages", .german: "Einstellungen",
             .portuguese: "Definições", .italian: "Impostazioni", .dutch: "Instellingen", .russian: "Настройки",
             .polish: "Ustawienia", .turkish: "Ayarlar", .swedish: "Inställningar", .norwegian: "Innstillinger",
-            .danish: "Indstillinger", .finnish: "Asetukset", .chinese: "设置", .japanese: "設定", .korean: "설정",
+            .danish: "Indstillinger", .finnish: "Asetukset", .chinese: "设置", .traditionalChinese: "設定", .japanese: "設定", .korean: "설정",
         ],
         .settings_language: [
             .english: "Language", .spanish: "Idioma", .french: "Langue", .german: "Sprache",
             .portuguese: "Idioma", .italian: "Lingua", .dutch: "Taal", .russian: "Язык",
             .polish: "Język", .turkish: "Dil", .swedish: "Språk", .norwegian: "Språk",
-            .danish: "Sprog", .finnish: "Kieli", .chinese: "语言", .japanese: "言語", .korean: "언어",
+            .danish: "Sprog", .finnish: "Kieli", .chinese: "语言", .traditionalChinese: "語言", .japanese: "言語", .korean: "언어",
         ],
         .settings_search: [
             .english: "Search settings", .spanish: "Buscar ajustes", .french: "Rechercher dans les réglages",
@@ -1537,6 +1560,7 @@ enum Strings {
             .dutch: "Instellingen zoeken", .russian: "Поиск в настройках", .polish: "Szukaj w ustawieniach",
             .turkish: "Ayarlarda ara", .swedish: "Sök i inställningar", .norwegian: "Søk i innstillinger",
             .danish: "Søg i indstillinger", .finnish: "Hae asetuksista", .chinese: "搜索设置",
+            .traditionalChinese: "搜尋設定",
             .japanese: "設定を検索", .korean: "설정 검색",
         ],
         .language_picker_footer: [
@@ -1555,6 +1579,7 @@ enum Strings {
             .danish: "Ændringer træder i kraft i hele appen med det samme. Engelsk er standard.",
             .finnish: "Muutokset tulevat heti voimaan koko sovelluksessa. Englanti on oletuskieli.",
             .chinese: "更改会立即应用到整个应用。默认语言为英语。",
+            .traditionalChinese: "變更會立即套用到整個 App。預設語言為英文。",
             .japanese: "変更はアプリ全体にすぐ反映されます。デフォルトは英語です。",
             .korean: "변경 사항은 앱 전체에 즉시 적용됩니다. 기본 언어는 영어입니다.",
         ],
@@ -1562,13 +1587,13 @@ enum Strings {
             .english: "Playback", .spanish: "Reproducción", .french: "Lecture", .german: "Wiedergabe",
             .portuguese: "Reprodução", .italian: "Riproduzione", .dutch: "Afspelen", .russian: "Воспроизведение",
             .polish: "Odtwarzanie", .turkish: "Oynatma", .swedish: "Uppspelning", .norwegian: "Avspilling",
-            .danish: "Afspilning", .finnish: "Toisto", .chinese: "播放", .japanese: "再生", .korean: "재생",
+            .danish: "Afspilning", .finnish: "Toisto", .chinese: "播放", .traditionalChinese: "播放", .japanese: "再生", .korean: "재생",
         ],
         .settings_section_audio: [
             .english: "Audio", .spanish: "Audio", .french: "Audio", .german: "Audio",
             .portuguese: "Áudio", .italian: "Audio", .dutch: "Audio", .russian: "Звук",
             .polish: "Dźwięk", .turkish: "Ses", .swedish: "Ljud", .norwegian: "Lyd",
-            .danish: "Lyd", .finnish: "Ääni", .chinese: "音频", .japanese: "オーディオ", .korean: "오디오",
+            .danish: "Lyd", .finnish: "Ääni", .chinese: "音频", .traditionalChinese: "音訊", .japanese: "オーディオ", .korean: "오디오",
         ],
         .settings_section_streaming: [
             .english: "Streaming", .spanish: "Streaming y descargas", .french: "Streaming et téléchargements",
@@ -1576,61 +1601,62 @@ enum Strings {
             .dutch: "Streamen en downloads", .russian: "Потоки и загрузки", .polish: "Strumieniowanie i pobieranie",
             .turkish: "Yayın ve indirmeler", .swedish: "Strömning och nedladdningar", .norwegian: "Strømming og nedlastinger",
             .danish: "Streaming og downloads", .finnish: "Suoratoisto ja lataukset", .chinese: "流媒体与下载",
+            .traditionalChinese: "串流",
             .japanese: "ストリーミングとダウンロード", .korean: "스트리밍 및 다운로드",
         ],
         .settings_section_performance: [
             .english: "Performance", .spanish: "Rendimiento", .french: "Performances", .german: "Leistung",
             .portuguese: "Desempenho", .italian: "Prestazioni", .dutch: "Prestaties", .russian: "Производительность",
             .polish: "Wydajność", .turkish: "Performans", .swedish: "Prestanda", .norwegian: "Ytelse",
-            .danish: "Ydeevne", .finnish: "Suorituskyky", .chinese: "性能", .japanese: "パフォーマンス", .korean: "성능",
+            .danish: "Ydeevne", .finnish: "Suorituskyky", .chinese: "性能", .traditionalChinese: "效能", .japanese: "パフォーマンス", .korean: "성능",
         ],
         .settings_section_appearance: [
             .english: "Appearance", .spanish: "Apariencia", .french: "Apparence", .german: "Darstellung",
             .portuguese: "Aparência", .italian: "Aspetto", .dutch: "Weergave", .russian: "Оформление",
             .polish: "Wygląd", .turkish: "Görünüm", .swedish: "Utseende", .norwegian: "Utseende",
-            .danish: "Udseende", .finnish: "Ulkoasu", .chinese: "外观", .japanese: "外観", .korean: "화면 표시",
+            .danish: "Udseende", .finnish: "Ulkoasu", .chinese: "外观", .traditionalChinese: "外觀", .japanese: "外観", .korean: "화면 표시",
         ],
         .settings_section_notifications: [
             .english: "Notifications", .spanish: "Notificaciones", .french: "Notifications", .german: "Mitteilungen",
             .portuguese: "Notificações", .italian: "Notifiche", .dutch: "Meldingen", .russian: "Уведомления",
             .polish: "Powiadomienia", .turkish: "Bildirimler", .swedish: "Aviseringar", .norwegian: "Varsler",
-            .danish: "Notifikationer", .finnish: "Ilmoitukset", .chinese: "通知", .japanese: "通知", .korean: "알림",
+            .danish: "Notifikationer", .finnish: "Ilmoitukset", .chinese: "通知", .traditionalChinese: "通知", .japanese: "通知", .korean: "알림",
         ],
         .settings_section_backups: [
             .english: "Backups", .spanish: "Copias de seguridad", .french: "Sauvegardes", .german: "Backups",
             .portuguese: "Cópias de segurança", .italian: "Backup", .dutch: "Back-ups", .russian: "Резервные копии",
             .polish: "Kopie zapasowe", .turkish: "Yedeklemeler", .swedish: "Säkerhetskopior", .norwegian: "Sikkerhetskopier",
-            .danish: "Sikkerhedskopier", .finnish: "Varmuuskopiot", .chinese: "备份", .japanese: "バックアップ", .korean: "백업",
+            .danish: "Sikkerhedskopier", .finnish: "Varmuuskopiot", .chinese: "备份", .traditionalChinese: "備份", .japanese: "バックアップ", .korean: "백업",
         ],
         .settings_section_server: [
             .english: "Server", .spanish: "Servidor", .french: "Serveur", .german: "Server",
             .portuguese: "Servidor", .italian: "Server", .dutch: "Server", .russian: "Сервер",
             .polish: "Serwer", .turkish: "Sunucu", .swedish: "Server", .norwegian: "Server",
-            .danish: "Server", .finnish: "Palvelin", .chinese: "服务器", .japanese: "サーバー", .korean: "서버",
+            .danish: "Server", .finnish: "Palvelin", .chinese: "服务器", .traditionalChinese: "伺服器", .japanese: "サーバー", .korean: "서버",
         ],
         .settings_section_storage: [
             .english: "Storage", .spanish: "Almacenamiento", .french: "Stockage", .german: "Speicher",
             .portuguese: "Armazenamento", .italian: "Spazio", .dutch: "Opslag", .russian: "Хранилище",
             .polish: "Pamięć", .turkish: "Depolama", .swedish: "Lagring", .norwegian: "Lagring",
-            .danish: "Lagring", .finnish: "Tallennustila", .chinese: "存储", .japanese: "ストレージ", .korean: "저장 공간",
+            .danish: "Lagring", .finnish: "Tallennustila", .chinese: "存储", .traditionalChinese: "儲存空間", .japanese: "ストレージ", .korean: "저장 공간",
         ],
         .settings_section_about: [
             .english: "About", .spanish: "Acerca de", .french: "À propos", .german: "Über",
             .portuguese: "Acerca de", .italian: "Informazioni", .dutch: "Over", .russian: "О приложении",
             .polish: "O aplikacji", .turkish: "Hakkında", .swedish: "Om", .norwegian: "Om",
-            .danish: "Om", .finnish: "Tietoja", .chinese: "关于", .japanese: "情報", .korean: "정보",
+            .danish: "Om", .finnish: "Tietoja", .chinese: "关于", .traditionalChinese: "關於", .japanese: "情報", .korean: "정보",
         ],
         .settings_section_developer: [
             .english: "Developer", .spanish: "Desarrollador", .french: "Développeur", .german: "Entwickler",
             .portuguese: "Programador", .italian: "Sviluppatore", .dutch: "Ontwikkelaar", .russian: "Разработчик",
             .polish: "Deweloper", .turkish: "Geliştirici", .swedish: "Utvecklare", .norwegian: "Utvikler",
-            .danish: "Udvikler", .finnish: "Kehittäjä", .chinese: "开发者", .japanese: "開発者", .korean: "개발자",
+            .danish: "Udvikler", .finnish: "Kehittäjä", .chinese: "开发者", .traditionalChinese: "開發者", .japanese: "開発者", .korean: "개발자",
         ],
         .appearance_theme: [
             .english: "Theme", .spanish: "Tema", .french: "Thème", .german: "Design",
             .portuguese: "Tema", .italian: "Tema", .dutch: "Thema", .russian: "Тема",
             .polish: "Motyw", .turkish: "Tema", .swedish: "Tema", .norwegian: "Tema",
-            .danish: "Tema", .finnish: "Teema", .chinese: "主题", .japanese: "テーマ", .korean: "테마",
+            .danish: "Tema", .finnish: "Teema", .chinese: "主题", .traditionalChinese: "主題", .japanese: "テーマ", .korean: "테마",
         ],
         .appearance_lossless_badge: [
             .english: "Show Lossless Badge", .spanish: "Mostrar insignia sin pérdida", .french: "Afficher le badge sans perte",
@@ -1638,6 +1664,7 @@ enum Strings {
             .dutch: "Lossless-badge tonen", .russian: "Показывать значок Lossless", .polish: "Pokaż plakietkę Lossless",
             .turkish: "Lossless rozetini göster", .swedish: "Visa lossless-märke", .norwegian: "Vis lossless-merke",
             .danish: "Vis lossless-mærke", .finnish: "Näytä lossless-merkki", .chinese: "显示无损标记",
+            .traditionalChinese: "顯示無損標記",
             .japanese: "ロスレスバッジを表示", .korean: "무손실 배지 표시",
         ],
         .appearance_explicit_badge: [
@@ -1646,13 +1673,14 @@ enum Strings {
             .dutch: "Explicit-badge tonen", .russian: "Показывать значок Explicit", .polish: "Pokaż plakietkę Explicit",
             .turkish: "Explicit rozetini göster", .swedish: "Visa explicit-märke", .norwegian: "Vis explicit-merke",
             .danish: "Vis explicit-mærke", .finnish: "Näytä explicit-merkki", .chinese: "显示限制级标记",
+            .traditionalChinese: "顯示露骨內容標記",
             .japanese: "Explicitバッジを表示", .korean: "유해 콘텐츠 배지 표시",
         ],
         .appearance_live_artwork: [
             .english: "Live Artwork", .spanish: "Carátula animada", .french: "Pochette animée", .german: "Live-Cover",
             .portuguese: "Capa animada", .italian: "Copertina animata", .dutch: "Live albumhoes", .russian: "Живая обложка",
             .polish: "Animowana okładka", .turkish: "Canlı kapak", .swedish: "Levande omslag", .norwegian: "Levende omslag",
-            .danish: "Levende omslag", .finnish: "Elävä kansikuva", .chinese: "动态封面", .japanese: "ライブアートワーク", .korean: "라이브 아트워크",
+            .danish: "Levende omslag", .finnish: "Elävä kansikuva", .chinese: "动态封面", .traditionalChinese: "動態封面", .japanese: "ライブアートワーク", .korean: "라이브 아트워크",
         ],
         .appearance_stylized_cover: [
             .english: "Stylized Player Cover", .spanish: "Carátula estilizada", .french: "Pochette stylisée du lecteur",
@@ -1660,6 +1688,7 @@ enum Strings {
             .dutch: "Gestileerde spelerhoes", .russian: "Стилизованная обложка плеера", .polish: "Stylizowana okładka odtwarzacza",
             .turkish: "Stilize oynatıcı kapağı", .swedish: "Stiliserat spelaromslag", .norwegian: "Stilisert spilleromslag",
             .danish: "Stiliseret afspilleromslag", .finnish: "Tyylitelty soittimen kansi", .chinese: "风格化播放器封面",
+            .traditionalChinese: "風格化播放器封面",
             .japanese: "スタイル付きプレーヤーカバー", .korean: "스타일 플레이어 커버",
         ],
         .appearance_simple_player_animations: [
@@ -1668,6 +1697,7 @@ enum Strings {
             .dutch: "Eenvoudige speleranimaties", .russian: "Простые анимации плеера", .polish: "Proste animacje odtwarzacza",
             .turkish: "Basit oynatıcı animasyonları", .swedish: "Enkla spelaranimationer", .norwegian: "Enkle spilleranimasjoner",
             .danish: "Enkle afspilleranimationer", .finnish: "Soittimen yksinkertaiset animaatiot", .chinese: "简单播放器动画",
+            .traditionalChinese: "簡化播放器動畫",
             .japanese: "シンプルなプレーヤーアニメーション", .korean: "간단한 플레이어 애니메이션",
         ],
         .appearance_stylized_album_cover: en("Stylized Album Cover"),
@@ -1678,6 +1708,7 @@ enum Strings {
             .dutch: "Albumhoes in lijsten", .russian: "Обложки в списках", .polish: "Okładki na listach",
             .turkish: "Listelerde şarkı kapağı", .swedish: "Omslag i listor", .norwegian: "Omslag i lister",
             .danish: "Omslag i lister", .finnish: "Kansikuvat luetteloissa", .chinese: "列表中显示歌曲封面",
+            .traditionalChinese: "在列表中顯示歌曲封面",
             .japanese: "リストに曲のアートワークを表示", .korean: "목록에 곡 아트워크 표시",
         ],
         .appearance_long_track_titles: [
@@ -1686,25 +1717,26 @@ enum Strings {
             .dutch: "Lange tracktitels", .russian: "Длинные названия треков", .polish: "Długie tytuły utworów",
             .turkish: "Uzun parça adları", .swedish: "Långa låttitlar", .norwegian: "Lange sangtitler",
             .danish: "Lange sangtitler", .finnish: "Pitkät kappaleiden nimet", .chinese: "长歌曲标题",
+            .traditionalChinese: "長曲目標題",
             .japanese: "長い曲名", .korean: "긴 곡 제목",
         ],
         .track_titles_truncate: [
             .english: "Truncate", .spanish: "Truncar", .french: "Tronquer", .german: "Kürzen",
             .portuguese: "Truncar", .italian: "Tronca", .dutch: "Afkappen", .russian: "Обрезать",
             .polish: "Skróć", .turkish: "Kısalt", .swedish: "Korta av", .norwegian: "Forkort",
-            .danish: "Forkort", .finnish: "Lyhennä", .chinese: "截断", .japanese: "省略", .korean: "말줄임",
+            .danish: "Forkort", .finnish: "Lyhennä", .chinese: "截断", .traditionalChinese: "截斷", .japanese: "省略", .korean: "말줄임",
         ],
         .track_titles_sliding: [
             .english: "Sliding", .spanish: "Deslizante", .french: "Défilement", .german: "Lauftext",
             .portuguese: "Deslizante", .italian: "Scorrimento", .dutch: "Schuivend", .russian: "Прокрутка",
             .polish: "Przewijanie", .turkish: "Kayan", .swedish: "Rullande", .norwegian: "Rullende",
-            .danish: "Rullende", .finnish: "Vierivä", .chinese: "滚动", .japanese: "スクロール", .korean: "스크롤",
+            .danish: "Rullende", .finnish: "Vierivä", .chinese: "滚动", .traditionalChinese: "捲動", .japanese: "スクロール", .korean: "스크롤",
         ],
         .track_titles_new_line: [
             .english: "New Line", .spanish: "Nueva línea", .french: "Nouvelle ligne", .german: "Neue Zeile",
             .portuguese: "Nova linha", .italian: "Nuova riga", .dutch: "Nieuwe regel", .russian: "Новая строка",
             .polish: "Nowy wiersz", .turkish: "Yeni satır", .swedish: "Ny rad", .norwegian: "Ny linje",
-            .danish: "Ny linje", .finnish: "Uusi rivi", .chinese: "换行", .japanese: "改行", .korean: "줄바꿈",
+            .danish: "Ny linje", .finnish: "Uusi rivi", .chinese: "换行", .traditionalChinese: "換行", .japanese: "改行", .korean: "줄바꿈",
         ],
         .appearance_dynamic_background: [
             .english: "Dynamic Player Background", .spanish: "Fondo dinámico del reproductor", .french: "Arrière-plan dynamique du lecteur",
@@ -1712,6 +1744,7 @@ enum Strings {
             .dutch: "Dynamische spelerachtergrond", .russian: "Динамический фон плеера", .polish: "Dynamiczne tło odtwarzacza",
             .turkish: "Dinamik oynatıcı arka planı", .swedish: "Dynamisk spelarbakgrund", .norwegian: "Dynamisk spillerbakgrunn",
             .danish: "Dynamisk afspillerbaggrund", .finnish: "Dynaaminen soittimen tausta", .chinese: "动态播放器背景",
+            .traditionalChinese: "動態播放器背景",
             .japanese: "ダイナミックなプレーヤー背景", .korean: "동적 플레이어 배경",
         ],
         .appearance_animated_background: en("Animated Background"),
@@ -1722,79 +1755,79 @@ enum Strings {
             .english: "Accent Color", .spanish: "Color de acento", .french: "Couleur d'accent", .german: "Akzentfarbe",
             .portuguese: "Cor de destaque", .italian: "Colore d'accento", .dutch: "Accentkleur", .russian: "Акцентный цвет",
             .polish: "Kolor akcentu", .turkish: "Vurgu rengi", .swedish: "Accentfärg", .norwegian: "Aksentfarge",
-            .danish: "Accentfarve", .finnish: "Korostusväri", .chinese: "强调色", .japanese: "アクセントカラー", .korean: "강조 색상",
+            .danish: "Accentfarve", .finnish: "Korostusväri", .chinese: "强调色", .traditionalChinese: "強調色", .japanese: "アクセントカラー", .korean: "강조 색상",
         ],
         .appearance_hidden_albums: [
             .english: "Hidden Albums", .spanish: "Álbumes ocultos", .french: "Albums masqués", .german: "Ausgeblendete Alben",
             .portuguese: "Álbuns ocultos", .italian: "Album nascosti", .dutch: "Verborgen albums", .russian: "Скрытые альбомы",
             .polish: "Ukryte albumy", .turkish: "Gizli albümler", .swedish: "Dolda album", .norwegian: "Skjulte album",
-            .danish: "Skjulte album", .finnish: "Piilotetut albumit", .chinese: "隐藏的专辑", .japanese: "非表示のアルバム", .korean: "숨긴 앨범",
+            .danish: "Skjulte album", .finnish: "Piilotetut albumit", .chinese: "隐藏的专辑", .traditionalChinese: "隱藏的專輯", .japanese: "非表示のアルバム", .korean: "숨긴 앨범",
         ],
         .hidden_albums_none: [
             .english: "None", .spanish: "Ninguno", .french: "Aucun", .german: "Keine",
             .portuguese: "Nenhum", .italian: "Nessuno", .dutch: "Geen", .russian: "Нет",
             .polish: "Brak", .turkish: "Yok", .swedish: "Inga", .norwegian: "Ingen",
-            .danish: "Ingen", .finnish: "Ei yhtään", .chinese: "无", .japanese: "なし", .korean: "없음",
+            .danish: "Ingen", .finnish: "Ei yhtään", .chinese: "无", .traditionalChinese: "無", .japanese: "なし", .korean: "없음",
         ],
         .hidden_albums_count: [
             .english: "%d hidden", .spanish: "%d ocultos", .french: "%d masqués", .german: "%d ausgeblendet",
             .portuguese: "%d ocultos", .italian: "%d nascosti", .dutch: "%d verborgen", .russian: "%d скрыто",
             .polish: "%d ukrytych", .turkish: "%d gizli", .swedish: "%d dolda", .norwegian: "%d skjult",
-            .danish: "%d skjulte", .finnish: "%d piilotettu", .chinese: "已隐藏 %d 个", .japanese: "%d 件非表示", .korean: "%d개 숨김",
+            .danish: "%d skjulte", .finnish: "%d piilotettu", .chinese: "已隐藏 %d 个", .traditionalChinese: "已隱藏 %d 張", .japanese: "%d 件非表示", .korean: "%d개 숨김",
         ],
         .hidden_albums_sort: [
             .english: "Sort", .spanish: "Ordenar", .french: "Trier", .german: "Sortieren",
             .portuguese: "Ordenar", .italian: "Ordina", .dutch: "Sorteren", .russian: "Сортировка",
             .polish: "Sortuj", .turkish: "Sırala", .swedish: "Sortera", .norwegian: "Sorter",
-            .danish: "Sorter", .finnish: "Lajittele", .chinese: "排序", .japanese: "並べ替え", .korean: "정렬",
+            .danish: "Sorter", .finnish: "Lajittele", .chinese: "排序", .traditionalChinese: "排序", .japanese: "並べ替え", .korean: "정렬",
         ],
         .hidden_albums_sort_visible_first: [
             .english: "Visible First", .spanish: "Visibles primero", .french: "Visibles d'abord", .german: "Sichtbare zuerst",
             .portuguese: "Visíveis primeiro", .italian: "Visibili prima", .dutch: "Zichtbaar eerst", .russian: "Сначала видимые",
             .polish: "Widoczne najpierw", .turkish: "Önce görünenler", .swedish: "Synliga först", .norwegian: "Synlige først",
-            .danish: "Synlige først", .finnish: "Näkyvät ensin", .chinese: "先显示可见", .japanese: "表示中を先に", .korean: "표시 항목 먼저",
+            .danish: "Synlige først", .finnish: "Näkyvät ensin", .chinese: "先显示可见", .traditionalChinese: "未隱藏的優先", .japanese: "表示中を先に", .korean: "표시 항목 먼저",
         ],
         .hidden_albums_sort_hidden_first: [
             .english: "Hidden First", .spanish: "Ocultos primero", .french: "Masqués d'abord", .german: "Ausgeblendete zuerst",
             .portuguese: "Ocultos primeiro", .italian: "Nascosti prima", .dutch: "Verborgen eerst", .russian: "Сначала скрытые",
             .polish: "Ukryte najpierw", .turkish: "Önce gizliler", .swedish: "Dolda först", .norwegian: "Skjulte først",
-            .danish: "Skjulte først", .finnish: "Piilotetut ensin", .chinese: "先显示隐藏", .japanese: "非表示を先に", .korean: "숨김 항목 먼저",
+            .danish: "Skjulte først", .finnish: "Piilotetut ensin", .chinese: "先显示隐藏", .traditionalChinese: "已隱藏的優先", .japanese: "非表示を先に", .korean: "숨김 항목 먼저",
         ],
         .hidden_albums_search: [
             .english: "Search albums", .spanish: "Buscar álbumes", .french: "Rechercher des albums", .german: "Alben suchen",
             .portuguese: "Pesquisar álbuns", .italian: "Cerca album", .dutch: "Albums zoeken", .russian: "Поиск альбомов",
             .polish: "Szukaj albumów", .turkish: "Albüm ara", .swedish: "Sök album", .norwegian: "Søk i album",
-            .danish: "Søg i album", .finnish: "Hae albumeja", .chinese: "搜索专辑", .japanese: "アルバムを検索", .korean: "앨범 검색",
+            .danish: "Søg i album", .finnish: "Hae albumeja", .chinese: "搜索专辑", .traditionalChinese: "搜尋專輯", .japanese: "アルバムを検索", .korean: "앨범 검색",
         ],
         .hidden_albums_hide_visible: [
             .english: "Hide Visible", .spanish: "Ocultar visibles", .french: "Masquer visibles", .german: "Sichtbare ausblenden",
             .portuguese: "Ocultar visíveis", .italian: "Nascondi visibili", .dutch: "Zichtbare verbergen", .russian: "Скрыть видимые",
             .polish: "Ukryj widoczne", .turkish: "Görünenleri gizle", .swedish: "Dölj synliga", .norwegian: "Skjul synlige",
-            .danish: "Skjul synlige", .finnish: "Piilota näkyvät", .chinese: "隐藏可见项", .japanese: "表示中を非表示", .korean: "표시 항목 숨기기",
+            .danish: "Skjul synlige", .finnish: "Piilota näkyvät", .chinese: "隐藏可见项", .traditionalChinese: "隱藏列出的項目", .japanese: "表示中を非表示", .korean: "표시 항목 숨기기",
         ],
         .hidden_albums_show_visible: [
             .english: "Show Visible", .spanish: "Mostrar visibles", .french: "Afficher visibles", .german: "Sichtbare anzeigen",
             .portuguese: "Mostrar visíveis", .italian: "Mostra visibili", .dutch: "Zichtbare tonen", .russian: "Показать видимые",
             .polish: "Pokaż widoczne", .turkish: "Görünenleri göster", .swedish: "Visa synliga", .norwegian: "Vis synlige",
-            .danish: "Vis synlige", .finnish: "Näytä näkyvät", .chinese: "显示可见项", .japanese: "表示中を表示", .korean: "표시 항목 보이기",
+            .danish: "Vis synlige", .finnish: "Näytä näkyvät", .chinese: "显示可见项", .traditionalChinese: "顯示列出的項目", .japanese: "表示中を表示", .korean: "표시 항목 보이기",
         ],
         .hidden_albums_show_all: [
             .english: "Show All", .spanish: "Mostrar todo", .french: "Tout afficher", .german: "Alle anzeigen",
             .portuguese: "Mostrar tudo", .italian: "Mostra tutto", .dutch: "Alles tonen", .russian: "Показать все",
             .polish: "Pokaż wszystko", .turkish: "Tümünü göster", .swedish: "Visa alla", .norwegian: "Vis alle",
-            .danish: "Vis alle", .finnish: "Näytä kaikki", .chinese: "显示全部", .japanese: "すべて表示", .korean: "모두 보이기",
+            .danish: "Vis alle", .finnish: "Näytä kaikki", .chinese: "显示全部", .traditionalChinese: "全部顯示", .japanese: "すべて表示", .korean: "모두 보이기",
         ],
         .hidden_albums_empty: [
             .english: "No albums found", .spanish: "No se encontraron álbumes", .french: "Aucun album trouvé", .german: "Keine Alben gefunden",
             .portuguese: "Nenhum álbum encontrado", .italian: "Nessun album trovato", .dutch: "Geen albums gevonden", .russian: "Альбомы не найдены",
             .polish: "Nie znaleziono albumów", .turkish: "Albüm bulunamadı", .swedish: "Inga album hittades", .norwegian: "Ingen album funnet",
-            .danish: "Ingen album fundet", .finnish: "Albumeja ei löytynyt", .chinese: "未找到专辑", .japanese: "アルバムが見つかりません", .korean: "앨범을 찾을 수 없음",
+            .danish: "Ingen album fundet", .finnish: "Albumeja ei löytynyt", .chinese: "未找到专辑", .traditionalChinese: "找不到專輯", .japanese: "アルバムが見つかりません", .korean: "앨범을 찾을 수 없음",
         ],
         .hidden_albums_no_matches: [
             .english: "No matches", .spanish: "Sin coincidencias", .french: "Aucun résultat", .german: "Keine Treffer",
             .portuguese: "Sem resultados", .italian: "Nessun risultato", .dutch: "Geen resultaten", .russian: "Нет совпадений",
             .polish: "Brak wyników", .turkish: "Eşleşme yok", .swedish: "Inga träffar", .norwegian: "Ingen treff",
-            .danish: "Ingen resultater", .finnish: "Ei osumia", .chinese: "无匹配项", .japanese: "一致なし", .korean: "일치 항목 없음",
+            .danish: "Ingen resultater", .finnish: "Ei osumia", .chinese: "无匹配项", .traditionalChinese: "沒有符合的項目", .japanese: "一致なし", .korean: "일치 항목 없음",
         ],
         .hidden_albums_no_server: [
             .english: "Connect to a server to manage hidden albums.", .spanish: "Conéctate a un servidor para gestionar álbumes ocultos.", .french: "Connectez-vous à un serveur pour gérer les albums masqués.",
@@ -1802,37 +1835,38 @@ enum Strings {
             .dutch: "Maak verbinding met een server om verborgen albums te beheren.", .russian: "Подключитесь к серверу, чтобы управлять скрытыми альбомами.", .polish: "Połącz się z serwerem, aby zarządzać ukrytymi albumami.",
             .turkish: "Gizli albümleri yönetmek için bir sunucuya bağlan.", .swedish: "Anslut till en server för att hantera dolda album.", .norwegian: "Koble til en server for å administrere skjulte album.",
             .danish: "Opret forbindelse til en server for at administrere skjulte album.", .finnish: "Yhdistä palvelimeen hallitaksesi piilotettuja albumeja.", .chinese: "连接服务器以管理隐藏的专辑。",
+            .traditionalChinese: "連線至伺服器以管理隱藏的專輯。",
             .japanese: "非表示のアルバムを管理するにはサーバーに接続してください。", .korean: "숨긴 앨범을 관리하려면 서버에 연결하세요.",
         ],
         .artist_singles: [
             .english: "Singles", .spanish: "Sencillos", .french: "Singles", .german: "Singles",
             .portuguese: "Singles", .italian: "Singoli", .dutch: "Singles", .russian: "Синглы",
             .polish: "Single", .turkish: "Single'lar", .swedish: "Singlar", .norwegian: "Singler",
-            .danish: "Singler", .finnish: "Singlet", .chinese: "单曲", .japanese: "シングル", .korean: "싱글",
+            .danish: "Singler", .finnish: "Singlet", .chinese: "单曲", .traditionalChinese: "單曲", .japanese: "シングル", .korean: "싱글",
         ],
         .theme_system: [
             .english: "System", .spanish: "Sistema", .french: "Système", .german: "System",
             .portuguese: "Sistema", .italian: "Sistema", .dutch: "Systeem", .russian: "Системная",
             .polish: "Systemowy", .turkish: "Sistem", .swedish: "System", .norwegian: "System",
-            .danish: "System", .finnish: "Järjestelmä", .chinese: "系统", .japanese: "システム", .korean: "시스템",
+            .danish: "System", .finnish: "Järjestelmä", .chinese: "系统", .traditionalChinese: "系統", .japanese: "システム", .korean: "시스템",
         ],
         .theme_dark: [
             .english: "Dark", .spanish: "Oscuro", .french: "Sombre", .german: "Dunkel",
             .portuguese: "Escuro", .italian: "Scuro", .dutch: "Donker", .russian: "Тёмная",
             .polish: "Ciemny", .turkish: "Koyu", .swedish: "Mörkt", .norwegian: "Mørk",
-            .danish: "Mørk", .finnish: "Tumma", .chinese: "深色", .japanese: "ダーク", .korean: "다크",
+            .danish: "Mørk", .finnish: "Tumma", .chinese: "深色", .traditionalChinese: "深色", .japanese: "ダーク", .korean: "다크",
         ],
         .theme_amoled: [
             .english: "AMOLED", .spanish: "AMOLED", .french: "AMOLED", .german: "AMOLED",
             .portuguese: "AMOLED", .italian: "AMOLED", .dutch: "AMOLED", .russian: "AMOLED",
             .polish: "AMOLED", .turkish: "AMOLED", .swedish: "AMOLED", .norwegian: "AMOLED",
-            .danish: "AMOLED", .finnish: "AMOLED", .chinese: "AMOLED", .japanese: "AMOLED", .korean: "AMOLED",
+            .danish: "AMOLED", .finnish: "AMOLED", .chinese: "AMOLED", .traditionalChinese: "AMOLED", .japanese: "AMOLED", .korean: "AMOLED",
         ],
         .theme_light: [
             .english: "Light", .spanish: "Claro", .french: "Clair", .german: "Hell",
             .portuguese: "Claro", .italian: "Chiaro", .dutch: "Licht", .russian: "Светлая",
             .polish: "Jasny", .turkish: "Açık", .swedish: "Ljust", .norwegian: "Lys",
-            .danish: "Lys", .finnish: "Vaalea", .chinese: "浅色", .japanese: "ライト", .korean: "라이트",
+            .danish: "Lys", .finnish: "Vaalea", .chinese: "浅色", .traditionalChinese: "淺色", .japanese: "ライト", .korean: "라이트",
         ],
 
         // Notifications / toasts
@@ -1842,6 +1876,7 @@ enum Strings {
             .dutch: "Toegevoegd aan favorieten", .russian: "Добавлено в избранное", .polish: "Dodano do ulubionych",
             .turkish: "Favorilere eklendi", .swedish: "Tillagd i favoriter", .norwegian: "Lagt til i favoritter",
             .danish: "Tilføjet til favoritter", .finnish: "Lisätty suosikkeihin", .chinese: "已添加到收藏",
+            .traditionalChinese: "已加入收藏",
             .japanese: "お気に入りに追加しました", .korean: "즐겨찾기에 추가됨",
         ],
         .notif_removed_from_favorites: [
@@ -1850,6 +1885,7 @@ enum Strings {
             .dutch: "Verwijderd uit favorieten", .russian: "Удалено из избранного", .polish: "Usunięto z ulubionych",
             .turkish: "Favorilerden kaldırıldı", .swedish: "Borttagen från favoriter", .norwegian: "Fjernet fra favoritter",
             .danish: "Fjernet fra favoritter", .finnish: "Poistettu suosikeista", .chinese: "已从收藏中移除",
+            .traditionalChinese: "已從收藏中移除",
             .japanese: "お気に入りから削除しました", .korean: "즐겨찾기에서 제거됨",
         ],
         .notif_added_to_queue: [
@@ -1858,6 +1894,7 @@ enum Strings {
             .dutch: "Toegevoegd aan wachtrij", .russian: "Добавлено в очередь", .polish: "Dodano do kolejki",
             .turkish: "Sıraya eklendi", .swedish: "Tillagd i kön", .norwegian: "Lagt til i køen",
             .danish: "Tilføjet til køen", .finnish: "Lisätty jonoon", .chinese: "已加入队列",
+            .traditionalChinese: "已加入待播清單",
             .japanese: "キューに追加しました", .korean: "대기열에 추가됨",
         ],
         .notif_playing_next: [
@@ -1866,6 +1903,7 @@ enum Strings {
             .dutch: "Volgende afspelen", .russian: "Следующий трек", .polish: "Następne w kolejce",
             .turkish: "Sıradaki çalınıyor", .swedish: "Spelas härnäst", .norwegian: "Spilles neste",
             .danish: "Afspilles næst", .finnish: "Toistetaan seuraavaksi", .chinese: "下一首播放",
+            .traditionalChinese: "將於下一首播放",
             .japanese: "次に再生", .korean: "다음에 재생",
         ],
         .notif_download_cancelled: [
@@ -1874,6 +1912,7 @@ enum Strings {
             .dutch: "Download geannuleerd", .russian: "Загрузка отменена", .polish: "Anulowano pobieranie",
             .turkish: "İndirme iptal edildi", .swedish: "Nedladdning avbruten", .norwegian: "Nedlasting avbrutt",
             .danish: "Download annulleret", .finnish: "Lataus peruutettu", .chinese: "已取消下载",
+            .traditionalChinese: "已取消下載",
             .japanese: "ダウンロードをキャンセルしました", .korean: "다운로드 취소됨",
         ],
         .notif_download_removed: [
@@ -1882,6 +1921,7 @@ enum Strings {
             .dutch: "Download verwijderd", .russian: "Загрузка удалена", .polish: "Usunięto pobranie",
             .turkish: "İndirme kaldırıldı", .swedish: "Nedladdning borttagen", .norwegian: "Nedlasting fjernet",
             .danish: "Download fjernet", .finnish: "Lataus poistettu", .chinese: "已删除下载",
+            .traditionalChinese: "已移除下載項目",
             .japanese: "ダウンロードを削除しました", .korean: "다운로드 제거됨",
         ],
         .notif_demo_no_downloads: [
@@ -1900,6 +1940,7 @@ enum Strings {
             .danish: "Downloads er deaktiveret på demoserveren",
             .finnish: "Lataukset on poistettu käytöstä demopalvelimella",
             .chinese: "演示服务器上已禁用下载",
+            .traditionalChinese: "示範伺服器已停用下載功能",
             .japanese: "デモサーバーではダウンロードは無効です",
             .korean: "데모 서버에서는 다운로드가 비활성화됩니다",
         ],
@@ -1909,6 +1950,7 @@ enum Strings {
             .dutch: "Gedownload: %@", .russian: "Загружено: %@", .polish: "Pobrano: %@",
             .turkish: "İndirildi: %@", .swedish: "Nedladdad: %@", .norwegian: "Lastet ned: %@",
             .danish: "Hentet: %@", .finnish: "Ladattu: %@", .chinese: "已下载 %@",
+            .traditionalChinese: "已下載 %@",
             .japanese: "%@ をダウンロードしました", .korean: "%@ 다운로드됨",
         ],
         .notif_downloads_cleared: [
@@ -1917,6 +1959,7 @@ enum Strings {
             .dutch: "Downloads gewist", .russian: "Загрузки очищены", .polish: "Wyczyszczono pobrania",
             .turkish: "İndirmeler temizlendi", .swedish: "Nedladdningar rensade", .norwegian: "Nedlastinger tømt",
             .danish: "Downloads ryddet", .finnish: "Lataukset tyhjennetty", .chinese: "已清除下载",
+            .traditionalChinese: "已清除下載項目",
             .japanese: "ダウンロードを消去しました", .korean: "다운로드 지움",
         ],
         .notif_evicted_old_download: [
@@ -1925,6 +1968,7 @@ enum Strings {
             .dutch: "Oude download verwijderd", .russian: "Старая загрузка удалена", .polish: "Usunięto stare pobranie",
             .turkish: "Eski indirme kaldırıldı", .swedish: "Gammal nedladdning borttagen", .norwegian: "Gammel nedlasting fjernet",
             .danish: "Gammel download fjernet", .finnish: "Vanha lataus poistettu", .chinese: "已清除旧下载",
+            .traditionalChinese: "已移除舊的下載項目",
             .japanese: "古いダウンロードを削除しました", .korean: "오래된 다운로드 제거됨",
         ],
         .notif_no_downloads_to_remove: [
@@ -1933,6 +1977,7 @@ enum Strings {
             .dutch: "Geen downloads om te verwijderen", .russian: "Нет загрузок для удаления", .polish: "Brak pobrań do usunięcia",
             .turkish: "Kaldırılacak indirme yok", .swedish: "Inga nedladdningar att ta bort", .norwegian: "Ingen nedlastinger å fjerne",
             .danish: "Ingen downloads at fjerne", .finnish: "Ei poistettavia latauksia", .chinese: "没有可移除的下载",
+            .traditionalChinese: "沒有可移除的下載項目",
             .japanese: "削除するダウンロードはありません", .korean: "제거할 다운로드가 없습니다",
         ],
         .notif_everything_downloaded: [
@@ -1941,6 +1986,7 @@ enum Strings {
             .dutch: "Alles is al gedownload", .russian: "Всё уже загружено", .polish: "Wszystko jest już pobrane",
             .turkish: "Her şey zaten indirildi", .swedish: "Allt är redan nedladdat", .norwegian: "Alt er allerede lastet ned",
             .danish: "Alt er allerede hentet", .finnish: "Kaikki on jo ladattu", .chinese: "全部已下载",
+            .traditionalChinese: "所有項目皆已下載",
             .japanese: "すべてダウンロード済みです", .korean: "모두 이미 다운로드됨",
         ],
         .notif_downloading_n: [
@@ -1949,6 +1995,7 @@ enum Strings {
             .dutch: "%d nummers downloaden", .russian: "Загрузка %d треков", .polish: "Pobieranie %d utworów",
             .turkish: "%d şarkı indiriliyor", .swedish: "Laddar ner %d låtar", .norwegian: "Laster ned %d sanger",
             .danish: "Henter %d sange", .finnish: "Ladataan %d kappaletta", .chinese: "正在下载 %d 首歌曲",
+            .traditionalChinese: "正在下載 %d 首歌曲",
             .japanese: "%d 曲をダウンロード中", .korean: "%d곡 다운로드 중",
         ],
         .notif_couldnt_load: [
@@ -1957,6 +2004,7 @@ enum Strings {
             .dutch: "Kan %@ niet laden", .russian: "Не удалось загрузить %@", .polish: "Nie można wczytać %@",
             .turkish: "%@ yüklenemedi", .swedish: "Det gick inte att läsa in %@", .norwegian: "Kunne ikke laste %@",
             .danish: "Kunne ikke indlæse %@", .finnish: "Kohteen %@ lataus epäonnistui", .chinese: "无法加载 %@",
+            .traditionalChinese: "無法載入 %@",
             .japanese: "%@ を読み込めませんでした", .korean: "%@을(를) 불러올 수 없습니다",
         ],
         .notif_couldnt_load_album: [
@@ -1965,6 +2013,7 @@ enum Strings {
             .dutch: "Kan album niet laden", .russian: "Не удалось загрузить альбом", .polish: "Nie można wczytać albumu",
             .turkish: "Albüm yüklenemedi", .swedish: "Det gick inte att läsa in albumet", .norwegian: "Kunne ikke laste albumet",
             .danish: "Kunne ikke indlæse albummet", .finnish: "Albumin lataus epäonnistui", .chinese: "无法加载专辑",
+            .traditionalChinese: "無法載入專輯",
             .japanese: "アルバムを読み込めませんでした", .korean: "앨범을 불러올 수 없습니다",
         ],
         .notif_couldnt_load_artist: [
@@ -1973,6 +2022,7 @@ enum Strings {
             .dutch: "Kan artiest niet laden", .russian: "Не удалось загрузить исполнителя", .polish: "Nie można wczytać wykonawcy",
             .turkish: "Sanatçı yüklenemedi", .swedish: "Det gick inte att läsa in artisten", .norwegian: "Kunne ikke laste artisten",
             .danish: "Kunne ikke indlæse kunstneren", .finnish: "Artistin lataus epäonnistui", .chinese: "无法加载艺人",
+            .traditionalChinese: "無法載入藝人",
             .japanese: "アーティストを読み込めませんでした", .korean: "아티스트를 불러올 수 없습니다",
         ],
         .notif_could_not_connect: [
@@ -1981,6 +2031,7 @@ enum Strings {
             .dutch: "Kan geen verbinding maken", .russian: "Не удалось подключиться", .polish: "Nie można połączyć",
             .turkish: "Bağlanılamadı", .swedish: "Det gick inte att ansluta", .norwegian: "Kunne ikke koble til",
             .danish: "Kunne ikke oprette forbindelse", .finnish: "Yhteyttä ei voitu muodostaa", .chinese: "无法连接",
+            .traditionalChinese: "無法連線",
             .japanese: "接続できませんでした", .korean: "연결할 수 없습니다",
         ],
         .notif_connection_saved: [
@@ -1989,6 +2040,7 @@ enum Strings {
             .dutch: "Verbinding opgeslagen", .russian: "Подключение сохранено", .polish: "Zapisano połączenie",
             .turkish: "Bağlantı kaydedildi", .swedish: "Anslutning sparad", .norwegian: "Tilkobling lagret",
             .danish: "Forbindelse gemt", .finnish: "Yhteys tallennettu", .chinese: "已保存连接",
+            .traditionalChinese: "已儲存連線",
             .japanese: "接続を保存しました", .korean: "연결 저장됨",
         ],
         .notif_connection_test_passed: [
@@ -1997,6 +2049,7 @@ enum Strings {
             .dutch: "Verbindingstest geslaagd", .russian: "Проверка подключения пройдена", .polish: "Test połączenia udany",
             .turkish: "Bağlantı testi başarılı", .swedish: "Anslutningstest godkänt", .norwegian: "Tilkoblingstest bestått",
             .danish: "Forbindelsestest bestået", .finnish: "Yhteystesti onnistui", .chinese: "连接测试通过",
+            .traditionalChinese: "連線測試成功",
             .japanese: "接続テストに合格しました", .korean: "연결 테스트 통과",
         ],
         .notif_connection_test_failed: [
@@ -2005,6 +2058,7 @@ enum Strings {
             .dutch: "Verbindingstest mislukt", .russian: "Проверка подключения не пройдена", .polish: "Test połączenia nieudany",
             .turkish: "Bağlantı testi başarısız", .swedish: "Anslutningstest misslyckades", .norwegian: "Tilkoblingstest mislyktes",
             .danish: "Forbindelsestest mislykkedes", .finnish: "Yhteystesti epäonnistui", .chinese: "连接测试失败",
+            .traditionalChinese: "連線測試失敗",
             .japanese: "接続テストに失敗しました", .korean: "연결 테스트 실패",
         ],
         .notif_invalid_server_url: [
@@ -2013,6 +2067,7 @@ enum Strings {
             .dutch: "Ongeldige server-URL", .russian: "Неверный URL сервера", .polish: "Nieprawidłowy adres URL serwera",
             .turkish: "Geçersiz sunucu URL'si", .swedish: "Ogiltig server-URL", .norwegian: "Ugyldig server-URL",
             .danish: "Ugyldig server-URL", .finnish: "Virheellinen palvelimen URL", .chinese: "服务器网址无效",
+            .traditionalChinese: "伺服器網址無效",
             .japanese: "サーバー URL が無効です", .korean: "잘못된 서버 URL",
         ],
         .notif_invalid_cellular_url: [
@@ -2021,6 +2076,7 @@ enum Strings {
             .dutch: "Ongeldige mobiele URL", .russian: "Неверный URL для сотовой сети", .polish: "Nieprawidłowy adres URL sieci komórkowej",
             .turkish: "Geçersiz hücresel URL", .swedish: "Ogiltig mobil-URL", .norwegian: "Ugyldig mobil-URL",
             .danish: "Ugyldig mobil-URL", .finnish: "Virheellinen mobiilidatan URL", .chinese: "蜂窝网址无效",
+            .traditionalChinese: "行動網路網址無效",
             .japanese: "モバイルデータの URL が無効です", .korean: "잘못된 셀룰러 URL",
         ],
         .notif_home_refreshed: [
@@ -2029,6 +2085,7 @@ enum Strings {
             .dutch: "Start vernieuwd", .russian: "Главная обновлена", .polish: "Odświeżono stronę główną",
             .turkish: "Ana sayfa yenilendi", .swedish: "Hem uppdaterad", .norwegian: "Hjem oppdatert",
             .danish: "Hjem opdateret", .finnish: "Koti päivitetty", .chinese: "主页已刷新",
+            .traditionalChinese: "已重新整理首頁",
             .japanese: "ホームを更新しました", .korean: "홈 새로고침됨",
         ],
         .notif_artwork_cache_cleared: [
@@ -2037,6 +2094,7 @@ enum Strings {
             .dutch: "Albumhoescache gewist", .russian: "Кэш обложек очищен", .polish: "Wyczyszczono pamięć podręczną okładek",
             .turkish: "Kapak önbelleği temizlendi", .swedish: "Omslagscache rensad", .norwegian: "Omslagsbuffer tømt",
             .danish: "Omslagscache ryddet", .finnish: "Kansikuvien välimuisti tyhjennetty", .chinese: "已清除封面缓存",
+            .traditionalChinese: "已清除封面快取",
             .japanese: "アートワークのキャッシュを消去しました", .korean: "아트워크 캐시 지움",
         ],
         .notif_local_artwork_deleted: [
@@ -2045,6 +2103,7 @@ enum Strings {
             .dutch: "Lokale albumhoezen verwijderd", .russian: "Локальные обложки удалены", .polish: "Usunięto lokalne okładki",
             .turkish: "Yerel kapaklar silindi", .swedish: "Lokala omslag raderade", .norwegian: "Lokale omslag slettet",
             .danish: "Lokale omslag slettet", .finnish: "Paikalliset kansikuvat poistettu", .chinese: "已删除本地封面",
+            .traditionalChinese: "已刪除本機封面",
             .japanese: "ローカルのアートワークを削除しました", .korean: "로컬 아트워크 삭제됨",
         ],
         .notif_local_lyrics_cleared: [
@@ -2053,6 +2112,7 @@ enum Strings {
             .dutch: "Lokale songteksten gewist", .russian: "Локальные тексты очищены", .polish: "Wyczyszczono lokalne teksty",
             .turkish: "Yerel şarkı sözleri temizlendi", .swedish: "Lokala låttexter rensade", .norwegian: "Lokale sangtekster tømt",
             .danish: "Lokale sangtekster ryddet", .finnish: "Paikalliset sanoitukset tyhjennetty", .chinese: "已清除本地歌词",
+            .traditionalChinese: "已清除本機歌詞",
             .japanese: "ローカルの歌詞を消去しました", .korean: "로컬 가사 지움",
         ],
         .notif_lyrics_up_to_date: [
@@ -2061,6 +2121,7 @@ enum Strings {
             .dutch: "Songteksten zijn al up-to-date", .russian: "Тексты уже актуальны", .polish: "Teksty są już aktualne",
             .turkish: "Şarkı sözleri zaten güncel", .swedish: "Låttexterna är redan uppdaterade", .norwegian: "Sangtekstene er allerede oppdatert",
             .danish: "Sangteksterne er allerede opdateret", .finnish: "Sanoitukset ovat jo ajan tasalla", .chinese: "歌词已是最新",
+            .traditionalChinese: "歌詞已是最新版本",
             .japanese: "歌詞はすでに最新です", .korean: "가사가 이미 최신입니다",
         ],
         .notif_lyrics_download_stopped: [
@@ -2069,6 +2130,7 @@ enum Strings {
             .dutch: "Songtekst downloaden gestopt", .russian: "Загрузка текстов остановлена", .polish: "Zatrzymano pobieranie tekstów",
             .turkish: "Şarkı sözü indirme durduruldu", .swedish: "Nedladdning av låttexter stoppad", .norwegian: "Nedlasting av sangtekster stoppet",
             .danish: "Download af sangtekster stoppet", .finnish: "Sanoitusten lataus pysäytetty", .chinese: "已停止下载歌词",
+            .traditionalChinese: "已停止下載歌詞",
             .japanese: "歌詞のダウンロードを停止しました", .korean: "가사 다운로드 중지됨",
         ],
         .notif_lyrics_download_complete: [
@@ -2077,6 +2139,7 @@ enum Strings {
             .dutch: "Songtekst downloaden voltooid", .russian: "Загрузка текстов завершена", .polish: "Zakończono pobieranie tekstów",
             .turkish: "Şarkı sözü indirme tamamlandı", .swedish: "Nedladdning av låttexter klar", .norwegian: "Nedlasting av sangtekster fullført",
             .danish: "Download af sangtekster fuldført", .finnish: "Sanoitusten lataus valmis", .chinese: "歌词下载完成",
+            .traditionalChinese: "歌詞下載完成",
             .japanese: "歌詞のダウンロードが完了しました", .korean: "가사 다운로드 완료",
         ],
         .notif_logs_cleared: [
@@ -2085,6 +2148,7 @@ enum Strings {
             .dutch: "Logboeken gewist", .russian: "Журналы очищены", .polish: "Wyczyszczono dzienniki",
             .turkish: "Günlükler temizlendi", .swedish: "Loggar rensade", .norwegian: "Logger tømt",
             .danish: "Logfiler ryddet", .finnish: "Lokit tyhjennetty", .chinese: "已清除日志",
+            .traditionalChinese: "已清除日誌",
             .japanese: "ログを消去しました", .korean: "로그 지움",
         ],
         .notif_logs_zip_ready: [
@@ -2093,6 +2157,7 @@ enum Strings {
             .dutch: "Logboek-zip klaar", .russian: "ZIP с журналами готов", .polish: "Plik ZIP dzienników gotowy",
             .turkish: "Günlük ZIP'i hazır", .swedish: "Logg-zip klar", .norwegian: "Logg-zip klar",
             .danish: "Log-zip klar", .finnish: "Lokien ZIP valmis", .chinese: "日志压缩包已就绪",
+            .traditionalChinese: "日誌壓縮檔已就緒",
             .japanese: "ログの ZIP の準備ができました", .korean: "로그 ZIP 준비됨",
         ],
         .notif_logs_folder_fallback: [
@@ -2101,6 +2166,7 @@ enum Strings {
             .dutch: "Logboekexport gebruikte mapfallback", .russian: "Экспорт журналов использовал резервную папку", .polish: "Eksport dzienników użył folderu zapasowego",
             .turkish: "Günlük dışa aktarımı klasör yedeğini kullandı", .swedish: "Loggexport använde mappreserv", .norwegian: "Loggeksport brukte mappe-reserve",
             .danish: "Logeksport brugte mappe-reserve", .finnish: "Lokien vienti käytti kansiovaraa", .chinese: "日志导出使用了文件夹回退",
+            .traditionalChinese: "日誌已改以資料夾形式匯出",
             .japanese: "ログの書き出しはフォルダーフォールバックを使用しました", .korean: "로그 내보내기가 폴더 대체를 사용함",
         ],
         .notif_app_files_zip_ready: [
@@ -2109,6 +2175,7 @@ enum Strings {
             .dutch: "App-bestanden-zip klaar", .russian: "ZIP с файлами приложения готов", .polish: "Plik ZIP plików aplikacji gotowy",
             .turkish: "Uygulama dosyaları ZIP'i hazır", .swedish: "App-filers zip klar", .norwegian: "App-filers zip klar",
             .danish: "App-filers zip klar", .finnish: "Sovellustiedostojen ZIP valmis", .chinese: "应用文件压缩包已就绪",
+            .traditionalChinese: "App 檔案壓縮檔已就緒",
             .japanese: "アプリファイルの ZIP の準備ができました", .korean: "앱 파일 ZIP 준비됨",
         ],
         .notif_settings_backup_ready: [
@@ -2117,6 +2184,7 @@ enum Strings {
             .dutch: "Instellingenback-up klaar", .russian: "Резервная копия настроек готова", .polish: "Kopia ustawień gotowa",
             .turkish: "Ayar yedeği hazır", .swedish: "Inställningssäkerhetskopia klar", .norwegian: "Sikkerhetskopi av innstillinger klar",
             .danish: "Sikkerhedskopi af indstillinger klar", .finnish: "Asetusten varmuuskopio valmis", .chinese: "设置备份已就绪",
+            .traditionalChinese: "設定備份已就緒",
             .japanese: "設定のバックアップの準備ができました", .korean: "설정 백업 준비됨",
         ],
         .notif_settings_restored: [
@@ -2125,6 +2193,7 @@ enum Strings {
             .dutch: "Instellingen hersteld", .russian: "Настройки восстановлены", .polish: "Przywrócono ustawienia",
             .turkish: "Ayarlar geri yüklendi", .swedish: "Inställningar återställda", .norwegian: "Innstillinger gjenopprettet",
             .danish: "Indstillinger gendannet", .finnish: "Asetukset palautettu", .chinese: "已恢复设置",
+            .traditionalChinese: "已回復設定",
             .japanese: "設定を復元しました", .korean: "설정 복원됨",
         ],
         .notif_settings_restore_failed: [
@@ -2133,6 +2202,7 @@ enum Strings {
             .dutch: "Herstellen van instellingen mislukt", .russian: "Не удалось восстановить настройки", .polish: "Nie udało się przywrócić ustawień",
             .turkish: "Ayarlar geri yüklenemedi", .swedish: "Det gick inte att återställa inställningar", .norwegian: "Gjenoppretting av innstillinger mislyktes",
             .danish: "Gendannelse af indstillinger mislykkedes", .finnish: "Asetusten palautus epäonnistui", .chinese: "恢复设置失败",
+            .traditionalChinese: "回復設定失敗",
             .japanese: "設定の復元に失敗しました", .korean: "설정 복원 실패",
         ],
         .notif_playlists_exported: [
@@ -2141,6 +2211,7 @@ enum Strings {
             .dutch: "Afspeellijsten geëxporteerd", .russian: "Плейлисты экспортированы", .polish: "Wyeksportowano playlisty",
             .turkish: "Çalma listeleri dışa aktarıldı", .swedish: "Spellistor exporterade", .norwegian: "Spillelister eksportert",
             .danish: "Spillelister eksporteret", .finnish: "Soittolistat viety", .chinese: "已导出播放列表",
+            .traditionalChinese: "已匯出播放列表",
             .japanese: "プレイリストを書き出しました", .korean: "재생목록 내보냄",
         ],
         .notif_playlist_export_failed: [
@@ -2149,6 +2220,7 @@ enum Strings {
             .dutch: "Afspeellijst exporteren mislukt", .russian: "Не удалось экспортировать плейлист", .polish: "Nie udało się wyeksportować playlisty",
             .turkish: "Çalma listesi dışa aktarılamadı", .swedish: "Det gick inte att exportera spellistan", .norwegian: "Eksport av spilleliste mislyktes",
             .danish: "Eksport af spilleliste mislykkedes", .finnish: "Soittolistan vienti epäonnistui", .chinese: "导出播放列表失败",
+            .traditionalChinese: "播放列表匯出失敗",
             .japanese: "プレイリストの書き出しに失敗しました", .korean: "재생목록 내보내기 실패",
         ],
         .notif_imported_playlists: [
@@ -2157,6 +2229,7 @@ enum Strings {
             .dutch: "%d afspeellijsten geïmporteerd", .russian: "Импортировано %d плейлистов", .polish: "Zaimportowano %d playlist",
             .turkish: "%d çalma listesi içe aktarıldı", .swedish: "%d spellistor importerade", .norwegian: "%d spillelister importert",
             .danish: "%d spillelister importeret", .finnish: "%d soittolistaa tuotu", .chinese: "已导入 %d 个播放列表",
+            .traditionalChinese: "已匯入 %d 個播放列表",
             .japanese: "%d 個のプレイリストを読み込みました", .korean: "재생목록 %d개 가져옴",
         ],
         .notif_playlist_import_failed: [
@@ -2165,6 +2238,7 @@ enum Strings {
             .dutch: "Afspeellijst importeren mislukt", .russian: "Не удалось импортировать плейлист", .polish: "Nie udało się zaimportować playlisty",
             .turkish: "Çalma listesi içe aktarılamadı", .swedish: "Det gick inte att importera spellistan", .norwegian: "Import av spilleliste mislyktes",
             .danish: "Import af spilleliste mislykkedes", .finnish: "Soittolistan tuonti epäonnistui", .chinese: "导入播放列表失败",
+            .traditionalChinese: "播放列表匯入失敗",
             .japanese: "プレイリストの読み込みに失敗しました", .korean: "재생목록 가져오기 실패",
         ],
         .notif_playlist_backups_updated: [
@@ -2173,6 +2247,7 @@ enum Strings {
             .dutch: "Afspeellijstback-ups bijgewerkt", .russian: "Резервные копии плейлистов обновлены", .polish: "Zaktualizowano kopie playlist",
             .turkish: "Çalma listesi yedekleri güncellendi", .swedish: "Spellistsäkerhetskopior uppdaterade", .norwegian: "Sikkerhetskopier av spillelister oppdatert",
             .danish: "Spilleliste-sikkerhedskopier opdateret", .finnish: "Soittolistojen varmuuskopiot päivitetty", .chinese: "已更新播放列表备份",
+            .traditionalChinese: "已更新播放列表備份",
             .japanese: "プレイリストのバックアップを更新しました", .korean: "재생목록 백업 업데이트됨",
         ],
         .notif_playlist_restored: [
@@ -2181,6 +2256,7 @@ enum Strings {
             .dutch: "Afspeellijst hersteld", .russian: "Плейлист восстановлен", .polish: "Przywrócono playlistę",
             .turkish: "Çalma listesi geri yüklendi", .swedish: "Spellista återställd", .norwegian: "Spilleliste gjenopprettet",
             .danish: "Spilleliste gendannet", .finnish: "Soittolista palautettu", .chinese: "已恢复播放列表",
+            .traditionalChinese: "已回復播放列表",
             .japanese: "プレイリストを復元しました", .korean: "재생목록 복원됨",
         ],
         .notif_playlist_restore_failed: [
@@ -2189,6 +2265,7 @@ enum Strings {
             .dutch: "Afspeellijst herstellen mislukt", .russian: "Не удалось восстановить плейлист", .polish: "Nie udało się przywrócić playlisty",
             .turkish: "Çalma listesi geri yüklenemedi", .swedish: "Det gick inte att återställa spellistan", .norwegian: "Gjenoppretting av spilleliste mislyktes",
             .danish: "Gendannelse af spilleliste mislykkedes", .finnish: "Soittolistan palautus epäonnistui", .chinese: "恢复播放列表失败",
+            .traditionalChinese: "回復播放列表失敗",
             .japanese: "プレイリストの復元に失敗しました", .korean: "재생목록 복원 실패",
         ],
         .notif_playlist_backup_deleted: [
@@ -2197,6 +2274,7 @@ enum Strings {
             .dutch: "Afspeellijstback-up verwijderd", .russian: "Резервная копия плейлиста удалена", .polish: "Usunięto kopię playlisty",
             .turkish: "Çalma listesi yedeği silindi", .swedish: "Spellistsäkerhetskopia raderad", .norwegian: "Sikkerhetskopi av spilleliste slettet",
             .danish: "Spilleliste-sikkerhedskopi slettet", .finnish: "Soittolistan varmuuskopio poistettu", .chinese: "已删除播放列表备份",
+            .traditionalChinese: "已刪除播放列表備份",
             .japanese: "プレイリストのバックアップを削除しました", .korean: "재생목록 백업 삭제됨",
         ],
         .notif_stats_exported: [
@@ -2205,6 +2283,7 @@ enum Strings {
             .dutch: "Statistieken geëxporteerd", .russian: "Статистика экспортирована", .polish: "Wyeksportowano statystyki",
             .turkish: "İstatistikler dışa aktarıldı", .swedish: "Statistik exporterad", .norwegian: "Statistikk eksportert",
             .danish: "Statistik eksporteret", .finnish: "Tilastot viety", .chinese: "已导出统计",
+            .traditionalChinese: "已匯出統計資料",
             .japanese: "統計を書き出しました", .korean: "통계 내보냄",
         ],
         .notif_stats_export_failed: [
@@ -2213,6 +2292,7 @@ enum Strings {
             .dutch: "Statistieken exporteren mislukt", .russian: "Не удалось экспортировать статистику", .polish: "Nie udało się wyeksportować statystyk",
             .turkish: "İstatistikler dışa aktarılamadı", .swedish: "Det gick inte att exportera statistik", .norwegian: "Eksport av statistikk mislyktes",
             .danish: "Eksport af statistik mislykkedes", .finnish: "Tilastojen vienti epäonnistui", .chinese: "导出统计失败",
+            .traditionalChinese: "統計資料匯出失敗",
             .japanese: "統計の書き出しに失敗しました", .korean: "통계 내보내기 실패",
         ],
         .notif_listening_stats_cleared: [
@@ -2221,6 +2301,7 @@ enum Strings {
             .dutch: "Luisterstatistieken gewist", .russian: "Статистика прослушивания очищена", .polish: "Wyczyszczono statystyki słuchania",
             .turkish: "Dinleme istatistikleri temizlendi", .swedish: "Lyssningsstatistik rensad", .norwegian: "Lyttestatistikk tømt",
             .danish: "Lyttestatistik ryddet", .finnish: "Kuuntelutilastot tyhjennetty", .chinese: "已清除收听统计",
+            .traditionalChinese: "已清除收聽統計資料",
             .japanese: "再生統計を消去しました", .korean: "청취 통계 지움",
         ],
         .notif_restart_to_apply: [
@@ -2229,6 +2310,7 @@ enum Strings {
             .dutch: "Start Volta opnieuw om overal toe te passen", .russian: "Перезапустите Volta, чтобы применить везде", .polish: "Uruchom ponownie Volta, aby zastosować wszędzie",
             .turkish: "Her yerde uygulamak için Volta'yı yeniden başlat", .swedish: "Starta om Volta för att tillämpa överallt", .norwegian: "Start Volta på nytt for å bruke overalt",
             .danish: "Genstart Volta for at anvende overalt", .finnish: "Käynnistä Volta uudelleen ottaaksesi käyttöön kaikkialla", .chinese: "重启 Volta 以全局应用",
+            .traditionalChinese: "重新啟動 Volta 以全面套用",
             .japanese: "全体に適用するには Volta を再起動してください", .korean: "전체에 적용하려면 Volta를 다시 시작하세요",
         ],
 
@@ -2236,402 +2318,402 @@ enum Strings {
         .stats_share_title: tr(
             en: "Share Stats", es: "Compartir estadísticas", fr: "Partager les stats", de: "Statistiken teilen", pt: "Partilhar estatísticas", it: "Condividi statistiche",
             nl: "Statistieken delen", ru: "Поделиться статистикой", pl: "Udostępnij statystyki", tr: "İstatistikleri paylaş", sv: "Dela statistik", nb: "Del statistikk",
-            da: "Del statistik", fi: "Jaa tilastot", zh: "分享统计", ja: "統計を共有", ko: "통계 공유"
+            da: "Del statistik", fi: "Jaa tilastot", zh: "分享统计", zhHant: "分享統計資料", ja: "統計を共有", ko: "통계 공유"
         ),
         .stats_share_export_data: tr(
             en: "Export Data", es: "Exportar datos", fr: "Exporter les données", de: "Daten exportieren", pt: "Exportar dados", it: "Esporta dati",
             nl: "Gegevens exporteren", ru: "Экспорт данных", pl: "Eksportuj dane", tr: "Verileri dışa aktar", sv: "Exportera data", nb: "Eksporter data",
-            da: "Eksporter data", fi: "Vie tiedot", zh: "导出数据", ja: "データを書き出す", ko: "데이터 내보내기"
+            da: "Eksporter data", fi: "Vie tiedot", zh: "导出数据", zhHant: "匯出資料", ja: "データを書き出す", ko: "데이터 내보내기"
         ),
         .stats_share_recap: tr(
             en: "Listening Recap", es: "Resumen de escucha", fr: "Récapitulatif d'écoute", de: "Hör-Rückblick", pt: "Resumo de audição", it: "Riepilogo ascolti",
             nl: "Luisteroverzicht", ru: "Итоги прослушивания", pl: "Podsumowanie słuchania", tr: "Dinleme özeti", sv: "Lyssningssammanfattning", nb: "Lytteoppsummering",
-            da: "Lytteoversigt", fi: "Kuunteluyhteenveto", zh: "收听回顾", ja: "再生まとめ", ko: "청취 요약"
+            da: "Lytteoversigt", fi: "Kuunteluyhteenveto", zh: "收听回顾", zhHant: "收聽回顧", ja: "再生まとめ", ko: "청취 요약"
         ),
         .stats_share_rhythm: tr(
             en: "Listening Rhythm", es: "Ritmo de escucha", fr: "Rythme d'écoute", de: "Hörrhythmus", pt: "Ritmo de audição", it: "Ritmo di ascolto",
             nl: "Luisterritme", ru: "Ритм прослушивания", pl: "Rytm słuchania", tr: "Dinleme ritmi", sv: "Lyssningsrytm", nb: "Lytterytme",
-            da: "Lytterytme", fi: "Kuuntelurytmi", zh: "收听节奏", ja: "再生リズム", ko: "청취 리듬"
+            da: "Lytterytme", fi: "Kuuntelurytmi", zh: "收听节奏", zhHant: "收聽節奏", ja: "再生リズム", ko: "청취 리듬"
         ),
         .stats_share_library_dna: tr(
             en: "Library DNA", es: "ADN de la biblioteca", fr: "ADN de la bibliothèque", de: "Bibliotheks-DNA", pt: "DNA da biblioteca", it: "DNA della libreria",
             nl: "Bibliotheek-DNA", ru: "ДНК библиотеки", pl: "DNA biblioteki", tr: "Kitaplık DNA'sı", sv: "Biblioteks-DNA", nb: "Bibliotek-DNA",
-            da: "Biblioteks-DNA", fi: "Kirjaston DNA", zh: "资料库 DNA", ja: "ライブラリ DNA", ko: "라이브러리 DNA"
+            da: "Biblioteks-DNA", fi: "Kirjaston DNA", zh: "资料库 DNA", zhHant: "資料庫 DNA", ja: "ライブラリ DNA", ko: "라이브러리 DNA"
         ),
         .stats_share_include_names: tr(
             en: "Include song and artist names", es: "Incluir nombres de canciones y artistas", fr: "Inclure les noms des titres et artistes", de: "Song- und Künstlernamen einbeziehen", pt: "Incluir nomes de músicas e artistas", it: "Includi nomi di brani e artisti",
             nl: "Nummers en artiesten opnemen", ru: "Включать названия треков и исполнителей", pl: "Uwzględnij nazwy utworów i wykonawców", tr: "Şarkı ve sanatçı adlarını ekle", sv: "Inkludera låt- och artistnamn", nb: "Inkluder låt- og artistnavn",
-            da: "Medtag sang- og kunstnernavne", fi: "Sisällytä kappale- ja artistinimet", zh: "包含歌曲和艺人名称", ja: "曲名とアーティスト名を含める", ko: "곡 및 아티스트 이름 포함"
+            da: "Medtag sang- og kunstnernavne", fi: "Sisällytä kappale- ja artistinimet", zh: "包含歌曲和艺人名称", zhHant: "包含歌曲和藝人名稱", ja: "曲名とアーティスト名を含める", ko: "곡 및 아티스트 이름 포함"
         ),
         .stats_share_local_only: tr(
             en: "Created locally on this device", es: "Creado localmente en este dispositivo", fr: "Créé localement sur cet appareil", de: "Lokal auf diesem Gerät erstellt", pt: "Criado localmente neste dispositivo", it: "Creato localmente su questo dispositivo",
             nl: "Lokaal op dit apparaat gemaakt", ru: "Создано локально на этом устройстве", pl: "Utworzono lokalnie na tym urządzeniu", tr: "Bu aygıtta yerel olarak oluşturuldu", sv: "Skapat lokalt på den här enheten", nb: "Opprettet lokalt på denne enheten",
-            da: "Oprettet lokalt på denne enhed", fi: "Luotu paikallisesti tällä laitteella", zh: "仅在此设备上本地创建", ja: "このデバイス上でローカルに作成", ko: "이 기기에서 로컬로 생성됨"
+            da: "Oprettet lokalt på denne enhed", fi: "Luotu paikallisesti tällä laitteella", zh: "仅在此设备上本地创建", zhHant: "在此裝置上本機製作", ja: "このデバイス上でローカルに作成", ko: "이 기기에서 로컬로 생성됨"
         ),
         .stats_share_scanning_library: tr(
             en: "Scanning library…", es: "Analizando biblioteca…", fr: "Analyse de la bibliothèque…", de: "Bibliothek wird gescannt…", pt: "A analisar a biblioteca…", it: "Analisi della libreria…",
             nl: "Bibliotheek wordt gescand…", ru: "Сканирование библиотеки…", pl: "Skanowanie biblioteki…", tr: "Kitaplık taranıyor…", sv: "Skannar biblioteket…", nb: "Skanner biblioteket…",
-            da: "Scanner biblioteket…", fi: "Kirjastoa tutkitaan…", zh: "正在扫描资料库…", ja: "ライブラリをスキャン中…", ko: "라이브러리 스캔 중…"
+            da: "Scanner biblioteket…", fi: "Kirjastoa tutkitaan…", zh: "正在扫描资料库…", zhHant: "正在掃描資料庫…", ja: "ライブラリをスキャン中…", ko: "라이브러리 스캔 중…"
         ),
         .stats_share_need_listening: tr(
             en: "Listen to a little more to create a recap", es: "Escucha un poco más para crear un resumen", fr: "Écoutez encore un peu pour créer un récapitulatif", de: "Höre noch etwas mehr, um einen Rückblick zu erstellen", pt: "Ouça mais um pouco para criar um resumo", it: "Ascolta ancora un po' per creare un riepilogo",
             nl: "Luister nog wat meer om een overzicht te maken", ru: "Послушайте ещё немного, чтобы создать итоги", pl: "Posłuchaj trochę więcej, aby utworzyć podsumowanie", tr: "Özet oluşturmak için biraz daha dinle", sv: "Lyssna lite mer för att skapa en sammanfattning", nb: "Lytt litt mer for å lage en oppsummering",
-            da: "Lyt lidt mere for at oprette en oversigt", fi: "Kuuntele hieman lisää luodaksesi yhteenvedon", zh: "再听一些内容即可创建回顾", ja: "もう少し聴くとまとめを作成できます", ko: "요약을 만들려면 조금 더 들어보세요"
+            da: "Lyt lidt mere for at oprette en oversigt", fi: "Kuuntele hieman lisää luodaksesi yhteenvedon", zh: "再听一些内容即可创建回顾", zhHant: "再多聽一些即可製作回顧", ja: "もう少し聴くとまとめを作成できます", ko: "요약을 만들려면 조금 더 들어보세요"
         ),
         .stats_share_listening_time: tr(
             en: "Listening Time", es: "Tiempo de escucha", fr: "Temps d'écoute", de: "Hörzeit", pt: "Tempo de audição", it: "Tempo di ascolto",
             nl: "Luistertijd", ru: "Время прослушивания", pl: "Czas słuchania", tr: "Dinleme süresi", sv: "Lyssningstid", nb: "Lyttetid",
-            da: "Lyttetid", fi: "Kuunteluaika", zh: "收听时长", ja: "再生時間", ko: "청취 시간"
+            da: "Lyttetid", fi: "Kuunteluaika", zh: "收听时长", zhHant: "收聽時間", ja: "再生時間", ko: "청취 시간"
         ),
         .stats_share_streak: tr(
             en: "Streak", es: "Racha", fr: "Série", de: "Serie", pt: "Sequência", it: "Serie",
             nl: "Reeks", ru: "Серия", pl: "Seria", tr: "Seri", sv: "Sviter", nb: "Rekke",
-            da: "Stime", fi: "Putki", zh: "连续天数", ja: "連続記録", ko: "연속 기록"
+            da: "Stime", fi: "Putki", zh: "连续天数", zhHant: "連續天數", ja: "連続記録", ko: "연속 기록"
         ),
         .stats_share_unique_songs: tr(
             en: "Unique Songs", es: "Canciones únicas", fr: "Morceaux uniques", de: "Einzigartige Titel", pt: "Faixas únicas", it: "Brani unici",
             nl: "Unieke nummers", ru: "Уникальные треки", pl: "Unikalne utwory", tr: "Benzersiz parçalar", sv: "Unika låtar", nb: "Unike sanger",
-            da: "Unikke sange", fi: "Yksilölliset kappaleet", zh: "独特歌曲", ja: "ユニークな曲", ko: "고유한 곡"
+            da: "Unikke sange", fi: "Yksilölliset kappaleet", zh: "独特歌曲", zhHant: "不重複歌曲", ja: "ユニークな曲", ko: "고유한 곡"
         ),
         .stats_share_unique_albums: tr(
             en: "Unique Albums", es: "Álbumes únicos", fr: "Albums uniques", de: "Einzigartige Alben", pt: "Álbuns únicos", it: "Album unici",
             nl: "Unieke albums", ru: "Уникальные альбомы", pl: "Unikalne albumy", tr: "Benzersiz albümler", sv: "Unika album", nb: "Unike album",
-            da: "Unikke album", fi: "Yksilölliset albumit", zh: "独特专辑", ja: "ユニークなアルバム", ko: "고유한 앨범"
+            da: "Unikke album", fi: "Yksilölliset albumit", zh: "独特专辑", zhHant: "不重複專輯", ja: "ユニークなアルバム", ko: "고유한 앨범"
         ),
         .stats_share_sessions: tr(
             en: "Sessions", es: "Sesiones", fr: "Sessions", de: "Sitzungen", pt: "Sessões", it: "Sessioni",
             nl: "Sessies", ru: "Сеансы", pl: "Sesje", tr: "Oturumlar", sv: "Sessioner", nb: "Økter",
-            da: "Sessioner", fi: "Istunnot", zh: "会话", ja: "セッション", ko: "세션"
+            da: "Sessioner", fi: "Istunnot", zh: "会话", zhHant: "收聽時段", ja: "セッション", ko: "세션"
         ),
         .stats_share_average_plays_per_day: tr(
             en: "Avg. Plays / Day", es: "Reproducciones medias/día", fr: "Lectures moy./jour", de: "Wiedergaben/Tag", pt: "Reproduções médias/dia", it: "Riproduzioni medie/giorno",
             nl: "Gem. afspelingen/dag", ru: "Ср. воспроизведений/день", pl: "Śr. odtworzeń/dzień", tr: "Ort. çalma/gün", sv: "Snittspelningar/dag", nb: "Gj.sn. avspillinger/dag",
-            da: "Gns. afspilninger/dag", fi: "Keskim. toistoa/päivä", zh: "平均每日播放", ja: "1日平均再生", ko: "일일 평균 재생"
+            da: "Gns. afspilninger/dag", fi: "Keskim. toistoa/päivä", zh: "平均每日播放", zhHant: "每日平均播放次數", ja: "1日平均再生", ko: "일일 평균 재생"
         ),
         .stats_share_average_listening_per_day: tr(
             en: "Avg. Listening / Day", es: "Escucha media/día", fr: "Écoute moy./jour", de: "Ø Hörzeit/Tag", pt: "Escuta média/dia", it: "Ascolto medio/giorno",
             nl: "Gem. luistertijd/dag", ru: "Ср. прослушивание/день", pl: "Śr. słuchania/dzień", tr: "Ort. dinleme/gün", sv: "Snittlyssning/dag", nb: "Gj.sn. lytting/dag",
-            da: "Gns. lytning/dag", fi: "Keskimääräinen kuuntelu/päivä", zh: "平均每日收听", ja: "1日平均再生時間", ko: "일일 평균 청취"
+            da: "Gns. lytning/dag", fi: "Keskimääräinen kuuntelu/päivä", zh: "平均每日收听", zhHant: "每日平均收聽時間", ja: "1日平均再生時間", ko: "일일 평균 청취"
         ),
         .stats_share_average_track_length: tr(
             en: "Avg. Track Length", es: "Duración media de canción", fr: "Durée moyenne des morceaux", de: "Ø Titellänge", pt: "Duração média da faixa", it: "Durata media brano",
             nl: "Gem. nummerlengte", ru: "Ср. длительность трека", pl: "Śr. długość utworu", tr: "Ort. parça süresi", sv: "Genomsnittlig låtlängd", nb: "Gj.sn. sanglengde",
-            da: "Gns. sanglængde", fi: "Keskimääräinen kappalepituus", zh: "平均歌曲时长", ja: "平均曲長", ko: "평균 곡 길이"
+            da: "Gns. sanglængde", fi: "Keskimääräinen kappalepituus", zh: "平均歌曲时长", zhHant: "平均曲目長度", ja: "平均曲長", ko: "평균 곡 길이"
         ),
         .stats_share_longest_session: tr(
             en: "Longest Session", es: "Sesión más larga", fr: "Session la plus longue", de: "Längste Sitzung", pt: "Sessão mais longa", it: "Sessione più lunga",
             nl: "Langste sessie", ru: "Самый долгий сеанс", pl: "Najdłuższa sesja", tr: "En uzun oturum", sv: "Längsta sessionen", nb: "Lengste økt",
-            da: "Længste session", fi: "Pisin istunto", zh: "最长会话", ja: "最長セッション", ko: "가장 긴 세션"
+            da: "Længste session", fi: "Pisin istunto", zh: "最长会话", zhHant: "最長收聽時段", ja: "最長セッション", ko: "가장 긴 세션"
         ),
         .stats_share_longest_streak: tr(
             en: "Longest Streak", es: "Racha más larga", fr: "Plus longue série", de: "Längste Serie", pt: "Maior sequência", it: "Serie più lunga",
             nl: "Langste reeks", ru: "Самая длинная серия", pl: "Najdłuższa seria", tr: "En uzun seri", sv: "Längsta svit", nb: "Lengste rekke",
-            da: "Længste stime", fi: "Pisin putki", zh: "最长连续", ja: "最長連続記録", ko: "최장 연속 기록"
+            da: "Længste stime", fi: "Pisin putki", zh: "最长连续", zhHant: "最長連續天數", ja: "最長連続記録", ko: "최장 연속 기록"
         ),
         .stats_share_top_genre: tr(
             en: "Top Genre", es: "Género principal", fr: "Genre principal", de: "Top-Genre", pt: "Género principal", it: "Genere principale",
             nl: "Topgenre", ru: "Главный жанр", pl: "Najpopularniejszy gatunek", tr: "En çok dinlenen tür", sv: "Toppgenre", nb: "Toppgenre",
-            da: "Topgenre", fi: "Suosikkigenre", zh: "最常听流派", ja: "トップジャンル", ko: "최다 재생 장르"
+            da: "Topgenre", fi: "Suosikkigenre", zh: "最常听流派", zhHant: "最常聽的類型", ja: "トップジャンル", ko: "최다 재생 장르"
         ),
         .stats_share_best_month: tr(
             en: "Best Month", es: "Mejor mes", fr: "Meilleur mois", de: "Bester Monat", pt: "Melhor mês", it: "Miglior mese",
             nl: "Beste maand", ru: "Лучший месяц", pl: "Najlepszy miesiąc", tr: "En iyi ay", sv: "Bästa månaden", nb: "Beste måned",
-            da: "Bedste måned", fi: "Paras kuukausi", zh: "最佳月份", ja: "ベスト月", ko: "최고의 달"
+            da: "Bedste måned", fi: "Paras kuukausi", zh: "最佳月份", zhHant: "最佳月份", ja: "ベスト月", ko: "최고의 달"
         ),
         .stats_share_top_artist: tr(
             en: "Top Artist", es: "Artista principal", fr: "Artiste principal", de: "Top-Künstler", pt: "Artista principal", it: "Artista principale",
             nl: "Topartiest", ru: "Главный исполнитель", pl: "Najczęstszy wykonawca", tr: "En çok dinlenen sanatçı", sv: "Mest spelade artist", nb: "Mest spilte artist",
-            da: "Mest spillede kunstner", fi: "Kuunnelluin artisti", zh: "最常听艺人", ja: "トップアーティスト", ko: "최다 재생 아티스트"
+            da: "Mest spillede kunstner", fi: "Kuunnelluin artisti", zh: "最常听艺人", zhHant: "最常聽的藝人", ja: "トップアーティスト", ko: "최다 재생 아티스트"
         ),
         .stats_share_private_recap: tr(
             en: "Private Recap", es: "Resumen privado", fr: "Récapitulatif privé", de: "Privater Rückblick", pt: "Resumo privado", it: "Riepilogo privato",
             nl: "Privéoverzicht", ru: "Приватные итоги", pl: "Prywatne podsumowanie", tr: "Özel özet", sv: "Privat sammanfattning", nb: "Privat oppsummering",
-            da: "Privat oversigt", fi: "Yksityinen yhteenveto", zh: "私密回顾", ja: "プライベートまとめ", ko: "비공개 요약"
+            da: "Privat oversigt", fi: "Yksityinen yhteenveto", zh: "私密回顾", zhHant: "私密回顧", ja: "プライベートまとめ", ko: "비공개 요약"
         ),
         .stats_share_names_hidden: tr(
             en: "Names hidden", es: "Nombres ocultos", fr: "Noms masqués", de: "Namen ausgeblendet", pt: "Nomes ocultos", it: "Nomi nascosti",
             nl: "Namen verborgen", ru: "Имена скрыты", pl: "Nazwy ukryte", tr: "Adlar gizli", sv: "Namn dolda", nb: "Navn skjult",
-            da: "Navne skjult", fi: "Nimet piilotettu", zh: "名称已隐藏", ja: "名前は非表示", ko: "이름 숨김"
+            da: "Navne skjult", fi: "Nimet piilotettu", zh: "名称已隐藏", zhHant: "已隱藏名稱", ja: "名前は非表示", ko: "이름 숨김"
         ),
         .stats_share_last_52_weeks: tr(
             en: "Last 52 Weeks", es: "Últimas 52 semanas", fr: "52 dernières semaines", de: "Letzte 52 Wochen", pt: "Últimas 52 semanas", it: "Ultime 52 settimane",
             nl: "Afgelopen 52 weken", ru: "Последние 52 недели", pl: "Ostatnie 52 tygodnie", tr: "Son 52 hafta", sv: "Senaste 52 veckorna", nb: "Siste 52 uker",
-            da: "Seneste 52 uger", fi: "Viimeiset 52 viikkoa", zh: "过去 52 周", ja: "直近52週間", ko: "지난 52주"
+            da: "Seneste 52 uger", fi: "Viimeiset 52 viikkoa", zh: "过去 52 周", zhHant: "過去 52 週", ja: "直近52週間", ko: "지난 52주"
         ),
         .stats_share_rhythm_subtitle: tr(
             en: "One square is one day of listening.", es: "Cada cuadrado es un día de escucha.", fr: "Chaque carré représente un jour d'écoute.", de: "Jedes Feld steht für einen Hörtag.", pt: "Cada quadrado representa um dia de audição.", it: "Ogni quadrato rappresenta un giorno di ascolto.",
             nl: "Elk vakje is één luisterdag.", ru: "Каждый квадрат — один день прослушивания.", pl: "Każdy kwadrat to jeden dzień słuchania.", tr: "Her kare bir dinleme günüdür.", sv: "Varje ruta är en lyssningsdag.", nb: "Hver rute er én lyttedag.",
-            da: "Hver firkant er én lyttedag.", fi: "Jokainen ruutu on yksi kuuntelupäivä.", zh: "每个方格代表一天的收听。", ja: "1つのマスが1日の再生を表します。", ko: "한 칸은 하루의 청취를 나타냅니다."
+            da: "Hver firkant er én lyttedag.", fi: "Jokainen ruutu on yksi kuuntelupäivä.", zh: "每个方格代表一天的收听。", zhHant: "每個方格代表一天的收聽。", ja: "1つのマスが1日の再生を表します。", ko: "한 칸은 하루의 청취를 나타냅니다."
         ),
         .stats_share_active_days: tr(
             en: "Active Days", es: "Días activos", fr: "Jours actifs", de: "Aktive Tage", pt: "Dias ativos", it: "Giorni attivi",
             nl: "Actieve dagen", ru: "Активные дни", pl: "Aktywne dni", tr: "Aktif günler", sv: "Aktiva dagar", nb: "Aktive dager",
-            da: "Aktive dage", fi: "Aktiiviset päivät", zh: "活跃天数", ja: "アクティブ日数", ko: "활동 일수"
+            da: "Aktive dage", fi: "Aktiiviset päivät", zh: "活跃天数", zhHant: "活躍天數", ja: "アクティブ日数", ko: "활동 일수"
         ),
         .stats_share_active_weeks: tr(
             en: "Active Weeks", es: "Semanas activas", fr: "Semaines actives", de: "Aktive Wochen", pt: "Semanas ativas", it: "Settimane attive",
             nl: "Actieve weken", ru: "Активные недели", pl: "Aktywne tygodnie", tr: "Etkin haftalar", sv: "Aktiva veckor", nb: "Aktive uker",
-            da: "Aktive uger", fi: "Aktiiviset viikot", zh: "活跃周数", ja: "アクティブな週", ko: "활성 주"
+            da: "Aktive uger", fi: "Aktiiviset viikot", zh: "活跃周数", zhHant: "活躍週數", ja: "アクティブな週", ko: "활성 주"
         ),
         .stats_share_albums: tr(
             en: "Albums", es: "Álbumes", fr: "Albums", de: "Alben", pt: "Álbuns", it: "Album",
             nl: "Albums", ru: "Альбомы", pl: "Albumy", tr: "Albümler", sv: "Album", nb: "Album",
-            da: "Album", fi: "Albumit", zh: "专辑", ja: "アルバム", ko: "앨범"
+            da: "Album", fi: "Albumit", zh: "专辑", zhHant: "專輯", ja: "アルバム", ko: "앨범"
         ),
         .stats_share_collection_time: tr(
             en: "Collection Time", es: "Duración de la colección", fr: "Durée de la collection", de: "Sammlungszeit", pt: "Duração da coleção", it: "Durata della raccolta",
             nl: "Collectieduur", ru: "Длительность коллекции", pl: "Czas kolekcji", tr: "Koleksiyon süresi", sv: "Samlingstid", nb: "Samlingstid",
-            da: "Samlingstid", fi: "Kokoelman kesto", zh: "收藏时长", ja: "コレクション時間", ko: "컬렉션 시간"
+            da: "Samlingstid", fi: "Kokoelman kesto", zh: "收藏时长", zhHant: "收藏總長度", ja: "コレクション時間", ko: "컬렉션 시간"
         ),
         .stats_share_library_size: tr(
             en: "Library Size", es: "Tamaño de la biblioteca", fr: "Taille de la bibliothèque", de: "Bibliotheksgröße", pt: "Tamanho da biblioteca", it: "Dimensione libreria",
             nl: "Bibliotheekgrootte", ru: "Размер библиотеки", pl: "Rozmiar biblioteki", tr: "Kitaplık boyutu", sv: "Biblioteksstorlek", nb: "Bibliotekstørrelse",
-            da: "Biblioteksstørrelse", fi: "Kirjaston koko", zh: "资料库大小", ja: "ライブラリサイズ", ko: "라이브러리 크기"
+            da: "Biblioteksstørrelse", fi: "Kirjaston koko", zh: "资料库大小", zhHant: "資料庫大小", ja: "ライブラリサイズ", ko: "라이브러리 크기"
         ),
         .stats_share_release_spectrum: tr(
             en: "Release Spectrum", es: "Espectro de lanzamientos", fr: "Spectre des sorties", de: "Veröffentlichungsspektrum", pt: "Espetro de lançamentos", it: "Spettro delle uscite",
             nl: "Uitgavespectrum", ru: "Спектр релизов", pl: "Rozkład wydań", tr: "Yayın spektrumu", sv: "Utgivningsspektrum", nb: "Utgivelsesspekter",
-            da: "Udgivelsesspektrum", fi: "Julkaisuspektri", zh: "发行年代分布", ja: "リリース分布", ko: "발매 분포"
+            da: "Udgivelsesspektrum", fi: "Julkaisuspektri", zh: "发行年代分布", zhHant: "發行年代分布", ja: "リリース分布", ko: "발매 분포"
         ),
         .stats_share_metadata: tr(
             en: "Metadata", es: "Metadatos", fr: "Métadonnées", de: "Metadaten", pt: "Metadados", it: "Metadati",
             nl: "Metagegevens", ru: "Метаданные", pl: "Metadane", tr: "Meta veriler", sv: "Metadata", nb: "Metadata",
-            da: "Metadata", fi: "Metatiedot", zh: "元数据", ja: "メタデータ", ko: "메타데이터"
+            da: "Metadata", fi: "Metatiedot", zh: "元数据", zhHant: "後設資料", ja: "メタデータ", ko: "메타데이터"
         ),
         .stats_share_customize: tr(
             en: "Customize", es: "Personalizar", fr: "Personnaliser", de: "Anpassen", pt: "Personalizar", it: "Personalizza",
             nl: "Aanpassen", ru: "Настроить", pl: "Dostosuj", tr: "Özelleştir", sv: "Anpassa", nb: "Tilpass",
-            da: "Tilpas", fi: "Mukauta", zh: "自定义", ja: "カスタマイズ", ko: "사용자화"
+            da: "Tilpas", fi: "Mukauta", zh: "自定义", zhHant: "自訂", ja: "カスタマイズ", ko: "사용자화"
         ),
         .stats_share_template: tr(
             en: "Template", es: "Plantilla", fr: "Modèle", de: "Vorlage", pt: "Modelo", it: "Modello",
             nl: "Sjabloon", ru: "Шаблон", pl: "Szablon", tr: "Şablon", sv: "Mall", nb: "Mal",
-            da: "Skabelon", fi: "Malli", zh: "模板", ja: "テンプレート", ko: "템플릿"
+            da: "Skabelon", fi: "Malli", zh: "模板", zhHant: "範本", ja: "テンプレート", ko: "템플릿"
         ),
         .stats_share_format: tr(
             en: "Format", es: "Formato", fr: "Format", de: "Format", pt: "Formato", it: "Formato",
             nl: "Indeling", ru: "Формат", pl: "Format", tr: "Biçim", sv: "Format", nb: "Format",
-            da: "Format", fi: "Muoto", zh: "格式", ja: "形式", ko: "형식"
+            da: "Format", fi: "Muoto", zh: "格式", zhHant: "格式", ja: "形式", ko: "형식"
         ),
         .stats_share_square: tr(
             en: "Square", es: "Cuadrado", fr: "Carré", de: "Quadratisch", pt: "Quadrado", it: "Quadrato",
             nl: "Vierkant", ru: "Квадрат", pl: "Kwadrat", tr: "Kare", sv: "Kvadrat", nb: "Kvadrat",
-            da: "Kvadrat", fi: "Neliö", zh: "方形", ja: "正方形", ko: "정사각형"
+            da: "Kvadrat", fi: "Neliö", zh: "方形", zhHant: "方形", ja: "正方形", ko: "정사각형"
         ),
         .stats_share_portrait: tr(
             en: "Portrait", es: "Retrato", fr: "Portrait", de: "Hochformat", pt: "Retrato", it: "Ritratto",
             nl: "Portret", ru: "Портрет", pl: "Pionowy", tr: "Dikey", sv: "Porträtt", nb: "Portrett",
-            da: "Portræt", fi: "Pysty", zh: "竖版", ja: "縦長", ko: "세로"
+            da: "Portræt", fi: "Pysty", zh: "竖版", zhHant: "直式", ja: "縦長", ko: "세로"
         ),
         .stats_share_story: tr(
             en: "Story", es: "Historia", fr: "Story", de: "Story", pt: "Story", it: "Storia",
             nl: "Verhaal", ru: "История", pl: "Relacja", tr: "Hikâye", sv: "Berättelse", nb: "Fortelling",
-            da: "Fortælling", fi: "Tarina", zh: "快拍", ja: "ストーリー", ko: "스토리"
+            da: "Fortælling", fi: "Tarina", zh: "快拍", zhHant: "限時動態", ja: "ストーリー", ko: "스토리"
         ),
         .stats_share_widget_size: tr(
             en: "Layout", es: "Diseño", fr: "Disposition", de: "Layout", pt: "Layout", it: "Layout",
             nl: "Indeling", ru: "Макет", pl: "Układ", tr: "Düzen", sv: "Layout", nb: "Oppsett",
-            da: "Layout", fi: "Asettelu", zh: "布局", ja: "レイアウト", ko: "레이아웃"
+            da: "Layout", fi: "Asettelu", zh: "布局", zhHant: "版面配置", ja: "レイアウト", ko: "레이아웃"
         ),
         .stats_share_layout: tr(
             en: "Layout", es: "Diseño", fr: "Disposition", de: "Layout", pt: "Layout", it: "Layout",
             nl: "Indeling", ru: "Макет", pl: "Układ", tr: "Düzen", sv: "Layout", nb: "Oppsett",
-            da: "Layout", fi: "Asettelu", zh: "布局", ja: "レイアウト", ko: "레이아웃"
+            da: "Layout", fi: "Asettelu", zh: "布局", zhHant: "版面配置", ja: "レイアウト", ko: "레이아웃"
         ),
         .stats_share_compact: tr(
             en: "Compact", es: "Compacto", fr: "Compact", de: "Kompakt", pt: "Compacto", it: "Compatto",
             nl: "Compact", ru: "Компактный", pl: "Kompaktowy", tr: "Kompakt", sv: "Kompakt", nb: "Kompakt",
-            da: "Kompakt", fi: "Tiivis", zh: "紧凑", ja: "コンパクト", ko: "컴팩트"
+            da: "Kompakt", fi: "Tiivis", zh: "紧凑", zhHant: "精簡", ja: "コンパクト", ko: "컴팩트"
         ),
         .stats_share_standard: tr(
             en: "Standard", es: "Estándar", fr: "Standard", de: "Standard", pt: "Padrão", it: "Standard",
             nl: "Standaard", ru: "Стандартный", pl: "Standardowy", tr: "Standart", sv: "Standard", nb: "Standard",
-            da: "Standard", fi: "Normaali", zh: "标准", ja: "標準", ko: "표준"
+            da: "Standard", fi: "Normaali", zh: "标准", zhHant: "標準", ja: "標準", ko: "표준"
         ),
         .stats_share_expanded: tr(
             en: "Expanded", es: "Ampliado", fr: "Étendu", de: "Erweitert", pt: "Expandido", it: "Esteso",
             nl: "Uitgebreid", ru: "Расширенный", pl: "Rozszerzony", tr: "Genişletilmiş", sv: "Utökad", nb: "Utvidet",
-            da: "Udvidet", fi: "Laajennettu", zh: "扩展", ja: "拡張", ko: "확장"
+            da: "Udvidet", fi: "Laajennettu", zh: "扩展", zhHant: "展開", ja: "拡張", ko: "확장"
         ),
         .stats_share_widget_light: tr(
             en: "Light", es: "Claro", fr: "Clair", de: "Hell", pt: "Claro", it: "Chiaro",
             nl: "Licht", ru: "Светлая", pl: "Jasny", tr: "Açık", sv: "Ljus", nb: "Lys",
-            da: "Lys", fi: "Vaalea", zh: "浅色", ja: "ライト", ko: "라이트"
+            da: "Lys", fi: "Vaalea", zh: "浅色", zhHant: "淺色", ja: "ライト", ko: "라이트"
         ),
         .stats_share_widget_dark: tr(
             en: "Dark", es: "Oscuro", fr: "Sombre", de: "Dunkel", pt: "Escuro", it: "Scuro",
             nl: "Donker", ru: "Тёмная", pl: "Ciemny", tr: "Koyu", sv: "Mörk", nb: "Mørk",
-            da: "Mørk", fi: "Tumma", zh: "深色", ja: "ダーク", ko: "다크"
+            da: "Mørk", fi: "Tumma", zh: "深色", zhHant: "深色", ja: "ダーク", ko: "다크"
         ),
         .stats_share_widget_default: tr(
             en: "Widget Default", es: "Predeterminado del widget", fr: "Par défaut du widget", de: "Widget-Standard", pt: "Predefinição do widget", it: "Predefinito del widget",
             nl: "Widgetstandaard", ru: "По умолчанию для виджета", pl: "Domyślny widżet", tr: "Varsayılan araç takımı", sv: "Widgetstandard", nb: "Widgetstandard",
-            da: "Widgetstandard", fi: "Vimpaimen oletus", zh: "小组件默认", ja: "ウィジェットのデフォルト", ko: "위젯 기본값"
+            da: "Widgetstandard", fi: "Vimpaimen oletus", zh: "小组件默认", zhHant: "小工具預設", ja: "ウィジェットのデフォルト", ko: "위젯 기본값"
         ),
         .stats_share_app_accent: tr(
             en: "App Accent", es: "Acento de la app", fr: "Accent de l’app", de: "App-Akzent", pt: "Destaque do app", it: "Accento app",
             nl: "App-accent", ru: "Акцент приложения", pl: "Akcent aplikacji", tr: "Uygulama vurgusu", sv: "Appaccent", nb: "Appaksent",
-            da: "Appaccent", fi: "Sovelluksen korostus", zh: "应用强调色", ja: "アプリアクセント", ko: "앱 강조색"
+            da: "Appaccent", fi: "Sovelluksen korostus", zh: "应用强调色", zhHant: "App 強調色", ja: "アプリアクセント", ko: "앱 강조색"
         ),
         .stats_share_custom_color: tr(
             en: "Custom Color", es: "Color personalizado", fr: "Couleur personnalisée", de: "Eigene Farbe", pt: "Cor personalizada", it: "Colore personalizzato",
             nl: "Aangepaste kleur", ru: "Свой цвет", pl: "Własny kolor", tr: "Özel renk", sv: "Egen färg", nb: "Egendefinert farge",
-            da: "Brugerdefineret farve", fi: "Mukautettu väri", zh: "自定义颜色", ja: "カスタムカラー", ko: "사용자 색상"
+            da: "Brugerdefineret farve", fi: "Mukautettu väri", zh: "自定义颜色", zhHant: "自訂顏色", ja: "カスタムカラー", ko: "사용자 색상"
         ),
         .stats_share_background_color: tr(
             en: "Background Color", es: "Color de fondo", fr: "Couleur d’arrière-plan", de: "Hintergrundfarbe", pt: "Cor de fundo", it: "Colore di sfondo",
             nl: "Achtergrondkleur", ru: "Цвет фона", pl: "Kolor tła", tr: "Arka plan rengi", sv: "Bakgrundsfärg", nb: "Bakgrunnsfarge",
-            da: "Baggrundsfarve", fi: "Taustaväri", zh: "背景颜色", ja: "背景色", ko: "배경 색상"
+            da: "Baggrundsfarve", fi: "Taustaväri", zh: "背景颜色", zhHant: "背景顏色", ja: "背景色", ko: "배경 색상"
         ),
         .stats_share_text_color: tr(
             en: "Text Color", es: "Color del texto", fr: "Couleur du texte", de: "Textfarbe", pt: "Cor do texto", it: "Colore del testo",
             nl: "Tekstkleur", ru: "Цвет текста", pl: "Kolor tekstu", tr: "Metin rengi", sv: "Textfärg", nb: "Tekstfarge",
-            da: "Tekstfarve", fi: "Tekstin väri", zh: "文本颜色", ja: "文字色", ko: "텍스트 색상"
+            da: "Tekstfarve", fi: "Tekstin väri", zh: "文本颜色", zhHant: "文字顏色", ja: "文字色", ko: "텍스트 색상"
         ),
         .stats_share_orange: tr(
             en: "Orange", es: "Naranja", fr: "Orange", de: "Orange", pt: "Laranja", it: "Arancione",
             nl: "Oranje", ru: "Оранжевый", pl: "Pomarańczowy", tr: "Turuncu", sv: "Orange", nb: "Oransje",
-            da: "Orange", fi: "Oranssi", zh: "橙色", ja: "オレンジ", ko: "주황"
+            da: "Orange", fi: "Oranssi", zh: "橙色", zhHant: "橘色", ja: "オレンジ", ko: "주황"
         ),
         .stats_share_indigo: tr(
             en: "Indigo", es: "Índigo", fr: "Indigo", de: "Indigo", pt: "Índigo", it: "Indaco",
             nl: "Indigo", ru: "Индиго", pl: "Indygo", tr: "İndigo", sv: "Indigo", nb: "Indigo",
-            da: "Indigo", fi: "Indigo", zh: "靛蓝", ja: "インディゴ", ko: "인디고"
+            da: "Indigo", fi: "Indigo", zh: "靛蓝", zhHant: "靛藍色", ja: "インディゴ", ko: "인디고"
         ),
         .stats_share_teal: tr(
             en: "Teal", es: "Verde azulado", fr: "Sarcelle", de: "Petrol", pt: "Verde-azulado", it: "Verde acqua",
             nl: "Groenblauw", ru: "Бирюзовый", pl: "Morski", tr: "Turkuaz", sv: "Blågrön", nb: "Blågrønn",
-            da: "Blågrøn", fi: "Sinivihreä", zh: "蓝绿", ja: "ティール", ko: "청록"
+            da: "Blågrøn", fi: "Sinivihreä", zh: "蓝绿", zhHant: "藍綠色", ja: "ティール", ko: "청록"
         ),
         .stats_share_blue: tr(
             en: "Blue", es: "Azul", fr: "Bleu", de: "Blau", pt: "Azul", it: "Blu",
             nl: "Blauw", ru: "Синий", pl: "Niebieski", tr: "Mavi", sv: "Blå", nb: "Blå",
-            da: "Blå", fi: "Sininen", zh: "蓝色", ja: "ブルー", ko: "파랑"
+            da: "Blå", fi: "Sininen", zh: "蓝色", zhHant: "藍色", ja: "ブルー", ko: "파랑"
         ),
         .stats_share_green: tr(
             en: "Green", es: "Verde", fr: "Vert", de: "Grün", pt: "Verde", it: "Verde",
             nl: "Groen", ru: "Зелёный", pl: "Zielony", tr: "Yeşil", sv: "Grön", nb: "Grønn",
-            da: "Grøn", fi: "Vihreä", zh: "绿色", ja: "グリーン", ko: "초록"
+            da: "Grøn", fi: "Vihreä", zh: "绿色", zhHant: "綠色", ja: "グリーン", ko: "초록"
         ),
         .stats_share_pink: tr(
             en: "Pink", es: "Rosa", fr: "Rose", de: "Pink", pt: "Rosa", it: "Rosa",
             nl: "Roze", ru: "Розовый", pl: "Różowy", tr: "Pembe", sv: "Rosa", nb: "Rosa",
-            da: "Pink", fi: "Vaaleanpunainen", zh: "粉色", ja: "ピンク", ko: "핑크"
+            da: "Pink", fi: "Vaaleanpunainen", zh: "粉色", zhHant: "粉紅色", ja: "ピンク", ko: "핑크"
         ),
         .stats_share_font: tr(
             en: "Font", es: "Fuente", fr: "Police", de: "Schriftart", pt: "Fonte", it: "Carattere",
             nl: "Lettertype", ru: "Шрифт", pl: "Czcionka", tr: "Yazı tipi", sv: "Typsnitt", nb: "Skrifttype",
-            da: "Skrifttype", fi: "Kirjasin", zh: "字体", ja: "フォント", ko: "글꼴"
+            da: "Skrifttype", fi: "Kirjasin", zh: "字体", zhHant: "字體", ja: "フォント", ko: "글꼴"
         ),
         .stats_share_font_widget: tr(
             en: "Widget Serif", es: "Serif de widget", fr: "Sérif du widget", de: "Widget-Serif", pt: "Serifa do widget", it: "Graziato widget",
             nl: "Widget-serif", ru: "Виджет с засечками", pl: "Szeryfowy widżet", tr: "Widget serif", sv: "Widgetserif", nb: "Widgetserif",
-            da: "Widgetserif", fi: "Vimpaimen päätteellinen", zh: "小组件衬线", ja: "ウィジェット明朝", ko: "위젯 세리프"
+            da: "Widgetserif", fi: "Vimpaimen päätteellinen", zh: "小组件衬线", zhHant: "小工具襯線體", ja: "ウィジェット明朝", ko: "위젯 세리프"
         ),
         .stats_share_font_rounded: tr(
             en: "Rounded", es: "Redondeada", fr: "Arrondie", de: "Abgerundet", pt: "Arredondada", it: "Arrotondato",
             nl: "Afgerond", ru: "Скруглённый", pl: "Zaokrąglony", tr: "Yuvarlatılmış", sv: "Avrundad", nb: "Avrundet",
-            da: "Afrundet", fi: "Pyöristetty", zh: "圆角", ja: "丸ゴシック", ko: "둥근"
+            da: "Afrundet", fi: "Pyöristetty", zh: "圆角", zhHant: "圓體", ja: "丸ゴシック", ko: "둥근"
         ),
         .stats_share_font_mono: tr(
             en: "Monospaced", es: "Monoespaciada", fr: "Monospace", de: "Nichtproportional", pt: "Monoespaçada", it: "Monospaziato",
             nl: "Monospace", ru: "Моноширинный", pl: "Monospace", tr: "Eş aralıklı", sv: "Monospace", nb: "Monospace",
-            da: "Monospace", fi: "Tasalevyinen", zh: "等宽", ja: "等幅", ko: "고정폭"
+            da: "Monospace", fi: "Tasalevyinen", zh: "等宽", zhHant: "等寬", ja: "等幅", ko: "고정폭"
         ),
         .stats_share_font_sans: tr(
             en: "Sans Serif", es: "Sans serif", fr: "Sans sérif", de: "Sans Serif", pt: "Sem serifa", it: "Sans serif",
             nl: "Sans-serif", ru: "Без засечек", pl: "Bezszeryfowy", tr: "Sans serif", sv: "Sans serif", nb: "Sans serif",
-            da: "Sans serif", fi: "Pääteviivaton", zh: "无衬线", ja: "ゴシック", ko: "산세리프"
+            da: "Sans serif", fi: "Pääteviivaton", zh: "无衬线", zhHant: "無襯線", ja: "ゴシック", ko: "산세리프"
         ),
         .stats_share_lead_metric: tr(
             en: "Lead Metric", es: "Métrica principal", fr: "Mesure principale", de: "Hauptmetrik", pt: "Métrica principal", it: "Metrica principale",
             nl: "Hoofdwaarde", ru: "Главный показатель", pl: "Główna metryka", tr: "Ana metrik", sv: "Huvudvärde", nb: "Hovedmåling",
-            da: "Hovedmåling", fi: "Päämittari", zh: "主要指标", ja: "主指標", ko: "주요 지표"
+            da: "Hovedmåling", fi: "Päämittari", zh: "主要指标", zhHant: "主要指標", ja: "主指標", ko: "주요 지표"
         ),
         .stats_share_data_one: tr(
             en: "Data One", es: "Dato uno", fr: "Donnée un", de: "Daten eins", pt: "Dado um", it: "Dato uno",
             nl: "Gegeven één", ru: "Данные один", pl: "Dane jeden", tr: "Veri bir", sv: "Data ett", nb: "Data én",
-            da: "Data ét", fi: "Tieto yksi", zh: "数据一", ja: "データ 1", ko: "데이터 1"
+            da: "Data ét", fi: "Tieto yksi", zh: "数据一", zhHant: "資料一", ja: "データ 1", ko: "데이터 1"
         ),
         .stats_share_data_two: tr(
             en: "Data Two", es: "Dato dos", fr: "Donnée deux", de: "Daten zwei", pt: "Dado dois", it: "Dato due",
             nl: "Gegeven twee", ru: "Данные два", pl: "Dane dwa", tr: "Veri iki", sv: "Data två", nb: "Data to",
-            da: "Data to", fi: "Tieto kaksi", zh: "数据二", ja: "データ 2", ko: "데이터 2"
+            da: "Data to", fi: "Tieto kaksi", zh: "数据二", zhHant: "資料二", ja: "データ 2", ko: "데이터 2"
         ),
         .stats_share_data_three: tr(
             en: "Data Three", es: "Dato tres", fr: "Donnée trois", de: "Daten drei", pt: "Dado três", it: "Dato tre",
             nl: "Gegeven drie", ru: "Данные три", pl: "Dane trzy", tr: "Veri üç", sv: "Data tre", nb: "Data tre",
-            da: "Data tre", fi: "Tieto kolme", zh: "数据三", ja: "データ 3", ko: "데이터 3"
+            da: "Data tre", fi: "Tieto kolme", zh: "数据三", zhHant: "資料三", ja: "データ 3", ko: "데이터 3"
         ),
         .stats_share_visible_data: tr(
             en: "Visible Data", es: "Datos visibles", fr: "Données visibles", de: "Sichtbare Daten", pt: "Dados visíveis", it: "Dati visibili",
             nl: "Zichtbare gegevens", ru: "Видимые данные", pl: "Widoczne dane", tr: "Görünür veriler", sv: "Synliga data", nb: "Synlige data",
-            da: "Synlige data", fi: "Näkyvät tiedot", zh: "显示数据", ja: "表示するデータ", ko: "표시할 데이터"
+            da: "Synlige data", fi: "Näkyvät tiedot", zh: "显示数据", zhHant: "顯示的資料", ja: "表示するデータ", ko: "표시할 데이터"
         ),
         .stats_share_show_header: tr(
             en: "Show Header", es: "Mostrar encabezado", fr: "Afficher l’en-tête", de: "Kopfzeile zeigen", pt: "Mostrar cabeçalho", it: "Mostra intestazione",
             nl: "Kop tonen", ru: "Показывать заголовок", pl: "Pokaż nagłówek", tr: "Başlığı göster", sv: "Visa rubrik", nb: "Vis overskrift",
-            da: "Vis overskrift", fi: "Näytä otsikko", zh: "显示标题", ja: "ヘッダーを表示", ko: "헤더 표시"
+            da: "Vis overskrift", fi: "Näytä otsikko", zh: "显示标题", zhHant: "顯示頁首", ja: "ヘッダーを表示", ko: "헤더 표시"
         ),
         .stats_share_show_footer: tr(
             en: "Show Footer", es: "Mostrar pie", fr: "Afficher le pied de page", de: "Fußzeile zeigen", pt: "Mostrar rodapé", it: "Mostra piè di pagina",
             nl: "Voettekst tonen", ru: "Показывать нижний колонтитул", pl: "Pokaż stopkę", tr: "Alt bilgiyi göster", sv: "Visa sidfot", nb: "Vis bunntekst",
-            da: "Vis sidefod", fi: "Näytä alatunniste", zh: "显示页脚", ja: "フッターを表示", ko: "바닥글 표시"
+            da: "Vis sidefod", fi: "Näytä alatunniste", zh: "显示页脚", zhHant: "顯示頁尾", ja: "フッターを表示", ko: "바닥글 표시"
         ),
         .stats_share_show_server_address: tr(
             en: "Show Server Address", es: "Mostrar dirección del servidor", fr: "Afficher l’adresse du serveur", de: "Serveradresse anzeigen", pt: "Mostrar endereço do servidor", it: "Mostra indirizzo del server",
             nl: "Serveradres tonen", ru: "Показывать адрес сервера", pl: "Pokaż adres serwera", tr: "Sunucu adresini göster", sv: "Visa serveradress", nb: "Vis serveradresse",
-            da: "Vis serveradresse", fi: "Näytä palvelinosoite", zh: "显示服务器地址", ja: "サーバーアドレスを表示", ko: "서버 주소 표시"
+            da: "Vis serveradresse", fi: "Näytä palvelinosoite", zh: "显示服务器地址", zhHant: "顯示伺服器位址", ja: "サーバーアドレスを表示", ko: "서버 주소 표시"
         ),
         .stats_share_map_span: tr(
             en: "Map Span", es: "Rango del mapa", fr: "Période de la carte", de: "Kartenzeitraum", pt: "Período do mapa", it: "Intervallo della mappa",
             nl: "Kaartperiode", ru: "Период карты", pl: "Zakres mapy", tr: "Harita aralığı", sv: "Kartintervall", nb: "Kartperiode",
-            da: "Kortperiode", fi: "Kartan jakso", zh: "图谱范围", ja: "マップの期間", ko: "맵 기간"
+            da: "Kortperiode", fi: "Kartan jakso", zh: "图谱范围", zhHant: "節奏圖範圍", ja: "マップの期間", ko: "맵 기간"
         ),
         .stats_share_map_measure: tr(
             en: "Map Intensity", es: "Intensidad del mapa", fr: "Intensité de la carte", de: "Kartenintensität", pt: "Intensidade do mapa", it: "Intensità della mappa",
             nl: "Kaartintensiteit", ru: "Интенсивность карты", pl: "Intensywność mapy", tr: "Harita yoğunluğu", sv: "Kartintensitet", nb: "Kartintensitet",
-            da: "Kortintensitet", fi: "Kartan voimakkuus", zh: "图谱强度", ja: "マップの濃度", ko: "맵 강도"
+            da: "Kortintensitet", fi: "Kartan voimakkuus", zh: "图谱强度", zhHant: "節奏圖強度", ja: "マップの濃度", ko: "맵 강도"
         ),
         .stats_share_12_weeks: tr(
             en: "Last 12 Weeks", es: "Últimas 12 semanas", fr: "12 dernières semaines", de: "Letzte 12 Wochen", pt: "Últimas 12 semanas", it: "Ultime 12 settimane",
             nl: "Afgelopen 12 weken", ru: "Последние 12 недель", pl: "Ostatnie 12 tygodni", tr: "Son 12 hafta", sv: "Senaste 12 veckorna", nb: "Siste 12 uker",
-            da: "Seneste 12 uger", fi: "Viimeiset 12 viikkoa", zh: "过去 12 周", ja: "直近12週間", ko: "지난 12주"
+            da: "Seneste 12 uger", fi: "Viimeiset 12 viikkoa", zh: "过去 12 周", zhHant: "過去 12 週", ja: "直近12週間", ko: "지난 12주"
         ),
         .stats_share_26_weeks: tr(
             en: "Last 26 Weeks", es: "Últimas 26 semanas", fr: "26 dernières semaines", de: "Letzte 26 Wochen", pt: "Últimas 26 semanas", it: "Ultime 26 settimane",
             nl: "Afgelopen 26 weken", ru: "Последние 26 недель", pl: "Ostatnie 26 tygodni", tr: "Son 26 hafta", sv: "Senaste 26 veckorna", nb: "Siste 26 uker",
-            da: "Seneste 26 uger", fi: "Viimeiset 26 viikkoa", zh: "过去 26 周", ja: "直近26週間", ko: "지난 26주"
+            da: "Seneste 26 uger", fi: "Viimeiset 26 viikkoa", zh: "过去 26 周", zhHant: "過去 26 週", ja: "直近26週間", ko: "지난 26주"
         ),
         .stats_share_by_plays: tr(
             en: "By Plays", es: "Por reproducciones", fr: "Par écoutes", de: "Nach Wiedergaben", pt: "Por reproduções", it: "Per riproduzioni",
             nl: "Op afspelen", ru: "По воспроизведениям", pl: "Według odtworzeń", tr: "Çalma sayısına göre", sv: "Efter spelningar", nb: "Etter avspillinger",
-            da: "Efter afspilninger", fi: "Toistojen mukaan", zh: "按播放次数", ja: "再生回数別", ko: "재생 횟수별"
+            da: "Efter afspilninger", fi: "Toistojen mukaan", zh: "按播放次数", zhHant: "依播放次數", ja: "再生回数別", ko: "재생 횟수별"
         ),
         .stats_share_by_time: tr(
             en: "By Listening Time", es: "Por tiempo de escucha", fr: "Par temps d’écoute", de: "Nach Hörzeit", pt: "Por tempo de audição", it: "Per tempo di ascolto",
             nl: "Op luistertijd", ru: "По времени прослушивания", pl: "Według czasu słuchania", tr: "Dinleme süresine göre", sv: "Efter lyssningstid", nb: "Etter lyttetid",
-            da: "Efter lyttetid", fi: "Kuunteluajan mukaan", zh: "按收听时长", ja: "再生時間別", ko: "청취 시간별"
+            da: "Efter lyttetid", fi: "Kuunteluajan mukaan", zh: "按收听时长", zhHant: "依收聽時間", ja: "再生時間別", ko: "청취 시간별"
         ),
         .stats_share_listening: tr(
             en: "Listening", es: "Escucha", fr: "Écoute", de: "Hören", pt: "Audição", it: "Ascolto",
             nl: "Luisteren", ru: "Прослушивание", pl: "Słuchanie", tr: "Dinleme", sv: "Lyssning", nb: "Lytting",
-            da: "Lytning", fi: "Kuuntelu", zh: "收听", ja: "再生", ko: "청취"
+            da: "Lytning", fi: "Kuuntelu", zh: "收听", zhHant: "收聽", ja: "再生", ko: "청취"
         ),
         .stats_share_hi_res: tr(
             en: "Hi-Res", es: "Alta resolución", fr: "Haute résolution", de: "Hochauflösend", pt: "Alta resolução", it: "Alta risoluzione",
             nl: "Hoge resolutie", ru: "Высокое разрешение", pl: "Wysoka rozdzielczość", tr: "Yüksek çözünürlük", sv: "Högupplöst", nb: "Høy oppløsning",
-            da: "Høj opløsning", fi: "Korkea resoluutio", zh: "高解析度", ja: "ハイレゾ", ko: "고해상도"
+            da: "Høj opløsning", fi: "Korkea resoluutio", zh: "高解析度", zhHant: "高解析度", ja: "ハイレゾ", ko: "고해상도"
         ),
         .stats_share_lossless_share: tr(
             en: "Lossless Share", es: "Proporción sin pérdida", fr: "Part sans perte", de: "Lossless-Anteil", pt: "Parte sem perdas", it: "Quota lossless",
             nl: "Lossless-aandeel", ru: "Доля без потерь", pl: "Udział bezstratny", tr: "Kayıpsız oran", sv: "Förlustfri andel", nb: "Tapsfri andel",
-            da: "Tabsfri andel", fi: "Häviötön osuus", zh: "无损占比", ja: "ロスレス比率", ko: "무손실 비율"
+            da: "Tabsfri andel", fi: "Häviötön osuus", zh: "无损占比", zhHant: "無損比例", ja: "ロスレス比率", ko: "무손실 비율"
         ),
         .stats_share_reset: tr(
             en: "Reset", es: "Restablecer", fr: "Réinitialiser", de: "Zurücksetzen", pt: "Repor", it: "Reimposta",
             nl: "Herstel", ru: "Сбросить", pl: "Resetuj", tr: "Sıfırla", sv: "Återställ", nb: "Tilbakestill",
-            da: "Nulstil", fi: "Nollaa", zh: "重置", ja: "リセット", ko: "재설정"
+            da: "Nulstil", fi: "Nollaa", zh: "重置", zhHant: "重置", ja: "リセット", ko: "재설정"
         ),
 
         // Settings rows
@@ -2641,6 +2723,7 @@ enum Strings {
             .dutch: "Automatisch afspelen", .russian: "Автовоспроизведение", .polish: "Autoodtwarzanie",
             .turkish: "Otomatik oynatma", .swedish: "Autouppspelning", .norwegian: "Autoavspilling",
             .danish: "Automatisk afspilning", .finnish: "Automaattinen toisto", .chinese: "自动播放",
+            .traditionalChinese: "自動播放",
             .japanese: "自動再生", .korean: "자동 재생",
         ],
         .settings_infinite_play: [
@@ -2649,6 +2732,7 @@ enum Strings {
             .dutch: "Oneindig afspelen", .russian: "Бесконечное воспроизведение", .polish: "Nieskończone odtwarzanie",
             .turkish: "Sonsuz oynatma", .swedish: "Oändlig uppspelning", .norwegian: "Uendelig avspilling",
             .danish: "Uendelig afspilning", .finnish: "Loputon toisto", .chinese: "无限播放",
+            .traditionalChinese: "無限播放",
             .japanese: "無限再生", .korean: "무한 재생",
         ],
         .settings_track_transition: [
@@ -2657,6 +2741,7 @@ enum Strings {
             .dutch: "Overgang tussen nummers", .russian: "Переход между треками", .polish: "Przejście między utworami",
             .turkish: "Parça geçişi", .swedish: "Spårövergång", .norwegian: "Sporovergang",
             .danish: "Sporovergang", .finnish: "Kappaleen siirtymä", .chinese: "曲目过渡",
+            .traditionalChinese: "曲目銜接",
             .japanese: "曲間のトランジション", .korean: "트랙 전환",
         ],
         .settings_gapless: [
@@ -2665,6 +2750,7 @@ enum Strings {
             .dutch: "Naadloos afspelen", .russian: "Воспроизведение без пауз", .polish: "Odtwarzanie bez przerw",
             .turkish: "Boşluksuz oynatma", .swedish: "Sömlös uppspelning", .norwegian: "Sømløs avspilling",
             .danish: "Sømløs afspilning", .finnish: "Tauoton toisto", .chinese: "无缝播放",
+            .traditionalChinese: "無間隙播放",
             .japanese: "ギャップレス再生", .korean: "갭리스 재생",
         ],
         .settings_gapless_mode: [
@@ -2673,6 +2759,7 @@ enum Strings {
             .dutch: "Naadloze modus", .russian: "Режим без пауз", .polish: "Tryb bez przerw",
             .turkish: "Boşluksuz oynatma modu", .swedish: "Sömlöst läge", .norwegian: "Sømløs modus",
             .danish: "Sømløs tilstand", .finnish: "Tauoton tila", .chinese: "无缝模式",
+            .traditionalChinese: "無間隙模式",
             .japanese: "ギャップレスモード", .korean: "갭리스 모드",
         ],
         .settings_gapless_default: [
@@ -2681,6 +2768,7 @@ enum Strings {
             .dutch: "Standaard", .russian: "По умолчанию", .polish: "Domyślny",
             .turkish: "Varsayılan", .swedish: "Standard", .norwegian: "Standard",
             .danish: "Standard", .finnish: "Oletus", .chinese: "默认",
+            .traditionalChinese: "預設",
             .japanese: "デフォルト", .korean: "기본값",
         ],
         .settings_gapless_experimental: [
@@ -2689,6 +2777,7 @@ enum Strings {
             .dutch: "Experimenteel", .russian: "Экспериментальный", .polish: "Eksperymentalny",
             .turkish: "Deneysel", .swedish: "Experimentellt", .norwegian: "Eksperimentell",
             .danish: "Eksperimentel", .finnish: "Kokeellinen", .chinese: "实验性",
+            .traditionalChinese: "實驗性",
             .japanese: "実験的", .korean: "실험적",
         ],
         .settings_shuffle_default: [
@@ -2697,6 +2786,7 @@ enum Strings {
             .dutch: "Standaard shuffle", .russian: "Перемешивать по умолчанию", .polish: "Domyślnie losowo",
             .turkish: "Varsayılan karıştır", .swedish: "Blanda som standard", .norwegian: "Bland som standard",
             .danish: "Bland som standard", .finnish: "Sekoita oletuksena", .chinese: "默认随机播放",
+            .traditionalChinese: "預設隨機播放",
             .japanese: "デフォルトでシャッフル", .korean: "기본 셔플",
         ],
         .settings_artwork_zoom: [
@@ -2705,6 +2795,7 @@ enum Strings {
             .dutch: "Albumhoes inzoomen bij afspelen", .russian: "Увеличение обложки при воспроизведении", .polish: "Powiększenie okładki przy odtwarzaniu",
             .turkish: "Çalarken kapak yakınlaştırma", .swedish: "Omslagszoom vid uppspelning", .norwegian: "Omslagszoom ved avspilling",
             .danish: "Omslagszoom ved afspilning", .finnish: "Kansikuvan zoomaus toistettaessa", .chinese: "播放时封面缩放",
+            .traditionalChinese: "播放時放大封面",
             .japanese: "再生時にアートワークをズーム", .korean: "재생 시 아트워크 확대",
         ],
         .settings_resume_interruption: [
@@ -2713,6 +2804,7 @@ enum Strings {
             .dutch: "Hervatten na onderbreking", .russian: "Возобновлять после прерывания", .polish: "Wznów po przerwaniu",
             .turkish: "Kesintiden sonra devam et", .swedish: "Återuppta efter avbrott", .norwegian: "Gjenoppta etter avbrudd",
             .danish: "Genoptag efter afbrydelse", .finnish: "Jatka keskeytyksen jälkeen", .chinese: "中断后继续播放",
+            .traditionalChinese: "中斷後繼續播放",
             .japanese: "中断後に再開", .korean: "중단 후 다시 재생",
         ],
         .settings_equalizer: [
@@ -2721,6 +2813,7 @@ enum Strings {
             .dutch: "Equalizer", .russian: "Эквалайзер", .polish: "Korektor",
             .turkish: "Ekolayzer", .swedish: "Equalizer", .norwegian: "Equalizer",
             .danish: "Equalizer", .finnish: "Taajuuskorjain", .chinese: "均衡器",
+            .traditionalChinese: "等化器",
             .japanese: "イコライザ", .korean: "이퀄라이저",
         ],
         .equalizer_autoeq_imports_title: [
@@ -2729,6 +2822,7 @@ enum Strings {
             .dutch: "AutoEQ-profiel toevoegen", .russian: "Добавить профиль AutoEQ", .polish: "Dodaj profil AutoEQ",
             .turkish: "AutoEQ profili ekle", .swedish: "Lägg till AutoEQ-profil", .norwegian: "Legg til AutoEQ-profil",
             .danish: "Tilføj AutoEQ-profil", .finnish: "Lisää AutoEQ-profiili", .chinese: "添加 AutoEQ 配置文件",
+            .traditionalChinese: "加入 AutoEQ 設定檔",
             .japanese: "AutoEQプロファイルを追加", .korean: "AutoEQ 프로필 추가",
         ],
         .equalizer_manage_autoeq_profiles: [
@@ -2737,6 +2831,7 @@ enum Strings {
             .dutch: "AutoEQ-profielen beheren", .russian: "Управление профилями AutoEQ", .polish: "Zarządzaj profilami AutoEQ",
             .turkish: "AutoEQ profillerini yönet", .swedish: "Hantera AutoEQ-profiler", .norwegian: "Administrer AutoEQ-profiler",
             .danish: "Administrer AutoEQ-profiler", .finnish: "Hallitse AutoEQ-profiileja", .chinese: "管理 AutoEQ 配置文件",
+            .traditionalChinese: "管理 AutoEQ 設定檔",
             .japanese: "AutoEQプロファイルを管理", .korean: "AutoEQ 프로필 관리",
         ],
         .equalizer_autoeq_manual_paste_hint: [
@@ -2745,6 +2840,7 @@ enum Strings {
             .dutch: "Kopieer de AutoEQ-tienbandstabel en voorversterking en plak ze hier.", .russian: "Скопируйте десятиполосную таблицу AutoEQ и предусиление, затем вставьте их сюда.", .polish: "Skopiuj dziesięciopasmową tabelę AutoEQ i przedwzmacniacz, a następnie wklej je tutaj.",
             .turkish: "AutoEQ'nin on bantlı tablosunu ve ön kazancını kopyalayıp buraya yapıştırın.", .swedish: "Kopiera AutoEQ:s tiobandstabell och förförstärkning och klistra in dem här.", .norwegian: "Kopier AutoEQs ti-båndstabell og forforsterkning og lim dem inn her.",
             .danish: "Kopiér AutoEQs tibåndstabel og forstærkning, og indsæt dem her.", .finnish: "Kopioi AutoEQ:n kymmenkaistainen taulukko ja esivahvistus ja liitä ne tähän.", .chinese: "复制 AutoEQ 的十频段表和前级增益，然后粘贴到这里。",
+            .traditionalChinese: "拷貝 AutoEQ 的十頻段表格和前級增益，然後貼到這裡。",
             .japanese: "AutoEQの10バンド表とプリアンプをコピーして、ここにペーストしてください。", .korean: "AutoEQ의 10밴드 표와 프리앰프를 복사해 여기에 붙여넣으세요.",
         ],
         .equalizer_autoeq_paste_ten_band: [
@@ -2753,6 +2849,7 @@ enum Strings {
             .dutch: "10-bands AutoEQ plakken", .russian: "Вставить 10-полосный AutoEQ", .polish: "Wklej 10-pasmowy AutoEQ",
             .turkish: "10 bantlı AutoEQ'yu yapıştır", .swedish: "Klistra in 10-bands AutoEQ", .norwegian: "Lim inn 10-bånds AutoEQ",
             .danish: "Indsæt 10-bånds AutoEQ", .finnish: "Liitä 10-kaistainen AutoEQ", .chinese: "粘贴 10 频段 AutoEQ",
+            .traditionalChinese: "貼上 10 頻段 AutoEQ",
             .japanese: "10バンドAutoEQをペースト", .korean: "10밴드 AutoEQ 붙여넣기",
         ],
         .equalizer_autoeq_manual_paste_success_title: [
@@ -2761,6 +2858,7 @@ enum Strings {
             .dutch: "10-bands AutoEQ toegevoegd", .russian: "10-полосный AutoEQ добавлен", .polish: "Dodano 10-pasmowy AutoEQ",
             .turkish: "10 bantlı AutoEQ eklendi", .swedish: "10-bands AutoEQ tillagt", .norwegian: "10-bånds AutoEQ lagt til",
             .danish: "10-bånds AutoEQ tilføjet", .finnish: "10-kaistainen AutoEQ lisätty", .chinese: "已添加 10 频段 AutoEQ",
+            .traditionalChinese: "已加入 10 頻段 AutoEQ",
             .japanese: "10バンドAutoEQを追加しました", .korean: "10밴드 AutoEQ가 추가되었습니다",
         ],
         .equalizer_autoeq_manual_paste_success_message: [
@@ -2769,6 +2867,7 @@ enum Strings {
             .dutch: "%1$@ is klaar en toegepast. Voorversterking: %2$@ dB.", .russian: "%1$@ готов и применён. Предусиление: %2$@ дБ.", .polish: "%1$@ jest gotowy i zastosowany. Przedwzmacniacz: %2$@ dB.",
             .turkish: "%1$@ hazır ve uygulandı. Ön kazanç: %2$@ dB.", .swedish: "%1$@ är klar och tillämpad. Förförstärkning: %2$@ dB.", .norwegian: "%1$@ er klar og brukt. Forforsterkning: %2$@ dB.",
             .danish: "%1$@ er klar og anvendt. Forforstærkning: %2$@ dB.", .finnish: "%1$@ on valmis ja käytössä. Esivahvistus: %2$@ dB.", .chinese: "%1$@ 已准备并应用。前级增益：%2$@ dB。",
+            .traditionalChinese: "%1$@ 已就緒並套用。前級增益：%2$@ dB。",
             .japanese: "%1$@を適用しました。プリアンプ：%2$@ dB。", .korean: "%1$@가 준비되어 적용되었습니다. 프리앰프: %2$@ dB.",
         ],
         .equalizer_profile_apply: [
@@ -2777,6 +2876,7 @@ enum Strings {
             .dutch: "Profiel toepassen", .russian: "Применить профиль", .polish: "Zastosuj profil",
             .turkish: "Profili uygula", .swedish: "Använd profil", .norwegian: "Bruk profil",
             .danish: "Anvend profil", .finnish: "Käytä profiilia", .chinese: "应用配置文件",
+            .traditionalChinese: "套用設定檔",
             .japanese: "プロファイルを適用", .korean: "프로필 적용",
         ],
         .equalizer_profile_assign_current_device: [
@@ -2785,6 +2885,7 @@ enum Strings {
             .dutch: "Gebruiken voor huidig audioapparaat", .russian: "Использовать для текущего аудиоустройства", .polish: "Użyj dla bieżącego urządzenia audio",
             .turkish: "Geçerli ses aygıtı için kullan", .swedish: "Använd för aktuell ljudenhet", .norwegian: "Bruk for gjeldende lydenhet",
             .danish: "Brug til den aktuelle lydenhed", .finnish: "Käytä nykyiselle äänilaitteelle", .chinese: "用于当前音频设备",
+            .traditionalChinese: "用於目前的音訊裝置",
             .japanese: "現在のオーディオデバイスに使用", .korean: "현재 오디오 기기에 사용",
         ],
         .equalizer_profile_delete: [
@@ -2793,6 +2894,7 @@ enum Strings {
             .dutch: "Profiel verwijderen", .russian: "Удалить профиль", .polish: "Usuń profil",
             .turkish: "Profili sil", .swedish: "Radera profil", .norwegian: "Slett profil",
             .danish: "Slet profil", .finnish: "Poista profiili", .chinese: "删除配置文件",
+            .traditionalChinese: "刪除設定檔",
             .japanese: "プロファイルを削除", .korean: "프로필 삭제",
         ],
         .equalizer_device_saved_assignments: [
@@ -2801,6 +2903,7 @@ enum Strings {
             .dutch: "Opgeslagen audioapparaten", .russian: "Сохранённые аудиоустройства", .polish: "Zapisane urządzenia audio",
             .turkish: "Kaydedilen ses aygıtları", .swedish: "Sparade ljudenheter", .norwegian: "Lagrede lydenheter",
             .danish: "Gemte lydenheder", .finnish: "Tallennetut äänilaitteet", .chinese: "已保存的音频设备",
+            .traditionalChinese: "已儲存的音訊裝置",
             .japanese: "保存済みのオーディオデバイス", .korean: "저장된 오디오 기기",
         ],
         .equalizer_device_remove: [
@@ -2809,6 +2912,7 @@ enum Strings {
             .dutch: "%1$@ verwijderen", .russian: "Удалить %1$@", .polish: "Usuń %1$@",
             .turkish: "%1$@ kaldır", .swedish: "Ta bort %1$@", .norwegian: "Fjern %1$@",
             .danish: "Fjern %1$@", .finnish: "Poista %1$@", .chinese: "移除 %1$@",
+            .traditionalChinese: "移除 %1$@",
             .japanese: "%1$@を削除", .korean: "%1$@ 제거",
         ],
         .equalizer_processing_model: en("Processing Model"),
@@ -2824,6 +2928,7 @@ enum Strings {
             .dutch: "Volumenormalisatie", .russian: "Нормализация громкости", .polish: "Normalizacja głośności",
             .turkish: "Ses normalleştirme", .swedish: "Volymnormalisering", .norwegian: "Volumnormalisering",
             .danish: "Volumennormalisering", .finnish: "Äänenvoimakkuuden normalisointi", .chinese: "音量标准化",
+            .traditionalChinese: "音量標準化",
             .japanese: "音量の正規化", .korean: "음량 정규화",
         ],
         .settings_mono_audio: [
@@ -2832,6 +2937,7 @@ enum Strings {
             .dutch: "Mono-audio", .russian: "Моно-звук", .polish: "Dźwięk mono",
             .turkish: "Mono ses", .swedish: "Monoljud", .norwegian: "Monolyd",
             .danish: "Monolyd", .finnish: "Monoääni", .chinese: "单声道",
+            .traditionalChinese: "單聲道音訊",
             .japanese: "モノラル音声", .korean: "모노 오디오",
         ],
         .settings_spatial_widener: [
@@ -2840,6 +2946,7 @@ enum Strings {
             .dutch: "3D ruimtelijke verbreder", .russian: "3D-расширение", .polish: "Poszerzacz przestrzeni 3D",
             .turkish: "3D uzamsal genişletici", .swedish: "3D-rumsvidgare", .norwegian: "3D-romutvider",
             .danish: "3D-rumudvider", .finnish: "3D-tilan laajennin", .chinese: "3D 空间扩展",
+            .traditionalChinese: "3D 空間擴展",
             .japanese: "3D 空間ワイドナー", .korean: "3D 공간 확장",
         ],
         .settings_wifi_quality: [
@@ -2848,6 +2955,7 @@ enum Strings {
             .dutch: "Wifi-kwaliteit", .russian: "Качество по Wi-Fi", .polish: "Jakość przez Wi-Fi",
             .turkish: "Wi-Fi kalitesi", .swedish: "Wi-Fi-kvalitet", .norwegian: "Wi-Fi-kvalitet",
             .danish: "Wi-Fi-kvalitet", .finnish: "Wi-Fi-laatu", .chinese: "Wi-Fi 音质",
+            .traditionalChinese: "Wi-Fi 品質",
             .japanese: "Wi-Fi 時の音質", .korean: "Wi-Fi 음질",
         ],
         .settings_cellular_quality: [
@@ -2856,6 +2964,7 @@ enum Strings {
             .dutch: "Mobiele kwaliteit", .russian: "Качество по моб. сети", .polish: "Jakość przez sieć komórkową",
             .turkish: "Hücresel kalite", .swedish: "Mobil kvalitet", .norwegian: "Mobilkvalitet",
             .danish: "Mobilkvalitet", .finnish: "Mobiilidatan laatu", .chinese: "蜂窝网络音质",
+            .traditionalChinese: "行動網路品質",
             .japanese: "モバイル通信時の音質", .korean: "셀룰러 음질",
         ],
         .settings_download_quality: [
@@ -2864,6 +2973,7 @@ enum Strings {
             .dutch: "Downloadkwaliteit (Albums/Nummers)", .russian: "Качество загрузки (Альбомы/Песни)", .polish: "Jakość pobierania (Albumy/Utwory)",
             .turkish: "İndirme kalitesi (Albümler/Şarkılar)", .swedish: "Nedladdningskvalitet (Album/Låtar)", .norwegian: "Nedlastingskvalitet (Album/Sanger)",
             .danish: "Downloadkvalitet (Album/Sange)", .finnish: "Latauksen laatu (Albumit/Kappaleet)", .chinese: "下载音质（专辑/歌曲）",
+            .traditionalChinese: "下載品質（專輯／歌曲）",
             .japanese: "ダウンロードの音質（アルバム/曲）", .korean: "다운로드 음질 (앨범/노래)",
         ],
         .settings_transcoding_format: [
@@ -2872,6 +2982,7 @@ enum Strings {
             .dutch: "Transcoderingsformaat", .russian: "Формат перекодирования", .polish: "Format transkodowania",
             .turkish: "Yeniden kodlama biçimi", .swedish: "Omkodningsformat", .norwegian: "Transkodingsformat",
             .danish: "Transkodningsformat", .finnish: "Transkoodausmuoto", .chinese: "转码格式",
+            .traditionalChinese: "轉碼格式",
             .japanese: "トランスコード形式", .korean: "트랜스코딩 형식",
         ],
         .settings_download_speed_limit: [
@@ -2880,6 +2991,7 @@ enum Strings {
             .dutch: "Downloadsnelheidslimiet", .russian: "Ограничение скорости загрузки", .polish: "Limit prędkości pobierania",
             .turkish: "İndirme hızı sınırı", .swedish: "Hastighetsgräns för nedladdning", .norwegian: "Hastighetsgrense for nedlasting",
             .danish: "Hastighedsgrænse for download", .finnish: "Latausnopeuden raja", .chinese: "下载速度限制",
+            .traditionalChinese: "下載速度限制",
             .japanese: "ダウンロード速度制限", .korean: "다운로드 속도 제한",
         ],
         .settings_download_storage_cap: [
@@ -2888,6 +3000,7 @@ enum Strings {
             .dutch: "Opslaglimiet voor downloads", .russian: "Лимит хранилища для загрузок", .polish: "Limit pamięci na pobrania",
             .turkish: "İndirme depolama sınırı", .swedish: "Lagringsgräns för nedladdningar", .norwegian: "Lagringsgrense for nedlastinger",
             .danish: "Lagringsgrænse for downloads", .finnish: "Latausten tallennusraja", .chinese: "下载存储上限",
+            .traditionalChinese: "下載儲存空間上限",
             .japanese: "ダウンロードの保存上限", .korean: "다운로드 저장 한도",
         ],
         .settings_auto_evict: [
@@ -2896,6 +3009,7 @@ enum Strings {
             .dutch: "Oudste automatisch verwijderen", .russian: "Удалять старые автоматически", .polish: "Automatycznie usuwaj najstarsze",
             .turkish: "En eskileri otomatik sil", .swedish: "Ta bort äldsta automatiskt", .norwegian: "Fjern eldste automatisk",
             .danish: "Fjern ældste automatisk", .finnish: "Poista vanhimmat automaattisesti", .chinese: "自动清除最旧的",
+            .traditionalChinese: "自動移除最舊項目",
             .japanese: "古いものを自動削除", .korean: "오래된 항목 자동 삭제",
         ],
         .download_manager_title: en("Download Manager"),
@@ -2921,387 +3035,387 @@ enum Strings {
             de: "Mediathek durchsuchen", pt: "Pesquisar na biblioteca", it: "Cerca nella libreria",
             nl: "Zoek in je bibliotheek", ru: "Поиск в медиатеке", pl: "Szukaj w bibliotece",
             tr: "Kitaplığında ara", sv: "Sök i biblioteket", nb: "Søk i biblioteket",
-            da: "Søg i biblioteket", fi: "Hae kirjastosta", zh: "搜索你的音乐库", ja: "ライブラリを検索", ko: "라이브러리 검색"
+            da: "Søg i biblioteket", fi: "Hae kirjastosta", zh: "搜索你的音乐库", zhHant: "搜尋你的資料庫", ja: "ライブラリを検索", ko: "라이브러리 검색"
         ),
         .search_recent: tr(
             en: "Recent", es: "Recientes", fr: "Récents", de: "Zuletzt", pt: "Recentes", it: "Recenti",
             nl: "Recent", ru: "Недавние", pl: "Ostatnie", tr: "Son aramalar", sv: "Senaste", nb: "Nylig",
-            da: "Seneste", fi: "Viimeisimmät", zh: "最近", ja: "最近", ko: "최근"
+            da: "Seneste", fi: "Viimeisimmät", zh: "最近", zhHant: "最近", ja: "最近", ko: "최근"
         ),
         .search_no_results: tr(
             en: "No results for \"%@\"", es: "Sin resultados para «%@»", fr: "Aucun résultat pour « %@ »",
             de: "Keine Ergebnisse für „%@“", pt: "Nenhum resultado para “%@”", it: "Nessun risultato per “%@”",
             nl: "Geen resultaten voor “%@”", ru: "Нет результатов для «%@»", pl: "Brak wyników dla „%@”",
             tr: "“%@” için sonuç yok", sv: "Inga resultat för ”%@”", nb: "Ingen resultater for «%@»",
-            da: "Ingen resultater for “%@”", fi: "Ei tuloksia haulle ”%@”", zh: "没有“%@”的结果", ja: "「%@」の結果がありません", ko: "“%@” 검색 결과 없음"
+            da: "Ingen resultater for “%@”", fi: "Ei tuloksia haulle ”%@”", zh: "没有“%@”的结果", zhHant: "沒有「%@」的結果", ja: "「%@」の結果がありません", ko: "“%@” 검색 결과 없음"
         ),
         .search_from_lyrics: tr(
             en: "From Lyrics", es: "Por letras", fr: "Dans les paroles", de: "Aus Songtexten", pt: "Nas letras", it: "Dai testi",
             nl: "Uit songteksten", ru: "По тексту", pl: "Z tekstów", tr: "Şarkı sözlerinden", sv: "Från låttexter", nb: "Fra sangtekster",
-            da: "Fra sangtekster", fi: "Sanoituksista", zh: "来自歌词", ja: "歌詞から", ko: "가사에서"
+            da: "Fra sangtekster", fi: "Sanoituksista", zh: "来自歌词", zhHant: "來自歌詞", ja: "歌詞から", ko: "가사에서"
         ),
         .media_albums: tr(
             en: "Albums", es: "Álbumes", fr: "Albums", de: "Alben", pt: "Álbuns", it: "Album",
             nl: "Albums", ru: "Альбомы", pl: "Albumy", tr: "Albümler", sv: "Album", nb: "Album",
-            da: "Album", fi: "Albumit", zh: "专辑", ja: "アルバム", ko: "앨범"
+            da: "Album", fi: "Albumit", zh: "专辑", zhHant: "專輯", ja: "アルバム", ko: "앨범"
         ),
         .media_genres: tr(
             en: "Genres", es: "Géneros", fr: "Genres", de: "Genres", pt: "Géneros", it: "Generi",
             nl: "Genres", ru: "Жанры", pl: "Gatunki", tr: "Türler", sv: "Genrer", nb: "Sjangere",
-            da: "Genrer", fi: "Genret", zh: "流派", ja: "ジャンル", ko: "장르"
+            da: "Genrer", fi: "Genret", zh: "流派", zhHant: "類型", ja: "ジャンル", ko: "장르"
         ),
         .artist_about: tr(
             en: "About %@", es: "Acerca de %@", fr: "À propos de %@", de: "Über %@", pt: "Sobre %@", it: "Informazioni su %@",
             nl: "Over %@", ru: "О %@", pl: "O %@", tr: "%@ hakkında", sv: "Om %@", nb: "Om %@",
-            da: "Om %@", fi: "Tietoja: %@", zh: "关于 %@", ja: "%@について", ko: "%@ 정보"
+            da: "Om %@", fi: "Tietoja: %@", zh: "关于 %@", zhHant: "關於 %@", ja: "%@について", ko: "%@ 정보"
         ),
         .action_more: tr(
             en: "More", es: "Más", fr: "Plus", de: "Mehr", pt: "Mais", it: "Altro",
             nl: "Meer", ru: "Ещё", pl: "Więcej", tr: "Daha fazla", sv: "Mer", nb: "Mer",
-            da: "Mere", fi: "Lisää", zh: "更多", ja: "もっと見る", ko: "더 보기"
+            da: "Mere", fi: "Lisää", zh: "更多", zhHant: "更多", ja: "もっと見る", ko: "더 보기"
         ),
         .action_add: tr(
             en: "Add", es: "Añadir", fr: "Ajouter", de: "Hinzufügen", pt: "Adicionar", it: "Aggiungi",
             nl: "Toevoegen", ru: "Добавить", pl: "Dodaj", tr: "Ekle", sv: "Lägg till", nb: "Legg til",
-            da: "Tilføj", fi: "Lisää", zh: "添加", ja: "追加", ko: "추가"
+            da: "Tilføj", fi: "Lisää", zh: "添加", zhHant: "加入", ja: "追加", ko: "추가"
         ),
         .album_disc: tr(
             en: "Disc %d", es: "Disco %d", fr: "Disque %d", de: "CD %d", pt: "Disco %d", it: "Disco %d",
             nl: "Schijf %d", ru: "Диск %d", pl: "Płyta %d", tr: "Disk %d", sv: "Skiva %d", nb: "Plate %d",
-            da: "Disk %d", fi: "Levy %d", zh: "碟 %d", ja: "ディスク %d", ko: "디스크 %d"
+            da: "Disk %d", fi: "Levy %d", zh: "碟 %d", zhHant: "光碟 %d", ja: "ディスク %d", ko: "디스크 %d"
         ),
         .album_add_to_playlist_q: tr(
             en: "Add to playlist?", es: "¿Añadir a la lista?", fr: "Ajouter à la playlist ?", de: "Zur Playlist hinzufügen?",
             pt: "Adicionar à lista?", it: "Aggiungere alla playlist?", nl: "Toevoegen aan afspeellijst?", ru: "Добавить в плейлист?",
             pl: "Dodać do playlisty?", tr: "Çalma listesine eklensin mi?", sv: "Lägg till i spellista?", nb: "Legg til i spilleliste?",
-            da: "Føj til playliste?", fi: "Lisätäänkö soittolistalle?", zh: "添加到播放列表？", ja: "プレイリストに追加しますか？", ko: "재생목록에 추가할까요?"
+            da: "Føj til playliste?", fi: "Lisätäänkö soittolistalle?", zh: "添加到播放列表？", zhHant: "要加入播放列表嗎？", ja: "プレイリストに追加しますか？", ko: "재생목록에 추가할까요?"
         ),
         .album_add_song_confirm: tr(
             en: "Add \"%@\" to \"%@\"?", es: "¿Añadir «%@» a «%@»?", fr: "Ajouter « %@ » à « %@ » ?", de: "„%@“ zu „%@“ hinzufügen?",
             pt: "Adicionar “%@” a “%@”?", it: "Aggiungere “%@” a “%@”?", nl: "“%@” toevoegen aan “%@”?", ru: "Добавить «%@» в «%@»?",
             pl: "Dodać „%@” do „%@”?", tr: "“%@” şu listeye eklensin mi: “%@”?", sv: "Lägg till ”%@” i ”%@”?", nb: "Legg til «%@» i «%@»?",
-            da: "Føj “%@” til “%@”?", fi: "Lisätäänkö ”%@” listalle ”%@”?", zh: "将“%@”添加到“%@”？", ja: "「%@」を「%@」に追加しますか？", ko: "“%@”을(를) “%@”에 추가할까요?"
+            da: "Føj “%@” til “%@”?", fi: "Lisätäänkö ”%@” listalle ”%@”?", zh: "将“%@”添加到“%@”？", zhHant: "要將「%@」加入「%@」嗎？", ja: "「%@」を「%@」に追加しますか？", ko: "“%@”을(를) “%@”에 추가할까요?"
         ),
         .queue_continue_playing: tr(
             en: "Continue Playing", es: "Seguir reproduciendo", fr: "Continuer la lecture", de: "Weiter abspielen",
             pt: "Continuar a reprodução", it: "Continua la riproduzione", nl: "Verder afspelen", ru: "Продолжить воспроизведение",
             pl: "Kontynuuj odtwarzanie", tr: "Çalmaya devam et", sv: "Fortsätt spela", nb: "Fortsett avspilling",
-            da: "Fortsæt afspilning", fi: "Jatka toistoa", zh: "继续播放", ja: "再生を続ける", ko: "계속 재생"
+            da: "Fortsæt afspilning", fi: "Jatka toistoa", zh: "继续播放", zhHant: "繼續播放", ja: "再生を続ける", ko: "계속 재생"
         ),
         .lyrics_none: tr(
             en: "No lyrics available", es: "No hay letra disponible", fr: "Aucune parole disponible", de: "Kein Songtext verfügbar",
             pt: "Nenhuma letra disponível", it: "Nessun testo disponibile", nl: "Geen songtekst beschikbaar", ru: "Текст недоступен",
             pl: "Brak tekstu", tr: "Şarkı sözü yok", sv: "Inga låttexter tillgängliga", nb: "Ingen sangtekst tilgjengelig",
-            da: "Ingen sangtekst tilgængelig", fi: "Sanoituksia ei saatavilla", zh: "暂无歌词", ja: "歌詞がありません", ko: "가사 없음"
+            da: "Ingen sangtekst tilgængelig", fi: "Sanoituksia ei saatavilla", zh: "暂无歌词", zhHant: "沒有可用的歌詞", ja: "歌詞がありません", ko: "가사 없음"
         ),
         .search_prompt: tr(
             en: "Albums, Artists, Songs, Lyrics", es: "Álbumes, artistas, canciones, letras", fr: "Albums, artistes, titres, paroles",
             de: "Alben, Künstler, Songs, Songtexte", pt: "Álbuns, artistas, músicas, letras", it: "Album, artisti, brani, testi",
             nl: "Albums, artiesten, nummers, songteksten", ru: "Альбомы, артисты, песни, тексты", pl: "Albumy, wykonawcy, utwory, teksty",
             tr: "Albümler, sanatçılar, şarkılar, sözler", sv: "Album, artister, låtar, låttexter", nb: "Album, artister, låter, sangtekster",
-            da: "Album, kunstnere, sange, sangtekster", fi: "Albumit, artistit, kappaleet, sanoitukset", zh: "专辑、艺人、歌曲、歌词", ja: "アルバム、アーティスト、曲、歌詞", ko: "앨범, 아티스트, 곡, 가사"
+            da: "Album, kunstnere, sange, sangtekster", fi: "Albumit, artistit, kappaleet, sanoitukset", zh: "专辑、艺人、歌曲、歌词", zhHant: "專輯、藝人、歌曲、歌詞", ja: "アルバム、アーティスト、曲、歌詞", ko: "앨범, 아티스트, 곡, 가사"
         ),
         .search_browse_genres: tr(
             en: "Browse Genres", es: "Explorar géneros", fr: "Parcourir les genres", de: "Genres durchsuchen",
             pt: "Explorar géneros", it: "Sfoglia i generi", nl: "Genres verkennen", ru: "Обзор жанров",
             pl: "Przeglądaj gatunki", tr: "Türlere göz at", sv: "Bläddra bland genrer", nb: "Bla i sjangere",
-            da: "Gennemse genrer", fi: "Selaa genrejä", zh: "浏览流派", ja: "ジャンルを見る", ko: "장르 둘러보기"
+            da: "Gennemse genrer", fi: "Selaa genrejä", zh: "浏览流派", zhHant: "瀏覽類型", ja: "ジャンルを見る", ko: "장르 둘러보기"
         ),
         .search_genre_mix_subtitle: tr(
             en: "Made from %@ songs", es: "Creada con canciones de %@", fr: "Composé de titres %@", de: "Aus %@-Songs",
             pt: "Feito com músicas de %@", it: "Creato con brani %@", nl: "Samengesteld uit %@-nummers", ru: "Из песен в жанре %@",
             pl: "Z utworów %@", tr: "%@ şarkılarından oluşur", sv: "Skapad av %@-låtar", nb: "Laget av %@-låter",
-            da: "Lavet af %@-sange", fi: "Koottu %@-kappaleista", zh: "由%@歌曲组成", ja: "%@の曲で構成", ko: "%@ 곡으로 구성"
+            da: "Lavet af %@-sange", fi: "Koottu %@-kappaleista", zh: "由%@歌曲组成", zhHant: "由 %@ 歌曲組成", ja: "%@の曲で構成", ko: "%@ 곡으로 구성"
         ),
         .media_album_count: tr(
             en: "%d albums", es: "%d álbumes", fr: "%d albums", de: "%d Alben", pt: "%d álbuns", it: "%d album",
             nl: "%d albums", ru: "%d альбомов", pl: "%d albumów", tr: "%d albüm", sv: "%d album", nb: "%d album",
-            da: "%d album", fi: "%d albumia", zh: "%d 张专辑", ja: "%d 枚のアルバム", ko: "앨범 %d개"
+            da: "%d album", fi: "%d albumia", zh: "%d 张专辑", zhHant: "%d 張專輯", ja: "%d 枚のアルバム", ko: "앨범 %d개"
         ),
 
         // MARK: Artist / Album detail
         .toast_added_to: tr(
             en: "Added to %@", es: "Añadido a %@", fr: "Ajouté à %@", de: "Zu %@ hinzugefügt", pt: "Adicionado a %@", it: "Aggiunto a %@",
             nl: "Toegevoegd aan %@", ru: "Добавлено в %@", pl: "Dodano do %@", tr: "%@ listesine eklendi", sv: "Tillagd i %@", nb: "Lagt til i %@",
-            da: "Føjet til %@", fi: "Lisätty: %@", zh: "已添加到%@", ja: "%@に追加しました", ko: "%@에 추가됨"
+            da: "Føjet til %@", fi: "Lisätty: %@", zh: "已添加到%@", zhHant: "已加入 %@", ja: "%@に追加しました", ko: "%@에 추가됨"
         ),
         .section_top_songs: tr(
             en: "Top Songs", es: "Mejores canciones", fr: "Titres populaires", de: "Top-Songs", pt: "Melhores músicas", it: "Brani migliori",
             nl: "Topnummers", ru: "Популярные песни", pl: "Najlepsze utwory", tr: "En iyi şarkılar", sv: "Topplåtar", nb: "Topplåter",
-            da: "Topnumre", fi: "Suosituimmat kappaleet", zh: "热门歌曲", ja: "人気の曲", ko: "인기 곡"
+            da: "Topnumre", fi: "Suosituimmat kappaleet", zh: "热门歌曲", zhHant: "熱門歌曲", ja: "人気の曲", ko: "인기 곡"
         ),
         .section_liked_songs: tr(
             en: "Liked Songs", es: "Canciones favoritas", fr: "Titres aimés", de: "Gemochte Songs", pt: "Músicas curtidas", it: "Brani preferiti",
             nl: "Favoriete nummers", ru: "Понравившиеся", pl: "Polubione utwory", tr: "Beğenilen şarkılar", sv: "Gillade låtar", nb: "Likede låter",
-            da: "Foretrukne numre", fi: "Tykätyt kappaleet", zh: "喜欢的歌曲", ja: "お気に入りの曲", ko: "좋아요 표시한 곡"
+            da: "Foretrukne numre", fi: "Tykätyt kappaleet", zh: "喜欢的歌曲", zhHant: "喜愛的歌曲", ja: "お気に入りの曲", ko: "좋아요 표시한 곡"
         ),
         .section_appeared_on: tr(
             en: "Appeared On", es: "Apareció en", fr: "Apparaît sur", de: "Mitgewirkt auf", pt: "Apareceu em", it: "Appare in",
             nl: "Verschenen op", ru: "Участие в", pl: "Wystąpił na", tr: "Yer aldığı albümler", sv: "Medverkar på", nb: "Medvirker på",
-            da: "Medvirker på", fi: "Esiintyy albumeilla", zh: "参与专辑", ja: "参加作品", ko: "참여 앨범"
+            da: "Medvirker på", fi: "Esiintyy albumeilla", zh: "参与专辑", zhHant: "參與作品", ja: "参加作品", ko: "참여 앨범"
         ),
         .section_similar_artists: tr(
             en: "Similar Artists", es: "Artistas similares", fr: "Artistes similaires", de: "Ähnliche Künstler", pt: "Artistas semelhantes", it: "Artisti simili",
             nl: "Vergelijkbare artiesten", ru: "Похожие артисты", pl: "Podobni wykonawcy", tr: "Benzer sanatçılar", sv: "Liknande artister", nb: "Lignende artister",
-            da: "Lignende kunstnere", fi: "Samankaltaiset artistit", zh: "相似艺人", ja: "似たアーティスト", ko: "비슷한 아티스트"
+            da: "Lignende kunstnere", fi: "Samankaltaiset artistit", zh: "相似艺人", zhHant: "相似藝人", ja: "似たアーティスト", ko: "비슷한 아티스트"
         ),
         .stat_total_plays: tr(
             en: "Total Plays", es: "Reproducciones totales", fr: "Lectures totales", de: "Wiedergaben gesamt", pt: "Reproduções totais", it: "Riproduzioni totali",
             nl: "Totaal afgespeeld", ru: "Всего прослушиваний", pl: "Łączne odtworzenia", tr: "Toplam çalma", sv: "Totalt antal spelningar", nb: "Totalt antall avspillinger",
-            da: "Afspilninger i alt", fi: "Toistoja yhteensä", zh: "总播放次数", ja: "総再生回数", ko: "총 재생 횟수"
+            da: "Afspilninger i alt", fi: "Toistoja yhteensä", zh: "总播放次数", zhHant: "總播放次數", ja: "総再生回数", ko: "총 재생 횟수"
         ),
         .stat_active_since: tr(
             en: "Active Since", es: "Activo desde", fr: "Actif depuis", de: "Aktiv seit", pt: "Ativo desde", it: "Attivo dal",
             nl: "Actief sinds", ru: "Активен с", pl: "Aktywny od", tr: "Şu tarihten beri aktif", sv: "Aktiv sedan", nb: "Aktiv siden",
-            da: "Aktiv siden", fi: "Aktiivinen vuodesta", zh: "活跃始于", ja: "活動開始", ko: "활동 시작"
+            da: "Aktiv siden", fi: "Aktiivinen vuodesta", zh: "活跃始于", zhHant: "活躍始於", ja: "活動開始", ko: "활동 시작"
         ),
         .stat_years_active: tr(
             en: "Years Active", es: "Años activo", fr: "Années d'activité", de: "Aktive Jahre", pt: "Anos ativo", it: "Anni di attività",
             nl: "Jaren actief", ru: "Годы активности", pl: "Lata aktywności", tr: "Aktif yıllar", sv: "Aktiva år", nb: "Aktive år",
-            da: "Aktive år", fi: "Aktiiviset vuodet", zh: "活跃年份", ja: "活動年数", ko: "활동 연수"
+            da: "Aktive år", fi: "Aktiiviset vuodet", zh: "活跃年份", zhHant: "活躍年份", ja: "活動年数", ko: "활동 연수"
         ),
         .a11y_see_all: tr(
             en: "See all %@", es: "Ver todo: %@", fr: "Voir tout : %@", de: "Alle anzeigen: %@", pt: "Ver tudo: %@", it: "Vedi tutti: %@",
             nl: "Alles tonen: %@", ru: "Показать все: %@", pl: "Zobacz wszystko: %@", tr: "Tümünü gör: %@", sv: "Visa alla: %@", nb: "Se alle: %@",
-            da: "Se alle: %@", fi: "Näytä kaikki: %@", zh: "查看全部%@", ja: "%@をすべて表示", ko: "%@ 모두 보기"
+            da: "Se alle: %@", fi: "Näytä kaikki: %@", zh: "查看全部%@", zhHant: "查看所有 %@", ja: "%@をすべて表示", ko: "%@ 모두 보기"
         ),
 
         // MARK: Artist profile (Apple Music style)
         .artist_featured: tr(
             en: "Featured", es: "Destacado", fr: "À la une", de: "Empfohlen", pt: "Destaque", it: "In evidenza",
             nl: "Uitgelicht", ru: "Избранное", pl: "Wyróżnione", tr: "Öne çıkan", sv: "Utvalt", nb: "Utvalgt",
-            da: "Fremhævet", fi: "Nostot", zh: "精选", ja: "注目", ko: "추천"
+            da: "Fremhævet", fi: "Nostot", zh: "精选", zhHant: "精選", ja: "注目", ko: "추천"
         ),
         .artist_featured_release: tr(
             en: "Featured Release", es: "Lanzamiento destacado", fr: "Sortie à la une", de: "Empfohlene Veröffentlichung", pt: "Lançamento em destaque", it: "Uscita in evidenza",
             nl: "Uitgelichte release", ru: "Избранный релиз", pl: "Wyróżnione wydanie", tr: "Öne çıkan sürüm", sv: "Utvald release", nb: "Utvalgt utgivelse",
-            da: "Fremhævet udgivelse", fi: "Nostettu julkaisu", zh: "精选发行", ja: "注目のリリース", ko: "추천 발매"
+            da: "Fremhævet udgivelse", fi: "Nostettu julkaisu", zh: "精选发行", zhHant: "精選作品", ja: "注目のリリース", ko: "추천 발매"
         ),
         .artist_biography: tr(
             en: "Biography", es: "Biografía", fr: "Biographie", de: "Biografie", pt: "Biografia", it: "Biografia",
             nl: "Biografie", ru: "Биография", pl: "Biografia", tr: "Biyografi", sv: "Biografi", nb: "Biografi",
-            da: "Biografi", fi: "Elämäkerta", zh: "传记", ja: "バイオグラフィー", ko: "약력"
+            da: "Biografi", fi: "Elämäkerta", zh: "传记", zhHant: "簡介", ja: "バイオグラフィー", ko: "약력"
         ),
         .artist_latest_release: tr(
             en: "Latest Release", es: "Último lanzamiento", fr: "Dernière sortie", de: "Neueste Veröffentlichung", pt: "Último lançamento", it: "Ultima uscita",
             nl: "Nieuwste release", ru: "Последний релиз", pl: "Najnowsze wydanie", tr: "Son sürüm", sv: "Senaste släppet", nb: "Siste utgivelse",
-            da: "Seneste udgivelse", fi: "Uusin julkaisu", zh: "最新发行", ja: "最新リリース", ko: "최신 발매"
+            da: "Seneste udgivelse", fi: "Uusin julkaisu", zh: "最新发行", zhHant: "最新作品", ja: "最新リリース", ko: "최신 발매"
         ),
         .artist_albums_and_singles: tr(
             en: "Albums & Singles", es: "Álbumes y sencillos", fr: "Albums et singles", de: "Alben & Singles", pt: "Álbuns e singles", it: "Album e singoli",
             nl: "Albums en singles", ru: "Альбомы и синглы", pl: "Albumy i single", tr: "Albümler ve single'lar", sv: "Album och singlar", nb: "Album og singler",
-            da: "Albummer og singler", fi: "Albumit ja singlet", zh: "专辑与单曲", ja: "アルバムとシングル", ko: "앨범 및 싱글"
+            da: "Albummer og singler", fi: "Albumit ja singlet", zh: "专辑与单曲", zhHant: "專輯與單曲", ja: "アルバムとシングル", ko: "앨범 및 싱글"
         ),
         .artist_appears_on: tr(
             en: "Appears On", es: "Aparece en", fr: "Apparaît sur", de: "Erscheint auf", pt: "Aparece em", it: "Appare in",
             nl: "Verschijnt op", ru: "Появляется на", pl: "Pojawia się na", tr: "Yer aldığı", sv: "Medverkar på", nb: "Opptrer på",
-            da: "Medvirker på", fi: "Esiintyy", zh: "参与作品", ja: "参加作品", ko: "참여"
+            da: "Medvirker på", fi: "Esiintyy", zh: "参与作品", zhHant: "參與作品", ja: "参加作品", ko: "참여"
         ),
         .action_artist_info: tr(
             en: "Artist Info", es: "Información del artista", fr: "Infos sur l'artiste", de: "Künstler-Info", pt: "Informações do artista", it: "Info artista",
             nl: "Artiestinfo", ru: "Об артисте", pl: "Informacje o wykonawcy", tr: "Sanatçı bilgisi", sv: "Artistinfo", nb: "Artistinfo",
-            da: "Kunstnerinfo", fi: "Artistin tiedot", zh: "艺人信息", ja: "アーティスト情報", ko: "아티스트 정보"
+            da: "Kunstnerinfo", fi: "Artistin tiedot", zh: "艺人信息", zhHant: "藝人資訊", ja: "アーティスト情報", ko: "아티스트 정보"
         ),
 
         // MARK: Album detail: audio quality + info popover
         .action_less: tr(
             en: "Less", es: "Menos", fr: "Moins", de: "Weniger", pt: "Menos", it: "Meno",
             nl: "Minder", ru: "Свернуть", pl: "Mniej", tr: "Daha az", sv: "Mindre", nb: "Mindre",
-            da: "Mindre", fi: "Vähemmän", zh: "收起", ja: "閉じる", ko: "접기"
+            da: "Mindre", fi: "Vähemmän", zh: "收起", zhHant: "收起", ja: "閉じる", ko: "접기"
         ),
         .quality_hires_lossless: tr(
             en: "Hi-Res Lossless", es: "Hi-Res sin pérdida", fr: "Hi-Res Lossless", de: "Hi-Res Lossless", pt: "Hi-Res sem perdas", it: "Hi-Res Lossless",
             nl: "Hi-Res Lossless", ru: "Hi-Res без потерь", pl: "Hi-Res bezstratny", tr: "Hi-Res Kayıpsız", sv: "Hi-Res förlustfri", nb: "Hi-Res tapsfri",
-            da: "Hi-Res tabsfri", fi: "Hi-Res häviötön", zh: "高解析度无损", ja: "ハイレゾロスレス", ko: "고해상도 무손실"
+            da: "Hi-Res tabsfri", fi: "Hi-Res häviötön", zh: "高解析度无损", zhHant: "高解析度無損", ja: "ハイレゾロスレス", ko: "고해상도 무손실"
         ),
         .quality_lossless: tr(
             en: "Lossless", es: "Sin pérdida", fr: "Lossless", de: "Verlustfrei", pt: "Sem perdas", it: "Lossless",
             nl: "Lossless", ru: "Без потерь", pl: "Bezstratny", tr: "Kayıpsız", sv: "Förlustfri", nb: "Tapsfri",
-            da: "Tabsfri", fi: "Häviötön", zh: "无损", ja: "ロスレス", ko: "무손실"
+            da: "Tabsfri", fi: "Häviötön", zh: "无损", zhHant: "無損", ja: "ロスレス", ko: "무손실"
         ),
         .quality_lossy: tr(
             en: "Lossy", es: "Con pérdida", fr: "Avec perte", de: "Verlustbehaftet", pt: "Com perdas", it: "Con perdita",
             nl: "Lossy", ru: "С потерями", pl: "Stratny", tr: "Kayıplı", sv: "Förstörande", nb: "Tapsbasert",
-            da: "Tabsbehæftet", fi: "Häviöllinen", zh: "有损", ja: "非可逆", ko: "손실"
+            da: "Tabsbehæftet", fi: "Häviöllinen", zh: "有损", zhHant: "有損", ja: "非可逆", ko: "손실"
         ),
         .album_more_by: tr(
             en: "More by %@", es: "Más de %@", fr: "Plus de %@", de: "Mehr von %@", pt: "Mais de %@", it: "Altro di %@",
             nl: "Meer van %@", ru: "Ещё от %@", pl: "Więcej od %@", tr: "%@ sanatçısından daha fazlası", sv: "Mer av %@", nb: "Mer av %@",
-            da: "Mere af %@", fi: "Lisää: %@", zh: "更多%@的作品", ja: "%@の他の作品", ko: "%@의 다른 음악"
+            da: "Mere af %@", fi: "Lisää: %@", zh: "更多%@的作品", zhHant: "更多 %@ 的作品", ja: "%@の他の作品", ko: "%@의 다른 음악"
         ),
         .album_quality_lossy_title: tr(
             en: "Lossy Album", es: "Álbum con pérdida", fr: "Album avec perte", de: "Verlustbehaftetes Album", pt: "Álbum com perdas", it: "Album con perdita",
             nl: "Lossy album", ru: "Альбом с потерями", pl: "Album stratny", tr: "Kayıplı albüm", sv: "Förstörande album", nb: "Tapsbasert album",
-            da: "Tabsbehæftet album", fi: "Häviöllinen albumi", zh: "有损专辑", ja: "非可逆アルバム", ko: "손실 앨범"
+            da: "Tabsbehæftet album", fi: "Häviöllinen albumi", zh: "有损专辑", zhHant: "有損專輯", ja: "非可逆アルバム", ko: "손실 앨범"
         ),
         .album_quality_hires_title: tr(
             en: "Hi-Res Lossless Album", es: "Álbum Hi-Res sin pérdida", fr: "Album Hi-Res Lossless", de: "Hi-Res-Lossless-Album", pt: "Álbum Hi-Res sem perdas", it: "Album Hi-Res Lossless",
             nl: "Hi-Res Lossless-album", ru: "Альбом Hi-Res без потерь", pl: "Album Hi-Res bezstratny", tr: "Hi-Res kayıpsız albüm", sv: "Hi-Res förlustfritt album", nb: "Hi-Res tapsfritt album",
-            da: "Hi-Res tabsfrit album", fi: "Hi-Res häviötön albumi", zh: "高解析度无损专辑", ja: "ハイレゾロスレスアルバム", ko: "고해상도 무손실 앨범"
+            da: "Hi-Res tabsfrit album", fi: "Hi-Res häviötön albumi", zh: "高解析度无损专辑", zhHant: "高解析度無損專輯", ja: "ハイレゾロスレスアルバム", ko: "고해상도 무손실 앨범"
         ),
         .album_quality_lossless_title: tr(
             en: "Lossless Album", es: "Álbum sin pérdida", fr: "Album Lossless", de: "Verlustfreies Album", pt: "Álbum sem perdas", it: "Album Lossless",
             nl: "Lossless-album", ru: "Альбом без потерь", pl: "Album bezstratny", tr: "Kayıpsız albüm", sv: "Förlustfritt album", nb: "Tapsfritt album",
-            da: "Tabsfrit album", fi: "Häviötön albumi", zh: "无损专辑", ja: "ロスレスアルバム", ko: "무손실 앨범"
+            da: "Tabsfrit album", fi: "Häviötön albumi", zh: "无损专辑", zhHant: "無損專輯", ja: "ロスレスアルバム", ko: "무손실 앨범"
         ),
         .album_quality_mixed_title: tr(
             en: "Mixed Quality Album", es: "Álbum de calidad mixta", fr: "Album de qualité mixte", de: "Album mit gemischter Qualität", pt: "Álbum de qualidade mista", it: "Album a qualità mista",
             nl: "Album met gemengde kwaliteit", ru: "Альбом смешанного качества", pl: "Album o mieszanej jakości", tr: "Karışık kaliteli albüm", sv: "Album med blandad kvalitet", nb: "Album med blandet kvalitet",
-            da: "Album med blandet kvalitet", fi: "Sekalaatuinen albumi", zh: "混合音质专辑", ja: "音質混在アルバム", ko: "혼합 품질 앨범"
+            da: "Album med blandet kvalitet", fi: "Sekalaatuinen albumi", zh: "混合音质专辑", zhHant: "混合品質專輯", ja: "音質混在アルバム", ko: "혼합 품질 앨범"
         ),
         .album_quality_lossy_desc: tr(
             en: "All %d tracks use a lossy format.", es: "Las %d pistas usan un formato con pérdida.", fr: "Les %d titres utilisent un format avec perte.", de: "Alle %d Titel verwenden ein verlustbehaftetes Format.", pt: "As %d faixas usam um formato com perdas.", it: "Tutti i %d brani usano un formato con perdita.",
             nl: "Alle %d nummers gebruiken een lossy formaat.", ru: "Все %d треков используют формат с потерями.", pl: "Wszystkie %d utwory używają formatu stratnego.", tr: "%d parçanın tümü kayıplı format kullanıyor.", sv: "Alla %d spår använder ett förstörande format.", nb: "Alle %d spor bruker et tapsbasert format.",
-            da: "Alle %d numre bruger et tabsbehæftet format.", fi: "Kaikki %d kappaletta käyttävät häviöllistä muotoa.", zh: "全部 %d 首曲目使用有损格式。", ja: "%d 曲すべてが非可逆フォーマットです。", ko: "%d개 트랙 모두 손실 형식을 사용합니다."
+            da: "Alle %d numre bruger et tabsbehæftet format.", fi: "Kaikki %d kappaletta käyttävät häviöllistä muotoa.", zh: "全部 %d 首曲目使用有损格式。", zhHant: "全部 %d 首曲目皆為有損格式。", ja: "%d 曲すべてが非可逆フォーマットです。", ko: "%d개 트랙 모두 손실 형식을 사용합니다."
         ),
         .album_quality_hires_desc: tr(
             en: "All %d tracks are hi-res lossless.", es: "Las %d pistas son Hi-Res sin pérdida.", fr: "Les %d titres sont en Hi-Res Lossless.", de: "Alle %d Titel sind Hi-Res Lossless.", pt: "As %d faixas são Hi-Res sem perdas.", it: "Tutti i %d brani sono Hi-Res Lossless.",
             nl: "Alle %d nummers zijn Hi-Res Lossless.", ru: "Все %d треков — Hi-Res без потерь.", pl: "Wszystkie %d utwory są Hi-Res bezstratne.", tr: "%d parçanın tümü Hi-Res kayıpsız.", sv: "Alla %d spår är Hi-Res förlustfria.", nb: "Alle %d spor er Hi-Res tapsfrie.",
-            da: "Alle %d numre er Hi-Res tabsfrie.", fi: "Kaikki %d kappaletta ovat Hi-Res häviöttömiä.", zh: "全部 %d 首曲目为高解析度无损。", ja: "%d 曲すべてがハイレゾロスレスです。", ko: "%d개 트랙 모두 고해상도 무손실입니다."
+            da: "Alle %d numre er Hi-Res tabsfrie.", fi: "Kaikki %d kappaletta ovat Hi-Res häviöttömiä.", zh: "全部 %d 首曲目为高解析度无损。", zhHant: "全部 %d 首曲目皆為高解析度無損。", ja: "%d 曲すべてがハイレゾロスレスです。", ko: "%d개 트랙 모두 고해상도 무손실입니다."
         ),
         .album_quality_lossless_desc: tr(
             en: "All %d tracks are lossless.", es: "Las %d pistas son sin pérdida.", fr: "Les %d titres sont en Lossless.", de: "Alle %d Titel sind verlustfrei.", pt: "As %d faixas são sem perdas.", it: "Tutti i %d brani sono Lossless.",
             nl: "Alle %d nummers zijn lossless.", ru: "Все %d треков без потерь.", pl: "Wszystkie %d utwory są bezstratne.", tr: "%d parçanın tümü kayıpsız.", sv: "Alla %d spår är förlustfria.", nb: "Alle %d spor er tapsfrie.",
-            da: "Alle %d numre er tabsfrie.", fi: "Kaikki %d kappaletta ovat häviöttömiä.", zh: "全部 %d 首曲目为无损。", ja: "%d 曲すべてがロスレスです。", ko: "%d개 트랙 모두 무손실입니다."
+            da: "Alle %d numre er tabsfrie.", fi: "Kaikki %d kappaletta ovat häviöttömiä.", zh: "全部 %d 首曲目为无损。", zhHant: "全部 %d 首曲目皆為無損。", ja: "%d 曲すべてがロスレスです。", ko: "%d개 트랙 모두 무손실입니다."
         ),
         .album_quality_mixed_desc: tr(
             en: "%d of %d tracks are lossless; the rest use a lossy format.", es: "%d de %d pistas son sin pérdida; el resto usa un formato con pérdida.", fr: "%d titres sur %d sont en Lossless ; les autres utilisent un format avec perte.", de: "%d von %d Titeln sind verlustfrei; der Rest ist verlustbehaftet.", pt: "%d de %d faixas são sem perdas; as restantes usam um formato com perdas.", it: "%d brani su %d sono Lossless; gli altri usano un formato con perdita.",
             nl: "%d van %d nummers zijn lossless; de rest gebruikt een lossy formaat.", ru: "%d из %d треков без потерь; остальные с потерями.", pl: "%d z %d utworów jest bezstratnych; reszta używa formatu stratnego.", tr: "%d/%d parça kayıpsız; gerisi kayıplı format kullanıyor.", sv: "%d av %d spår är förlustfria; resten använder ett förstörande format.", nb: "%d av %d spor er tapsfrie; resten bruker et tapsbasert format.",
-            da: "%d af %d numre er tabsfrie; resten bruger et tabsbehæftet format.", fi: "%d/%d kappaletta on häviöttömiä; loput käyttävät häviöllistä muotoa.", zh: "%d/%d 首曲目为无损，其余为有损格式。", ja: "%d/%d 曲がロスレスで、残りは非可逆フォーマットです。", ko: "%d/%d 트랙이 무손실이며 나머지는 손실 형식을 사용합니다."
+            da: "%d af %d numre er tabsfrie; resten bruger et tabsbehæftet format.", fi: "%d/%d kappaletta on häviöttömiä; loput käyttävät häviöllistä muotoa.", zh: "%d/%d 首曲目为无损，其余为有损格式。", zhHant: "%d / %d 首曲目為無損，其餘為有損格式。", ja: "%d/%d 曲がロスレスで、残りは非可逆フォーマットです。", ko: "%d/%d 트랙이 무손실이며 나머지는 손실 형식을 사용합니다."
         ),
         .detail_formats: tr(
             en: "Formats", es: "Formatos", fr: "Formats", de: "Formate", pt: "Formatos", it: "Formati",
             nl: "Formaten", ru: "Форматы", pl: "Formaty", tr: "Formatlar", sv: "Format", nb: "Formater",
-            da: "Formater", fi: "Muodot", zh: "格式", ja: "フォーマット", ko: "형식"
+            da: "Formater", fi: "Muodot", zh: "格式", zhHant: "格式", ja: "フォーマット", ko: "형식"
         ),
         .detail_sample_rates: tr(
             en: "Sample Rates", es: "Frecuencias de muestreo", fr: "Fréquences d'échantillonnage", de: "Abtastraten", pt: "Taxas de amostragem", it: "Frequenze di campionamento",
             nl: "Samplefrequenties", ru: "Частоты дискретизации", pl: "Częstotliwości próbkowania", tr: "Örnekleme hızları", sv: "Samplingsfrekvenser", nb: "Samplingsfrekvenser",
-            da: "Samplingsfrekvenser", fi: "Näytteenottotaajuudet", zh: "采样率", ja: "サンプルレート", ko: "샘플링 레이트"
+            da: "Samplingsfrekvenser", fi: "Näytteenottotaajuudet", zh: "采样率", zhHant: "取樣率", ja: "サンプルレート", ko: "샘플링 레이트"
         ),
         .detail_bit_depths: tr(
             en: "Bit Depths", es: "Profundidades de bits", fr: "Profondeurs de bits", de: "Bittiefen", pt: "Profundidades de bits", it: "Profondità di bit",
             nl: "Bitdiepten", ru: "Битность", pl: "Głębie bitowe", tr: "Bit derinlikleri", sv: "Bitdjup", nb: "Bitdybder",
-            da: "Bitdybder", fi: "Bittisyvyydet", zh: "位深", ja: "ビット深度", ko: "비트 심도"
+            da: "Bitdybder", fi: "Bittisyvyydet", zh: "位深", zhHant: "位元深度", ja: "ビット深度", ko: "비트 심도"
         ),
         .detail_hires_tracks: tr(
             en: "Hi-Res Tracks", es: "Pistas Hi-Res", fr: "Titres Hi-Res", de: "Hi-Res-Titel", pt: "Faixas Hi-Res", it: "Brani Hi-Res",
             nl: "Hi-Res-nummers", ru: "Треки Hi-Res", pl: "Utwory Hi-Res", tr: "Hi-Res parçalar", sv: "Hi-Res-spår", nb: "Hi-Res-spor",
-            da: "Hi-Res-numre", fi: "Hi-Res-kappaleet", zh: "高解析度曲目", ja: "ハイレゾ曲", ko: "고해상도 트랙"
+            da: "Hi-Res-numre", fi: "Hi-Res-kappaleet", zh: "高解析度曲目", zhHant: "高解析度曲目", ja: "ハイレゾ曲", ko: "고해상도 트랙"
         ),
         .detail_x_of_y: tr(
             en: "%d of %d", es: "%d de %d", fr: "%d sur %d", de: "%d von %d", pt: "%d de %d", it: "%d di %d",
             nl: "%d van %d", ru: "%d из %d", pl: "%d z %d", tr: "%d / %d", sv: "%d av %d", nb: "%d av %d",
-            da: "%d af %d", fi: "%d/%d", zh: "%d / %d", ja: "%d / %d", ko: "%d / %d"
+            da: "%d af %d", fi: "%d/%d", zh: "%d / %d", zhHant: "%d / %d", ja: "%d / %d", ko: "%d / %d"
         ),
         .detail_bit_value: tr(
             en: "%d-bit", es: "%d bits", fr: "%d bits", de: "%d Bit", pt: "%d bits", it: "%d bit",
             nl: "%d-bit", ru: "%d бит", pl: "%d-bit", tr: "%d bit", sv: "%d-bitars", nb: "%d-bit",
-            da: "%d-bit", fi: "%d-bittinen", zh: "%d 位", ja: "%d ビット", ko: "%d비트"
+            da: "%d-bit", fi: "%d-bittinen", zh: "%d 位", zhHant: "%d 位元", ja: "%d ビット", ko: "%d비트"
         ),
 
         // MARK: Queue
         .queue_repeat: tr(
             en: "Repeat", es: "Repetir", fr: "Répéter", de: "Wiederholen", pt: "Repetir", it: "Ripeti",
             nl: "Herhalen", ru: "Повтор", pl: "Powtarzaj", tr: "Tekrarla", sv: "Upprepa", nb: "Gjenta",
-            da: "Gentag", fi: "Toista", zh: "重复", ja: "リピート", ko: "반복"
+            da: "Gentag", fi: "Toista", zh: "重复", zhHant: "重複播放", ja: "リピート", ko: "반복"
         ),
         .queue_repeat_one: tr(
             en: "Repeat 1", es: "Repetir 1", fr: "Répéter 1", de: "1 wiederholen", pt: "Repetir 1", it: "Ripeti 1",
             nl: "1 herhalen", ru: "Повтор 1", pl: "Powtórz 1", tr: "1 tekrarla", sv: "Upprepa 1", nb: "Gjenta 1",
-            da: "Gentag 1", fi: "Toista 1", zh: "单曲重复", ja: "1曲リピート", ko: "한 곡 반복"
+            da: "Gentag 1", fi: "Toista 1", zh: "单曲重复", zhHant: "重複播放單曲", ja: "1曲リピート", ko: "한 곡 반복"
         ),
 
         // MARK: Library
         .library_search_prompt: tr(
             en: "Search Library", es: "Buscar en biblioteca", fr: "Rechercher dans la bibliothèque", de: "Mediathek durchsuchen", pt: "Pesquisar na biblioteca", it: "Cerca nella libreria",
             nl: "Zoek in bibliotheek", ru: "Поиск в медиатеке", pl: "Szukaj w bibliotece", tr: "Kitaplıkta ara", sv: "Sök i biblioteket", nb: "Søk i biblioteket",
-            da: "Søg i biblioteket", fi: "Hae kirjastosta", zh: "搜索音乐库", ja: "ライブラリを検索", ko: "라이브러리 검색"
+            da: "Søg i biblioteket", fi: "Hae kirjastosta", zh: "搜索音乐库", zhHant: "搜尋資料庫", ja: "ライブラリを検索", ko: "라이브러리 검색"
         ),
         .library_folders: tr(
             en: "Folders", es: "Carpetas", fr: "Dossiers", de: "Ordner", pt: "Pastas", it: "Cartelle",
             nl: "Mappen", ru: "Папки", pl: "Foldery", tr: "Klasörler", sv: "Mappar", nb: "Mapper",
-            da: "Mapper", fi: "Kansiot", zh: "文件夹", ja: "フォルダ", ko: "폴더"
+            da: "Mapper", fi: "Kansiot", zh: "文件夹", zhHant: "資料夾", ja: "フォルダ", ko: "폴더"
         ),
         .library_source: tr(
             en: "Source", es: "Origen", fr: "Source", de: "Quelle", pt: "Origem", it: "Origine",
             nl: "Bron", ru: "Источник", pl: "Źródło", tr: "Kaynak", sv: "Källa", nb: "Kilde",
-            da: "Kilde", fi: "Lähde", zh: "来源", ja: "ソース", ko: "소스"
+            da: "Kilde", fi: "Lähde", zh: "来源", zhHant: "來源", ja: "ソース", ko: "소스"
         ),
         .library_sort_by: tr(
             en: "Sort By", es: "Ordenar por", fr: "Trier par", de: "Sortieren nach", pt: "Ordenar por", it: "Ordina per",
             nl: "Sorteren op", ru: "Сортировать по", pl: "Sortuj wg", tr: "Sırala", sv: "Sortera efter", nb: "Sorter etter",
-            da: "Sortér efter", fi: "Lajittele", zh: "排序方式", ja: "並べ替え", ko: "정렬 기준"
+            da: "Sortér efter", fi: "Lajittele", zh: "排序方式", zhHant: "排序方式", ja: "並べ替え", ko: "정렬 기준"
         ),
         .library_all_genres: tr(
             en: "All Genres", es: "Todos los géneros", fr: "Tous les genres", de: "Alle Genres", pt: "Todos os géneros", it: "Tutti i generi",
             nl: "Alle genres", ru: "Все жанры", pl: "Wszystkie gatunki", tr: "Tüm türler", sv: "Alla genrer", nb: "Alle sjangere",
-            da: "Alle genrer", fi: "Kaikki genret", zh: "所有流派", ja: "すべてのジャンル", ko: "모든 장르"
+            da: "Alle genrer", fi: "Kaikki genret", zh: "所有流派", zhHant: "所有類型", ja: "すべてのジャンル", ko: "모든 장르"
         ),
         .library_never_played: tr(
             en: "Never Played", es: "Nunca reproducido", fr: "Jamais lu", de: "Nie gespielt", pt: "Nunca reproduzido", it: "Mai riprodotto",
             nl: "Nooit afgespeeld", ru: "Не воспроизводилось", pl: "Nigdy nieodtwarzane", tr: "Hiç çalınmadı", sv: "Aldrig spelad", nb: "Aldri spilt",
-            da: "Aldrig afspillet", fi: "Ei koskaan toistettu", zh: "从未播放", ja: "未再生", ko: "재생 안 함"
+            da: "Aldrig afspillet", fi: "Ei koskaan toistettu", zh: "从未播放", zhHant: "從未播放", ja: "未再生", ko: "재생 안 함"
         ),
         .library_clear_filters: tr(
             en: "Clear Filters", es: "Borrar filtros", fr: "Effacer les filtres", de: "Filter löschen", pt: "Limpar filtros", it: "Cancella filtri",
             nl: "Filters wissen", ru: "Сбросить фильтры", pl: "Wyczyść filtry", tr: "Filtreleri temizle", sv: "Rensa filter", nb: "Tøm filtre",
-            da: "Ryd filtre", fi: "Tyhjennä suodattimet", zh: "清除筛选", ja: "フィルタをクリア", ko: "필터 지우기"
+            da: "Ryd filtre", fi: "Tyhjennä suodattimet", zh: "清除筛选", zhHant: "清除篩選條件", ja: "フィルタをクリア", ko: "필터 지우기"
         ),
         .library_all_folders: tr(
             en: "All Folders", es: "Todas las carpetas", fr: "Tous les dossiers", de: "Alle Ordner", pt: "Todas as pastas", it: "Tutte le cartelle",
             nl: "Alle mappen", ru: "Все папки", pl: "Wszystkie foldery", tr: "Tüm klasörler", sv: "Alla mappar", nb: "Alle mapper",
-            da: "Alle mapper", fi: "Kaikki kansiot", zh: "所有文件夹", ja: "すべてのフォルダ", ko: "모든 폴더"
+            da: "Alle mapper", fi: "Kaikki kansiot", zh: "所有文件夹", zhHant: "所有資料夾", ja: "すべてのフォルダ", ko: "모든 폴더"
         ),
         .library_select_all: tr(
             en: "Select All", es: "Seleccionar todo", fr: "Tout sélectionner", de: "Alle auswählen", pt: "Selecionar tudo", it: "Seleziona tutto",
             nl: "Alles selecteren", ru: "Выбрать все", pl: "Zaznacz wszystko", tr: "Tümünü seç", sv: "Markera alla", nb: "Velg alle",
-            da: "Vælg alle", fi: "Valitse kaikki", zh: "全选", ja: "すべて選択", ko: "모두 선택"
+            da: "Vælg alle", fi: "Valitse kaikki", zh: "全选", zhHant: "全選", ja: "すべて選択", ko: "모두 선택"
         ),
         .library_deselect_all: tr(
             en: "Deselect All", es: "Deseleccionar todo", fr: "Tout désélectionner", de: "Auswahl aufheben", pt: "Desmarcar tudo", it: "Deseleziona tutto",
             nl: "Alles deselecteren", ru: "Снять выбор", pl: "Odznacz wszystko", tr: "Seçimi kaldır", sv: "Avmarkera alla", nb: "Fjern alle",
-            da: "Fravælg alle", fi: "Poista valinnat", zh: "取消全选", ja: "すべて選択解除", ko: "모두 선택 해제"
+            da: "Fravælg alle", fi: "Poista valinnat", zh: "取消全选", zhHant: "取消全選", ja: "すべて選択解除", ko: "모두 선택 해제"
         ),
         .library_add_n_songs: tr(
             en: "Add %d Songs", es: "Añadir %d canciones", fr: "Ajouter %d titres", de: "%d Songs hinzufügen", pt: "Adicionar %d músicas", it: "Aggiungi %d brani",
             nl: "%d nummers toevoegen", ru: "Добавить %d песен", pl: "Dodaj %d utworów", tr: "%d şarkı ekle", sv: "Lägg till %d låtar", nb: "Legg til %d låter",
-            da: "Tilføj %d sange", fi: "Lisää %d kappaletta", zh: "添加 %d 首歌曲", ja: "%d 曲を追加", ko: "%d곡 추가"
+            da: "Tilføj %d sange", fi: "Lisää %d kappaletta", zh: "添加 %d 首歌曲", zhHant: "加入 %d 首歌曲", ja: "%d 曲を追加", ko: "%d곡 추가"
         ),
         .action_queue: tr(
             en: "Queue", es: "Cola", fr: "File d'attente", de: "Warteschlange", pt: "Fila", it: "Coda",
             nl: "Wachtrij", ru: "Очередь", pl: "Kolejka", tr: "Sıra", sv: "Kö", nb: "Kø",
-            da: "Kø", fi: "Jono", zh: "队列", ja: "キュー", ko: "대기열"
+            da: "Kø", fi: "Jono", zh: "队列", zhHant: "待播清單", ja: "キュー", ko: "대기열"
         ),
         .media_playlist: tr(
             en: "Playlist", es: "Lista", fr: "Playlist", de: "Playlist", pt: "Lista", it: "Playlist",
             nl: "Afspeellijst", ru: "Плейлист", pl: "Playlista", tr: "Çalma listesi", sv: "Spellista", nb: "Spilleliste",
-            da: "Playliste", fi: "Soittolista", zh: "播放列表", ja: "プレイリスト", ko: "재생목록"
+            da: "Playliste", fi: "Soittolista", zh: "播放列表", zhHant: "播放列表", ja: "プレイリスト", ko: "재생목록"
         ),
         .library_source_server: tr(
             en: "Server", es: "Servidor", fr: "Serveur", de: "Server", pt: "Servidor", it: "Server",
             nl: "Server", ru: "Сервер", pl: "Serwer", tr: "Sunucu", sv: "Server", nb: "Server",
-            da: "Server", fi: "Palvelin", zh: "服务器", ja: "サーバ", ko: "서버"
+            da: "Server", fi: "Palvelin", zh: "服务器", zhHant: "伺服器", ja: "サーバ", ko: "서버"
         ),
         .library_source_downloaded: tr(
             en: "Downloaded", es: "Descargado", fr: "Téléchargé", de: "Heruntergeladen", pt: "Baixado", it: "Scaricato",
             nl: "Gedownload", ru: "Загружено", pl: "Pobrane", tr: "İndirildi", sv: "Nedladdat", nb: "Lastet ned",
-            da: "Downloadet", fi: "Ladattu", zh: "已下载", ja: "ダウンロード済み", ko: "다운로드됨"
+            da: "Downloadet", fi: "Ladattu", zh: "已下载", zhHant: "已下載", ja: "ダウンロード済み", ko: "다운로드됨"
         ),
         .sort_name: tr(
             en: "Name", es: "Nombre", fr: "Nom", de: "Name", pt: "Nome", it: "Nome",
             nl: "Naam", ru: "Имя", pl: "Nazwa", tr: "Ad", sv: "Namn", nb: "Navn",
-            da: "Navn", fi: "Nimi", zh: "名称", ja: "名前", ko: "이름"
+            da: "Navn", fi: "Nimi", zh: "名称", zhHant: "名稱", ja: "名前", ko: "이름"
         ),
         .sort_most_played: tr(
             en: "Most Played", es: "Más reproducido", fr: "Les plus écoutés", de: "Meistgespielt", pt: "Mais reproduzido", it: "Più riprodotti",
             nl: "Meest afgespeeld", ru: "Часто играемые", pl: "Najczęściej odtwarzane", tr: "En çok çalınan", sv: "Mest spelade", nb: "Mest spilt",
-            da: "Mest afspillet", fi: "Eniten toistetut", zh: "最常播放", ja: "再生回数順", ko: "많이 재생됨"
+            da: "Mest afspillet", fi: "Eniten toistetut", zh: "最常播放", zhHant: "最常播放", ja: "再生回数順", ko: "많이 재생됨"
         ),
         .playlists_none_yet: tr(
             en: "No playlists yet", es: "Aún no hay listas", fr: "Aucune playlist pour l'instant", de: "Noch keine Playlists", pt: "Ainda sem listas", it: "Ancora nessuna playlist",
             nl: "Nog geen afspeellijsten", ru: "Пока нет плейлистов", pl: "Brak playlist", tr: "Henüz çalma listesi yok", sv: "Inga spellistor än", nb: "Ingen spillelister ennå",
-            da: "Ingen playlister endnu", fi: "Ei vielä soittolistoja", zh: "还没有播放列表", ja: "プレイリストはまだありません", ko: "아직 재생목록이 없습니다"
+            da: "Ingen playlister endnu", fi: "Ei vielä soittolistoja", zh: "还没有播放列表", zhHant: "還沒有播放列表", ja: "プレイリストはまだありません", ko: "아직 재생목록이 없습니다"
         ),
 
         // MARK: Library views / smart filters
@@ -3415,536 +3529,536 @@ enum Strings {
         .toast_added_count_to: tr(
             en: "Added %d to %@", es: "Se añadieron %d a %@", fr: "%d ajoutés à %@", de: "%d zu %@ hinzugefügt", pt: "%d adicionados a %@", it: "%d aggiunti a %@",
             nl: "%d toegevoegd aan %@", ru: "Добавлено %d в %@", pl: "Dodano %d do %@", tr: "%d öğe %@ listesine eklendi", sv: "%d tillagda i %@", nb: "%d lagt til i %@",
-            da: "%d føjet til %@", fi: "Lisätty %d kohteeseen %@", zh: "已将 %d 首添加到%@", ja: "%d 曲を%@に追加しました", ko: "%d개를 %@에 추가함"
+            da: "%d føjet til %@", fi: "Lisätty %d kohteeseen %@", zh: "已将 %d 首添加到%@", zhHant: "已將 %d 首加入 %@", ja: "%d 曲を%@に追加しました", ko: "%d개를 %@에 추가함"
         ),
         .toast_playing_n_next: tr(
             en: "Playing %d next", es: "Reproduciendo %d a continuación", fr: "%d à suivre", de: "%d als Nächstes", pt: "A reproduzir %d a seguir", it: "%d in riproduzione successiva",
             nl: "%d hierna afspelen", ru: "%d в очереди далее", pl: "Następnie %d", tr: "Sıradaki %d", sv: "Spelar %d härnäst", nb: "Spiller %d neste",
-            da: "Afspiller %d næst", fi: "Toistetaan %d seuraavaksi", zh: "接下来播放 %d 首", ja: "次に %d 曲を再生", ko: "다음에 %d개 재생"
+            da: "Afspiller %d næst", fi: "Toistetaan %d seuraavaksi", zh: "接下来播放 %d 首", zhHant: "接下來將播放 %d 首", ja: "次に %d 曲を再生", ko: "다음에 %d개 재생"
         ),
         .toast_added_n_to_queue: tr(
             en: "Added %d to queue", es: "%d añadidos a la cola", fr: "%d ajoutés à la file", de: "%d zur Warteschlange hinzugefügt", pt: "%d adicionados à fila", it: "%d aggiunti alla coda",
             nl: "%d toegevoegd aan wachtrij", ru: "%d добавлено в очередь", pl: "Dodano %d do kolejki", tr: "%d öğe sıraya eklendi", sv: "%d tillagda i kön", nb: "%d lagt til i køen",
-            da: "%d føjet til køen", fi: "Lisätty %d jonoon", zh: "已将 %d 首添加到队列", ja: "%d 曲をキューに追加", ko: "%d개를 대기열에 추가함"
+            da: "%d føjet til køen", fi: "Lisätty %d jonoon", zh: "已将 %d 首添加到队列", zhHant: "已將 %d 首加入待播清單", ja: "%d 曲をキューに追加", ko: "%d개를 대기열에 추가함"
         ),
         .toast_downloading_n: tr(
             en: "Downloading %d", es: "Descargando %d", fr: "Téléchargement de %d", de: "%d werden geladen", pt: "A baixar %d", it: "Download di %d",
             nl: "%d downloaden", ru: "Загрузка %d", pl: "Pobieranie %d", tr: "%d indiriliyor", sv: "Laddar ner %d", nb: "Laster ned %d",
-            da: "Downloader %d", fi: "Ladataan %d", zh: "正在下载 %d 首", ja: "%d 曲をダウンロード中", ko: "%d개 다운로드 중"
+            da: "Downloader %d", fi: "Ladataan %d", zh: "正在下载 %d 首", zhHant: "正在下載 %d 首", ja: "%d 曲をダウンロード中", ko: "%d개 다운로드 중"
         ),
 
         // MARK: Playlists screen
         .playlists_search_prompt: tr(
             en: "Search playlists", es: "Buscar listas", fr: "Rechercher des playlists", de: "Playlists durchsuchen", pt: "Pesquisar listas", it: "Cerca playlist",
             nl: "Zoek afspeellijsten", ru: "Поиск плейлистов", pl: "Szukaj playlist", tr: "Çalma listelerinde ara", sv: "Sök spellistor", nb: "Søk i spillelister",
-            da: "Søg i playlister", fi: "Hae soittolistoja", zh: "搜索播放列表", ja: "プレイリストを検索", ko: "재생목록 검색"
+            da: "Søg i playlister", fi: "Hae soittolistoja", zh: "搜索播放列表", zhHant: "搜尋播放列表", ja: "プレイリストを検索", ko: "재생목록 검색"
         ),
         .playlists_count: tr(
             en: "%d playlists", es: "%d listas", fr: "%d playlists", de: "%d Playlists", pt: "%d listas", it: "%d playlist",
             nl: "%d afspeellijsten", ru: "%d плейлистов", pl: "%d playlist", tr: "%d çalma listesi", sv: "%d spellistor", nb: "%d spillelister",
-            da: "%d playlister", fi: "%d soittolistaa", zh: "%d 个播放列表", ja: "%d 個のプレイリスト", ko: "재생목록 %d개"
+            da: "%d playlister", fi: "%d soittolistaa", zh: "%d 个播放列表", zhHant: "%d 個播放列表", ja: "%d 個のプレイリスト", ko: "재생목록 %d개"
         ),
         .playlist_delete_q: tr(
             en: "Delete Playlist?", es: "¿Eliminar lista?", fr: "Supprimer la playlist ?", de: "Playlist löschen?", pt: "Eliminar lista?", it: "Eliminare la playlist?",
             nl: "Afspeellijst verwijderen?", ru: "Удалить плейлист?", pl: "Usunąć playlistę?", tr: "Çalma listesi silinsin mi?", sv: "Radera spellista?", nb: "Slette spilleliste?",
-            da: "Slet playliste?", fi: "Poistetaanko soittolista?", zh: "删除播放列表？", ja: "プレイリストを削除しますか？", ko: "재생목록을 삭제할까요?"
+            da: "Slet playliste?", fi: "Poistetaanko soittolista?", zh: "删除播放列表？", zhHant: "要刪除播放列表嗎？", ja: "プレイリストを削除しますか？", ko: "재생목록을 삭제할까요?"
         ),
         .playlist_delete_named: tr(
             en: "Delete “%@”", es: "Eliminar «%@»", fr: "Supprimer « %@ »", de: "„%@“ löschen", pt: "Eliminar “%@”", it: "Elimina “%@”",
             nl: "“%@” verwijderen", ru: "Удалить «%@»", pl: "Usuń „%@”", tr: "“%@” sil", sv: "Radera ”%@”", nb: "Slett «%@»",
-            da: "Slet “%@”", fi: "Poista ”%@”", zh: "删除“%@”", ja: "「%@」を削除", ko: "“%@” 삭제"
+            da: "Slet “%@”", fi: "Poista ”%@”", zh: "删除“%@”", zhHant: "刪除「%@」", ja: "「%@」を削除", ko: "“%@” 삭제"
         ),
         .playlist_delete_msg: tr(
             en: "“%@” will be permanently deleted. This can’t be undone.", es: "«%@» se eliminará permanentemente. No se puede deshacer.", fr: "« %@ » sera définitivement supprimée. Action irréversible.", de: "„%@“ wird endgültig gelöscht. Das kann nicht rückgängig gemacht werden.", pt: "“%@” será eliminada permanentemente. Não pode ser desfeito.", it: "“%@” verrà eliminata definitivamente. L’operazione è irreversibile.",
             nl: "“%@” wordt permanent verwijderd. Dit kan niet ongedaan worden gemaakt.", ru: "«%@» будет удалён безвозвратно. Это действие нельзя отменить.", pl: "„%@” zostanie trwale usunięta. Nie można tego cofnąć.", tr: "“%@” kalıcı olarak silinecek. Bu geri alınamaz.", sv: "”%@” raderas permanent. Detta kan inte ångras.", nb: "«%@» slettes permanent. Dette kan ikke angres.",
-            da: "“%@” slettes permanent. Dette kan ikke fortrydes.", fi: "”%@” poistetaan pysyvästi. Tätä ei voi kumota.", zh: "“%@”将被永久删除，此操作无法撤销。", ja: "「%@」は完全に削除されます。元に戻せません。", ko: "“%@”이(가) 영구적으로 삭제됩니다. 되돌릴 수 없습니다."
+            da: "“%@” slettes permanent. Dette kan ikke fortrydes.", fi: "”%@” poistetaan pysyvästi. Tätä ei voi kumota.", zh: "“%@”将被永久删除，此操作无法撤销。", zhHant: "「%@」將被永久刪除。此動作無法復原。", ja: "「%@」は完全に削除されます。元に戻せません。", ko: "“%@”이(가) 영구적으로 삭제됩니다. 되돌릴 수 없습니다."
         ),
         .smart_delete_q: tr(
             en: "Delete Smart Playlist?", es: "¿Eliminar lista inteligente?", fr: "Supprimer la playlist intelligente ?", de: "Intelligente Playlist löschen?", pt: "Eliminar lista inteligente?", it: "Eliminare la playlist smart?",
             nl: "Slimme afspeellijst verwijderen?", ru: "Удалить умный плейлист?", pl: "Usunąć inteligentną playlistę?", tr: "Akıllı çalma listesi silinsin mi?", sv: "Radera smart spellista?", nb: "Slette smart spilleliste?",
-            da: "Slet smart playliste?", fi: "Poistetaanko älykäs soittolista?", zh: "删除智能播放列表？", ja: "スマートプレイリストを削除しますか？", ko: "스마트 재생목록을 삭제할까요?"
+            da: "Slet smart playliste?", fi: "Poistetaanko älykäs soittolista?", zh: "删除智能播放列表？", zhHant: "要刪除智慧型播放列表嗎？", ja: "スマートプレイリストを削除しますか？", ko: "스마트 재생목록을 삭제할까요?"
         ),
         .smart_delete_msg: tr(
             en: "“%@” will be removed from this device.", es: "«%@» se eliminará de este dispositivo.", fr: "« %@ » sera supprimée de cet appareil.", de: "„%@“ wird von diesem Gerät entfernt.", pt: "“%@” será removida deste dispositivo.", it: "“%@” verrà rimossa da questo dispositivo.",
             nl: "“%@” wordt van dit apparaat verwijderd.", ru: "«%@» будет удалён с этого устройства.", pl: "„%@” zostanie usunięta z tego urządzenia.", tr: "“%@” bu cihazdan kaldırılacak.", sv: "”%@” tas bort från den här enheten.", nb: "«%@» fjernes fra denne enheten.",
-            da: "“%@” fjernes fra denne enhed.", fi: "”%@” poistetaan tästä laitteesta.", zh: "“%@”将从此设备中移除。", ja: "「%@」はこのデバイスから削除されます。", ko: "“%@”이(가) 이 기기에서 제거됩니다."
+            da: "“%@” fjernes fra denne enhed.", fi: "”%@” poistetaan tästä laitteesta.", zh: "“%@”将从此设备中移除。", zhHant: "「%@」將從此裝置中移除。", ja: "「%@」はこのデバイスから削除されます。", ko: "“%@”이(가) 이 기기에서 제거됩니다."
         ),
         .folder_delete_q: tr(
             en: "Delete Folder?", es: "¿Eliminar carpeta?", fr: "Supprimer le dossier ?", de: "Ordner löschen?", pt: "Eliminar pasta?", it: "Eliminare la cartella?",
             nl: "Map verwijderen?", ru: "Удалить папку?", pl: "Usunąć folder?", tr: "Klasör silinsin mi?", sv: "Radera mapp?", nb: "Slette mappe?",
-            da: "Slet mappe?", fi: "Poistetaanko kansio?", zh: "删除文件夹？", ja: "フォルダを削除しますか？", ko: "폴더를 삭제할까요?"
+            da: "Slet mappe?", fi: "Poistetaanko kansio?", zh: "删除文件夹？", zhHant: "要刪除資料夾嗎？", ja: "フォルダを削除しますか？", ko: "폴더를 삭제할까요?"
         ),
         .folder_delete_msg: tr(
             en: "“%@” will be removed. Playlists inside it will stay intact.", es: "«%@» se eliminará. Las listas que contiene se conservarán.", fr: "« %@ » sera supprimé. Les playlists qu’il contient seront conservées.", de: "„%@“ wird entfernt. Die enthaltenen Playlists bleiben erhalten.", pt: "“%@” será removida. As listas no seu interior permanecerão intactas.", it: "“%@” verrà rimossa. Le playlist al suo interno resteranno intatte.",
             nl: "“%@” wordt verwijderd. De afspeellijsten erin blijven behouden.", ru: "«%@» будет удалена. Плейлисты внутри останутся.", pl: "„%@” zostanie usunięty. Playlisty w środku pozostaną nienaruszone.", tr: "“%@” kaldırılacak. İçindeki çalma listeleri korunacak.", sv: "”%@” tas bort. Spellistorna i den behålls.", nb: "«%@» fjernes. Spillelistene i den beholdes.",
-            da: "“%@” fjernes. Playlisterne i den bevares.", fi: "”%@” poistetaan. Sen sisällä olevat soittolistat säilyvät.", zh: "“%@”将被移除，其中的播放列表会保留。", ja: "「%@」は削除されます。中のプレイリストは保持されます。", ko: "“%@”이(가) 제거됩니다. 안의 재생목록은 유지됩니다."
+            da: "“%@” fjernes. Playlisterne i den bevares.", fi: "”%@” poistetaan. Sen sisällä olevat soittolistat säilyvät.", zh: "“%@”将被移除，其中的播放列表会保留。", zhHant: "「%@」將被移除。其中的播放列表會保留。", ja: "「%@」は削除されます。中のプレイリストは保持されます。", ko: "“%@”이(가) 제거됩니다. 안의 재생목록은 유지됩니다."
         ),
         .playlist_pin: tr(
             en: "Pin to Top", es: "Fijar arriba", fr: "Épingler en haut", de: "Oben anheften", pt: "Fixar no topo", it: "Fissa in alto",
             nl: "Bovenaan vastzetten", ru: "Закрепить вверху", pl: "Przypnij na górze", tr: "Üste sabitle", sv: "Fäst överst", nb: "Fest øverst",
-            da: "Fastgør øverst", fi: "Kiinnitä ylös", zh: "置顶", ja: "上部に固定", ko: "맨 위에 고정"
+            da: "Fastgør øverst", fi: "Kiinnitä ylös", zh: "置顶", zhHant: "置頂", ja: "上部に固定", ko: "맨 위에 고정"
         ),
         .playlist_unpin: tr(
             en: "Unpin", es: "Dejar de fijar", fr: "Détacher", de: "Lösen", pt: "Desafixar", it: "Rimuovi",
             nl: "Losmaken", ru: "Открепить", pl: "Odepnij", tr: "Sabitlemeyi kaldır", sv: "Lossa", nb: "Løsne",
-            da: "Frigør", fi: "Poista kiinnitys", zh: "取消置顶", ja: "固定を解除", ko: "고정 해제"
+            da: "Frigør", fi: "Poista kiinnitys", zh: "取消置顶", zhHant: "取消置頂", ja: "固定を解除", ko: "고정 해제"
         ),
         .folder_add_to: tr(
             en: "Add to Folder", es: "Añadir a carpeta", fr: "Ajouter au dossier", de: "Zu Ordner hinzufügen", pt: "Adicionar à pasta", it: "Aggiungi a cartella",
             nl: "Aan map toevoegen", ru: "Добавить в папку", pl: "Dodaj do folderu", tr: "Klasöre ekle", sv: "Lägg till i mapp", nb: "Legg til i mappe",
-            da: "Føj til mappe", fi: "Lisää kansioon", zh: "添加到文件夹", ja: "フォルダに追加", ko: "폴더에 추가"
+            da: "Føj til mappe", fi: "Lisää kansioon", zh: "添加到文件夹", zhHant: "加入資料夾", ja: "フォルダに追加", ko: "폴더에 추가"
         ),
         .folder_remove_from: tr(
             en: "Remove from Folder", es: "Quitar de la carpeta", fr: "Retirer du dossier", de: "Aus Ordner entfernen", pt: "Remover da pasta", it: "Rimuovi dalla cartella",
             nl: "Uit map verwijderen", ru: "Убрать из папки", pl: "Usuń z folderu", tr: "Klasörden çıkar", sv: "Ta bort från mapp", nb: "Fjern fra mappe",
-            da: "Fjern fra mappe", fi: "Poista kansiosta", zh: "从文件夹移除", ja: "フォルダから削除", ko: "폴더에서 제거"
+            da: "Fjern fra mappe", fi: "Poista kansiosta", zh: "从文件夹移除", zhHant: "從資料夾中移除", ja: "フォルダから削除", ko: "폴더에서 제거"
         ),
         .media_folder: tr(
             en: "Folder", es: "Carpeta", fr: "Dossier", de: "Ordner", pt: "Pasta", it: "Cartella",
             nl: "Map", ru: "Папка", pl: "Folder", tr: "Klasör", sv: "Mapp", nb: "Mappe",
-            da: "Mappe", fi: "Kansio", zh: "文件夹", ja: "フォルダ", ko: "폴더"
+            da: "Mappe", fi: "Kansio", zh: "文件夹", zhHant: "資料夾", ja: "フォルダ", ko: "폴더"
         ),
         .folder_empty: tr(
             en: "Empty Folder", es: "Carpeta vacía", fr: "Dossier vide", de: "Leerer Ordner", pt: "Pasta vazia", it: "Cartella vuota",
             nl: "Lege map", ru: "Пустая папка", pl: "Pusty folder", tr: "Boş klasör", sv: "Tom mapp", nb: "Tom mappe",
-            da: "Tom mappe", fi: "Tyhjä kansio", zh: "空文件夹", ja: "空のフォルダ", ko: "빈 폴더"
+            da: "Tom mappe", fi: "Tyhjä kansio", zh: "空文件夹", zhHant: "空資料夾", ja: "空のフォルダ", ko: "빈 폴더"
         ),
         .action_clear_selection: tr(
             en: "Clear Selection", es: "Borrar selección", fr: "Effacer la sélection", de: "Auswahl aufheben", pt: "Limpar seleção", it: "Cancella selezione",
             nl: "Selectie wissen", ru: "Снять выделение", pl: "Wyczyść zaznaczenie", tr: "Seçimi temizle", sv: "Rensa markering", nb: "Tøm utvalg",
-            da: "Ryd markering", fi: "Tyhjennä valinta", zh: "清除选择", ja: "選択を解除", ko: "선택 해제"
+            da: "Ryd markering", fi: "Tyhjennä valinta", zh: "清除选择", zhHant: "清除所選項目", ja: "選択を解除", ko: "선택 해제"
         ),
         .search_x: tr(
             en: "Search %@", es: "Buscar %@", fr: "Rechercher %@", de: "%@ durchsuchen", pt: "Pesquisar %@", it: "Cerca %@",
             nl: "Zoek %@", ru: "Поиск: %@", pl: "Szukaj %@", tr: "%@ ara", sv: "Sök %@", nb: "Søk %@",
-            da: "Søg %@", fi: "Hae %@", zh: "搜索%@", ja: "%@を検索", ko: "%@ 검색"
+            da: "Søg %@", fi: "Hae %@", zh: "搜索%@", zhHant: "搜尋 %@", ja: "%@を検索", ko: "%@ 검색"
         ),
         .create_type: tr(
             en: "Type", es: "Tipo", fr: "Type", de: "Typ", pt: "Tipo", it: "Tipo",
             nl: "Type", ru: "Тип", pl: "Typ", tr: "Tür", sv: "Typ", nb: "Type",
-            da: "Type", fi: "Tyyppi", zh: "类型", ja: "種類", ko: "유형"
+            da: "Type", fi: "Tyyppi", zh: "类型", zhHant: "類型", ja: "種類", ko: "유형"
         ),
         .create_playlist_name_ph: tr(
             en: "Playlist name", es: "Nombre de la lista", fr: "Nom de la playlist", de: "Playlist-Name", pt: "Nome da lista", it: "Nome della playlist",
             nl: "Naam afspeellijst", ru: "Название плейлиста", pl: "Nazwa playlisty", tr: "Çalma listesi adı", sv: "Spellistans namn", nb: "Navn på spilleliste",
-            da: "Playlistens navn", fi: "Soittolistan nimi", zh: "播放列表名称", ja: "プレイリスト名", ko: "재생목록 이름"
+            da: "Playlistens navn", fi: "Soittolistan nimi", zh: "播放列表名称", zhHant: "播放列表名稱", ja: "プレイリスト名", ko: "재생목록 이름"
         ),
         .create_folder_name_ph: tr(
             en: "Folder name", es: "Nombre de la carpeta", fr: "Nom du dossier", de: "Ordnername", pt: "Nome da pasta", it: "Nome della cartella",
             nl: "Mapnaam", ru: "Название папки", pl: "Nazwa folderu", tr: "Klasör adı", sv: "Mappnamn", nb: "Mappenavn",
-            da: "Mappenavn", fi: "Kansion nimi", zh: "文件夹名称", ja: "フォルダ名", ko: "폴더 이름"
+            da: "Mappenavn", fi: "Kansion nimi", zh: "文件夹名称", zhHant: "資料夾名稱", ja: "フォルダ名", ko: "폴더 이름"
         ),
         .create_new_playlist_title: tr(
             en: "New Playlist", es: "Nueva lista", fr: "Nouvelle playlist", de: "Neue Playlist", pt: "Nova lista", it: "Nuova playlist",
             nl: "Nieuwe afspeellijst", ru: "Новый плейлист", pl: "Nowa playlista", tr: "Yeni çalma listesi", sv: "Ny spellista", nb: "Ny spilleliste",
-            da: "Ny playliste", fi: "Uusi soittolista", zh: "新建播放列表", ja: "新規プレイリスト", ko: "새 재생목록"
+            da: "Ny playliste", fi: "Uusi soittolista", zh: "新建播放列表", zhHant: "新增播放列表", ja: "新規プレイリスト", ko: "새 재생목록"
         ),
         .action_create: tr(
             en: "Create", es: "Crear", fr: "Créer", de: "Erstellen", pt: "Criar", it: "Crea",
             nl: "Aanmaken", ru: "Создать", pl: "Utwórz", tr: "Oluştur", sv: "Skapa", nb: "Opprett",
-            da: "Opret", fi: "Luo", zh: "创建", ja: "作成", ko: "만들기"
+            da: "Opret", fi: "Luo", zh: "创建", zhHant: "建立", ja: "作成", ko: "만들기"
         ),
         .name_exists_title: tr(
             en: "Name Already Exists", es: "El nombre ya existe", fr: "Ce nom existe déjà", de: "Name existiert bereits", pt: "O nome já existe", it: "Il nome esiste già",
             nl: "Naam bestaat al", ru: "Имя уже существует", pl: "Nazwa już istnieje", tr: "Ad zaten var", sv: "Namnet finns redan", nb: "Navnet finnes allerede",
-            da: "Navnet findes allerede", fi: "Nimi on jo olemassa", zh: "名称已存在", ja: "名前は既に存在します", ko: "이미 존재하는 이름"
+            da: "Navnet findes allerede", fi: "Nimi on jo olemassa", zh: "名称已存在", zhHant: "名稱已存在", ja: "名前は既に存在します", ko: "이미 존재하는 이름"
         ),
         .smart_songs_rule: tr(
             en: "%d songs · %@", es: "%d canciones · %@", fr: "%d titres · %@", de: "%d Songs · %@", pt: "%d músicas · %@", it: "%d brani · %@",
             nl: "%d nummers · %@", ru: "%d песен · %@", pl: "%d utworów · %@", tr: "%d şarkı · %@", sv: "%d låtar · %@", nb: "%d låter · %@",
-            da: "%d sange · %@", fi: "%d kappaletta · %@", zh: "%d 首歌曲 · %@", ja: "%d 曲 · %@", ko: "%d곡 · %@"
+            da: "%d sange · %@", fi: "%d kappaletta · %@", zh: "%d 首歌曲 · %@", zhHant: "%d 首歌曲 · %@", ja: "%d 曲 · %@", ko: "%d곡 · %@"
         ),
 
         // MARK: Smart playlist editor
         .smart_name_ph: tr(
             en: "Smart playlist name", es: "Nombre de lista inteligente", fr: "Nom de la playlist intelligente", de: "Name der intelligenten Playlist", pt: "Nome da lista inteligente", it: "Nome playlist smart",
             nl: "Naam slimme afspeellijst", ru: "Название умного плейлиста", pl: "Nazwa inteligentnej playlisty", tr: "Akıllı çalma listesi adı", sv: "Smart spellistas namn", nb: "Navn på smart spilleliste",
-            da: "Smart playlistes navn", fi: "Älykkään soittolistan nimi", zh: "智能播放列表名称", ja: "スマートプレイリスト名", ko: "스마트 재생목록 이름"
+            da: "Smart playlistes navn", fi: "Älykkään soittolistan nimi", zh: "智能播放列表名称", zhHant: "智慧型播放列表名稱", ja: "スマートプレイリスト名", ko: "스마트 재생목록 이름"
         ),
         .smart_desc: tr(
             en: "Description", es: "Descripción", fr: "Description", de: "Beschreibung", pt: "Descrição", it: "Descrizione",
             nl: "Beschrijving", ru: "Описание", pl: "Opis", tr: "Açıklama", sv: "Beskrivning", nb: "Beskrivelse",
-            da: "Beskrivelse", fi: "Kuvaus", zh: "描述", ja: "説明", ko: "설명"
+            da: "Beskrivelse", fi: "Kuvaus", zh: "描述", zhHant: "描述", ja: "説明", ko: "설명"
         ),
         .smart_section_rules: tr(
             en: "Rules", es: "Reglas", fr: "Règles", de: "Regeln", pt: "Regras", it: "Regole",
             nl: "Regels", ru: "Правила", pl: "Reguły", tr: "Kurallar", sv: "Regler", nb: "Regler",
-            da: "Regler", fi: "Säännöt", zh: "规则", ja: "ルール", ko: "규칙"
+            da: "Regler", fi: "Säännöt", zh: "规则", zhHant: "規則", ja: "ルール", ko: "규칙"
         ),
         .smart_match: tr(
             en: "Match", es: "Coincidencia", fr: "Correspondance", de: "Übereinstimmung", pt: "Correspondência", it: "Corrispondenza",
             nl: "Overeenkomst", ru: "Совпадение", pl: "Dopasowanie", tr: "Eşleşme", sv: "Matchning", nb: "Treff",
-            da: "Match", fi: "Vastaavuus", zh: "匹配", ja: "一致", ko: "일치"
+            da: "Match", fi: "Vastaavuus", zh: "匹配", zhHant: "符合", ja: "一致", ko: "일치"
         ),
         .smart_search_ph: tr(
             en: "Title, artist, album, genre contains", es: "Título, artista, álbum o género contiene", fr: "Titre, artiste, album, genre contient", de: "Titel, Künstler, Album, Genre enthält", pt: "Título, artista, álbum, género contém", it: "Titolo, artista, album, genere contiene",
             nl: "Titel, artiest, album, genre bevat", ru: "Название, артист, альбом, жанр содержит", pl: "Tytuł, wykonawca, album, gatunek zawiera", tr: "Başlık, sanatçı, albüm, tür içerir", sv: "Titel, artist, album, genre innehåller", nb: "Tittel, artist, album, sjanger inneholder",
-            da: "Titel, kunstner, album, genre indeholder", fi: "Nimi, artisti, albumi, genre sisältää", zh: "标题、艺人、专辑、流派包含", ja: "タイトル・アーティスト・アルバム・ジャンルに含む", ko: "제목, 아티스트, 앨범, 장르 포함"
+            da: "Titel, kunstner, album, genre indeholder", fi: "Nimi, artisti, albumi, genre sisältää", zh: "标题、艺人、专辑、流派包含", zhHant: "標題、藝人、專輯、類型包含", ja: "タイトル・アーティスト・アルバム・ジャンルに含む", ko: "제목, 아티스트, 앨범, 장르 포함"
         ),
         .smart_artist_ph: tr(
             en: "Artist contains", es: "El artista contiene", fr: "L’artiste contient", de: "Künstler enthält", pt: "O artista contém", it: "L’artista contiene",
             nl: "Artiest bevat", ru: "Артист содержит", pl: "Wykonawca zawiera", tr: "Sanatçı içerir", sv: "Artist innehåller", nb: "Artist inneholder",
-            da: "Kunstner indeholder", fi: "Artisti sisältää", zh: "艺人包含", ja: "アーティストに含む", ko: "아티스트 포함"
+            da: "Kunstner indeholder", fi: "Artisti sisältää", zh: "艺人包含", zhHant: "藝人包含", ja: "アーティストに含む", ko: "아티스트 포함"
         ),
         .smart_album_ph: tr(
             en: "Album contains", es: "El álbum contiene", fr: "L’album contient", de: "Album enthält", pt: "O álbum contém", it: "L’album contiene",
             nl: "Album bevat", ru: "Альбом содержит", pl: "Album zawiera", tr: "Albüm içerir", sv: "Album innehåller", nb: "Album inneholder",
-            da: "Album indeholder", fi: "Albumi sisältää", zh: "专辑包含", ja: "アルバムに含む", ko: "앨범 포함"
+            da: "Album indeholder", fi: "Albumi sisältää", zh: "专辑包含", zhHant: "專輯包含", ja: "アルバムに含む", ko: "앨범 포함"
         ),
         .smart_any_genre: tr(
             en: "Any Genre", es: "Cualquier género", fr: "Tous les genres", de: "Beliebiges Genre", pt: "Qualquer género", it: "Qualsiasi genere",
             nl: "Elk genre", ru: "Любой жанр", pl: "Dowolny gatunek", tr: "Herhangi bir tür", sv: "Valfri genre", nb: "Hvilken som helst sjanger",
-            da: "Enhver genre", fi: "Mikä tahansa genre", zh: "任意流派", ja: "すべてのジャンル", ko: "모든 장르"
+            da: "Enhver genre", fi: "Mikä tahansa genre", zh: "任意流派", zhHant: "任何類型", ja: "すべてのジャンル", ko: "모든 장르"
         ),
         .smart_section_filters: tr(
             en: "Filters", es: "Filtros", fr: "Filtres", de: "Filter", pt: "Filtros", it: "Filtri",
             nl: "Filters", ru: "Фильтры", pl: "Filtry", tr: "Filtreler", sv: "Filter", nb: "Filtre",
-            da: "Filtre", fi: "Suodattimet", zh: "筛选", ja: "フィルタ", ko: "필터"
+            da: "Filtre", fi: "Suodattimet", zh: "筛选", zhHant: "篩選條件", ja: "フィルタ", ko: "필터"
         ),
         .smart_min_year_ph: tr(
             en: "Minimum year", es: "Año mínimo", fr: "Année minimale", de: "Mindestjahr", pt: "Ano mínimo", it: "Anno minimo",
             nl: "Minimumjaar", ru: "Минимальный год", pl: "Rok minimalny", tr: "En küçük yıl", sv: "Minsta år", nb: "Minste år",
-            da: "Mindste år", fi: "Vähimmäisvuosi", zh: "最早年份", ja: "最小の年", ko: "최소 연도"
+            da: "Mindste år", fi: "Vähimmäisvuosi", zh: "最早年份", zhHant: "最早年份", ja: "最小の年", ko: "최소 연도"
         ),
         .smart_max_year_ph: tr(
             en: "Maximum year", es: "Año máximo", fr: "Année maximale", de: "Höchstjahr", pt: "Ano máximo", it: "Anno massimo",
             nl: "Maximumjaar", ru: "Максимальный год", pl: "Rok maksymalny", tr: "En büyük yıl", sv: "Högsta år", nb: "Største år",
-            da: "Største år", fi: "Enimmäisvuosi", zh: "最晚年份", ja: "最大の年", ko: "최대 연도"
+            da: "Største år", fi: "Enimmäisvuosi", zh: "最晚年份", zhHant: "最晚年份", ja: "最大の年", ko: "최대 연도"
         ),
         .smart_min_plays_ph: tr(
             en: "Minimum plays", es: "Reproducciones mínimas", fr: "Lectures minimales", de: "Mindestwiedergaben", pt: "Reproduções mínimas", it: "Riproduzioni minime",
             nl: "Minimum aantal keer afgespeeld", ru: "Минимум прослушиваний", pl: "Minimalna liczba odtworzeń", tr: "En az çalma", sv: "Minsta antal spelningar", nb: "Minste antall avspillinger",
-            da: "Mindste antal afspilninger", fi: "Vähimmäistoistot", zh: "最少播放次数", ja: "最小再生回数", ko: "최소 재생 횟수"
+            da: "Mindste antal afspilninger", fi: "Vähimmäistoistot", zh: "最少播放次数", zhHant: "最少播放次數", ja: "最小再生回数", ko: "최소 재생 횟수"
         ),
         .smart_max_plays_ph: tr(
             en: "Maximum plays", es: "Reproducciones máximas", fr: "Lectures maximales", de: "Höchstwiedergaben", pt: "Reproduções máximas", it: "Riproduzioni massime",
             nl: "Maximum aantal keer afgespeeld", ru: "Максимум прослушиваний", pl: "Maksymalna liczba odtworzeń", tr: "En çok çalma", sv: "Högsta antal spelningar", nb: "Største antall avspillinger",
-            da: "Største antal afspilninger", fi: "Enimmäistoistot", zh: "最多播放次数", ja: "最大再生回数", ko: "최대 재생 횟수"
+            da: "Største antal afspilninger", fi: "Enimmäistoistot", zh: "最多播放次数", zhHant: "最多播放次數", ja: "最大再生回数", ko: "최대 재생 횟수"
         ),
         .smart_never_played_only: tr(
             en: "Never Played Only", es: "Solo nunca reproducidas", fr: "Jamais lus uniquement", de: "Nur nie gespielte", pt: "Apenas nunca reproduzidas", it: "Solo mai riprodotti",
             nl: "Alleen nooit afgespeeld", ru: "Только не воспроизводившиеся", pl: "Tylko nigdy nieodtwarzane", tr: "Yalnızca hiç çalınmayanlar", sv: "Endast aldrig spelade", nb: "Bare aldri spilt",
-            da: "Kun aldrig afspillede", fi: "Vain ei koskaan toistetut", zh: "仅从未播放", ja: "未再生のみ", ko: "재생 안 한 항목만"
+            da: "Kun aldrig afspillede", fi: "Vain ei koskaan toistetut", zh: "仅从未播放", zhHant: "僅限從未播放", ja: "未再生のみ", ko: "재생 안 한 항목만"
         ),
         .smart_lossless_only: tr(
             en: "Lossless Only", es: "Solo sin pérdida", fr: "Lossless uniquement", de: "Nur verlustfrei", pt: "Apenas sem perdas", it: "Solo Lossless",
             nl: "Alleen lossless", ru: "Только без потерь", pl: "Tylko bezstratne", tr: "Yalnızca kayıpsız", sv: "Endast förlustfria", nb: "Bare tapsfrie",
-            da: "Kun tabsfrie", fi: "Vain häviöttömät", zh: "仅无损", ja: "ロスレスのみ", ko: "무손실만"
+            da: "Kun tabsfrie", fi: "Vain häviöttömät", zh: "仅无损", zhHant: "僅限無損", ja: "ロスレスのみ", ko: "무손실만"
         ),
         .smart_hires_only: tr(
             en: "Hi-Res Lossless Only", es: "Solo Hi-Res sin pérdida", fr: "Hi-Res Lossless uniquement", de: "Nur Hi-Res Lossless", pt: "Apenas Hi-Res sem perdas", it: "Solo Hi-Res Lossless",
             nl: "Alleen Hi-Res Lossless", ru: "Только Hi-Res без потерь", pl: "Tylko Hi-Res bezstratne", tr: "Yalnızca Hi-Res kayıpsız", sv: "Endast Hi-Res förlustfria", nb: "Bare Hi-Res tapsfrie",
-            da: "Kun Hi-Res tabsfrie", fi: "Vain Hi-Res häviöttömät", zh: "仅高解析度无损", ja: "ハイレゾロスレスのみ", ko: "고해상도 무손실만"
+            da: "Kun Hi-Res tabsfrie", fi: "Vain Hi-Res häviöttömät", zh: "仅高解析度无损", zhHant: "僅限高解析度無損", ja: "ハイレゾロスレスのみ", ko: "고해상도 무손실만"
         ),
         .smart_downloaded_only: tr(
             en: "Downloaded Only", es: "Solo descargadas", fr: "Téléchargés uniquement", de: "Nur heruntergeladene", pt: "Apenas baixadas", it: "Solo scaricati",
             nl: "Alleen gedownload", ru: "Только загруженные", pl: "Tylko pobrane", tr: "Yalnızca indirilenler", sv: "Endast nedladdade", nb: "Bare nedlastede",
-            da: "Kun downloadede", fi: "Vain ladatut", zh: "仅已下载", ja: "ダウンロード済みのみ", ko: "다운로드한 항목만"
+            da: "Kun downloadede", fi: "Vain ladatut", zh: "仅已下载", zhHant: "僅限已下載", ja: "ダウンロード済みのみ", ko: "다운로드한 항목만"
         ),
         .smart_taste: tr(
             en: "Taste", es: "Gusto", fr: "Goût", de: "Geschmack", pt: "Gosto", it: "Gusto",
             nl: "Smaak", ru: "Вкус", pl: "Gust", tr: "Beğeni", sv: "Smak", nb: "Smak",
-            da: "Smag", fi: "Maku", zh: "喜好", ja: "好み", ko: "취향"
+            da: "Smag", fi: "Maku", zh: "喜好", zhHant: "喜好", ja: "好み", ko: "취향"
         ),
         .smart_section_mix: tr(
             en: "Mix Options", es: "Opciones de mezcla", fr: "Options de mix", de: "Mix-Optionen", pt: "Opções de mistura", it: "Opzioni mix",
             nl: "Mixopties", ru: "Параметры микса", pl: "Opcje miksu", tr: "Karışım seçenekleri", sv: "Mixalternativ", nb: "Miksalternativer",
-            da: "Mixindstillinger", fi: "Miksausasetukset", zh: "混合选项", ja: "ミックスオプション", ko: "믹스 옵션"
+            da: "Mixindstillinger", fi: "Miksausasetukset", zh: "混合选项", zhHant: "精選選項", ja: "ミックスオプション", ko: "믹스 옵션"
         ),
         .smart_sort: tr(
             en: "Sort", es: "Ordenar", fr: "Trier", de: "Sortieren", pt: "Ordenar", it: "Ordina",
             nl: "Sorteren", ru: "Сортировка", pl: "Sortuj", tr: "Sırala", sv: "Sortera", nb: "Sorter",
-            da: "Sortér", fi: "Lajittele", zh: "排序", ja: "並べ替え", ko: "정렬"
+            da: "Sortér", fi: "Lajittele", zh: "排序", zhHant: "排序", ja: "並べ替え", ko: "정렬"
         ),
         .smart_limit: tr(
             en: "Limit: %d songs", es: "Límite: %d canciones", fr: "Limite : %d titres", de: "Limit: %d Songs", pt: "Limite: %d músicas", it: "Limite: %d brani",
             nl: "Limiet: %d nummers", ru: "Лимит: %d песен", pl: "Limit: %d utworów", tr: "Sınır: %d şarkı", sv: "Gräns: %d låtar", nb: "Grense: %d låter",
-            da: "Grænse: %d sange", fi: "Raja: %d kappaletta", zh: "上限：%d 首歌曲", ja: "上限: %d 曲", ko: "제한: %d곡"
+            da: "Grænse: %d sange", fi: "Raja: %d kappaletta", zh: "上限：%d 首歌曲", zhHant: "上限：%d 首歌曲", ja: "上限: %d 曲", ko: "제한: %d곡"
         ),
         .smart_matching_now: tr(
             en: "%d matching songs right now", es: "%d canciones coinciden ahora", fr: "%d titres correspondent actuellement", de: "%d passende Songs aktuell", pt: "%d músicas correspondem agora", it: "%d brani corrispondono ora",
             nl: "%d overeenkomende nummers nu", ru: "%d подходящих песен сейчас", pl: "%d pasujących utworów teraz", tr: "Şu anda %d eşleşen şarkı", sv: "%d matchande låtar just nu", nb: "%d samsvarende låter nå",
-            da: "%d matchende sange lige nu", fi: "%d osumaa juuri nyt", zh: "当前匹配 %d 首歌曲", ja: "現在 %d 曲が一致", ko: "현재 일치하는 곡 %d개"
+            da: "%d matchende sange lige nu", fi: "%d osumaa juuri nyt", zh: "当前匹配 %d 首歌曲", zhHant: "目前有 %d 首符合的歌曲", ja: "現在 %d 曲が一致", ko: "현재 일치하는 곡 %d개"
         ),
         .smart_any: tr(
             en: "Any", es: "Cualquiera", fr: "Tous", de: "Beliebig", pt: "Qualquer", it: "Qualsiasi",
             nl: "Elk", ru: "Любой", pl: "Dowolny", tr: "Herhangi", sv: "Valfri", nb: "Alle",
-            da: "Enhver", fi: "Mikä tahansa", zh: "任意", ja: "すべて", ko: "모두"
+            da: "Enhver", fi: "Mikä tahansa", zh: "任意", zhHant: "任何", ja: "すべて", ko: "모두"
         ),
 
         // MARK: Smart playlist enum cases
         .create_kind_custom: tr(
             en: "Custom", es: "Personalizada", fr: "Personnalisée", de: "Eigene", pt: "Personalizada", it: "Personalizzata",
             nl: "Aangepast", ru: "Свой", pl: "Własna", tr: "Özel", sv: "Anpassad", nb: "Egendefinert",
-            da: "Tilpasset", fi: "Mukautettu", zh: "自定义", ja: "カスタム", ko: "사용자 지정"
+            da: "Tilpasset", fi: "Mukautettu", zh: "自定义", zhHant: "自訂", ja: "カスタム", ko: "사용자 지정"
         ),
         .create_kind_smart: tr(
             en: "Smart", es: "Inteligente", fr: "Intelligente", de: "Intelligent", pt: "Inteligente", it: "Smart",
             nl: "Slim", ru: "Умный", pl: "Inteligentna", tr: "Akıllı", sv: "Smart", nb: "Smart",
-            da: "Smart", fi: "Älykäs", zh: "智能", ja: "スマート", ko: "스마트"
+            da: "Smart", fi: "Älykäs", zh: "智能", zhHant: "智慧型", ja: "スマート", ko: "스마트"
         ),
         .smart_match_all: tr(
             en: "All Rules", es: "Todas las reglas", fr: "Toutes les règles", de: "Alle Regeln", pt: "Todas as regras", it: "Tutte le regole",
             nl: "Alle regels", ru: "Все правила", pl: "Wszystkie reguły", tr: "Tüm kurallar", sv: "Alla regler", nb: "Alle regler",
-            da: "Alle regler", fi: "Kaikki säännöt", zh: "所有规则", ja: "すべてのルール", ko: "모든 규칙"
+            da: "Alle regler", fi: "Kaikki säännöt", zh: "所有规则", zhHant: "所有規則", ja: "すべてのルール", ko: "모든 규칙"
         ),
         .smart_match_any: tr(
             en: "Any Rule", es: "Cualquier regla", fr: "N’importe quelle règle", de: "Beliebige Regel", pt: "Qualquer regra", it: "Qualsiasi regola",
             nl: "Elke regel", ru: "Любое правило", pl: "Dowolna reguła", tr: "Herhangi bir kural", sv: "Valfri regel", nb: "Hvilken som helst regel",
-            da: "Enhver regel", fi: "Mikä tahansa sääntö", zh: "任意规则", ja: "いずれかのルール", ko: "임의 규칙"
+            da: "Enhver regel", fi: "Mikä tahansa sääntö", zh: "任意规则", zhHant: "任一規則", ja: "いずれかのルール", ko: "임의 규칙"
         ),
         .smart_taste_loved: tr(
             en: "Loved", es: "Favoritas", fr: "Coups de cœur", de: "Geliebt", pt: "Adoradas", it: "Preferiti",
             nl: "Geliefd", ru: "Любимые", pl: "Ulubione", tr: "Sevilenler", sv: "Älskade", nb: "Elsket",
-            da: "Elskede", fi: "Rakastetut", zh: "喜爱", ja: "お気に入り", ko: "좋아함"
+            da: "Elskede", fi: "Rakastetut", zh: "喜爱", zhHant: "喜愛", ja: "お気に入り", ko: "좋아함"
         ),
         .smart_taste_not_disliked: tr(
             en: "Not Disliked", es: "No rechazadas", fr: "Non rejetés", de: "Nicht abgelehnt", pt: "Não rejeitadas", it: "Non rifiutati",
             nl: "Niet afgekeurd", ru: "Не отклонённые", pl: "Nieodrzucone", tr: "Beğenilmeyenler hariç", sv: "Inte ogillade", nb: "Ikke mislikt",
-            da: "Ikke mislidte", fi: "Ei tykätyt pois", zh: "未不喜欢", ja: "嫌いでない", ko: "싫어하지 않음"
+            da: "Ikke mislidte", fi: "Ei tykätyt pois", zh: "未不喜欢", zhHant: "未標為不喜歡", ja: "嫌いでない", ko: "싫어하지 않음"
         ),
         .smart_taste_disliked: tr(
             en: "Disliked", es: "Rechazadas", fr: "Rejetés", de: "Abgelehnt", pt: "Rejeitadas", it: "Rifiutati",
             nl: "Afgekeurd", ru: "Отклонённые", pl: "Odrzucone", tr: "Beğenilmeyenler", sv: "Ogillade", nb: "Mislikt",
-            da: "Mislidte", fi: "Ei pidetyt", zh: "不喜欢", ja: "嫌い", ko: "싫어함"
+            da: "Mislidte", fi: "Ei pidetyt", zh: "不喜欢", zhHant: "不喜歡", ja: "嫌い", ko: "싫어함"
         ),
         .smart_sort_title: tr(
             en: "Title", es: "Título", fr: "Titre", de: "Titel", pt: "Título", it: "Titolo",
             nl: "Titel", ru: "Название", pl: "Tytuł", tr: "Başlık", sv: "Titel", nb: "Tittel",
-            da: "Titel", fi: "Nimi", zh: "标题", ja: "タイトル", ko: "제목"
+            da: "Titel", fi: "Nimi", zh: "标题", zhHant: "標題", ja: "タイトル", ko: "제목"
         ),
         .smart_sort_newest: tr(
             en: "Newest", es: "Más recientes", fr: "Plus récents", de: "Neueste", pt: "Mais recentes", it: "Più recenti",
             nl: "Nieuwste", ru: "Сначала новые", pl: "Najnowsze", tr: "En yeni", sv: "Nyaste", nb: "Nyeste",
-            da: "Nyeste", fi: "Uusimmat", zh: "最新", ja: "新しい順", ko: "최신순"
+            da: "Nyeste", fi: "Uusimmat", zh: "最新", zhHant: "最新", ja: "新しい順", ko: "최신순"
         ),
         .smart_sort_oldest: tr(
             en: "Oldest", es: "Más antiguas", fr: "Plus anciens", de: "Älteste", pt: "Mais antigas", it: "Più vecchi",
             nl: "Oudste", ru: "Сначала старые", pl: "Najstarsze", tr: "En eski", sv: "Äldsta", nb: "Eldste",
-            da: "Ældste", fi: "Vanhimmat", zh: "最旧", ja: "古い順", ko: "오래된순"
+            da: "Ældste", fi: "Vanhimmat", zh: "最旧", zhHant: "最舊", ja: "古い順", ko: "오래된순"
         ),
         .smart_sort_least_played: tr(
             en: "Least Played", es: "Menos reproducidas", fr: "Les moins écoutés", de: "Am wenigsten gespielt", pt: "Menos reproduzidas", it: "Meno riprodotti",
             nl: "Minst afgespeeld", ru: "Редко играемые", pl: "Najrzadziej odtwarzane", tr: "En az çalınan", sv: "Minst spelade", nb: "Minst spilt",
-            da: "Mindst afspillet", fi: "Vähiten toistetut", zh: "最少播放", ja: "再生回数が少ない順", ko: "적게 재생됨"
+            da: "Mindst afspillet", fi: "Vähiten toistetut", zh: "最少播放", zhHant: "最少播放", ja: "再生回数が少ない順", ko: "적게 재생됨"
         ),
         .smart_sort_random: tr(
             en: "Random", es: "Aleatorio", fr: "Aléatoire", de: "Zufällig", pt: "Aleatório", it: "Casuale",
             nl: "Willekeurig", ru: "Случайно", pl: "Losowo", tr: "Rastgele", sv: "Slumpmässig", nb: "Tilfeldig",
-            da: "Tilfældig", fi: "Satunnainen", zh: "随机", ja: "ランダム", ko: "무작위"
+            da: "Tilfældig", fi: "Satunnainen", zh: "随机", zhHant: "隨機", ja: "ランダム", ko: "무작위"
         ),
         .smart_mix: tr(
             en: "Smart mix", es: "Mezcla inteligente", fr: "Mix intelligent", de: "Smarter Mix", pt: "Mix inteligente", it: "Mix intelligente",
             nl: "Slimme mix", ru: "Умный микс", pl: "Inteligentny miks", tr: "Akıllı karışım", sv: "Smart mix", nb: "Smart miks",
-            da: "Smart mix", fi: "Älykäs miksaus", zh: "智能混合", ja: "スマートミックス", ko: "스마트 믹스"
+            da: "Smart mix", fi: "Älykäs miksaus", zh: "智能混合", zhHant: "智慧型精選", ja: "スマートミックス", ko: "스마트 믹스"
         ),
         .smart_n_selected: tr(
             en: "%d selected", es: "%d seleccionados", fr: "%d sélectionnés", de: "%d ausgewählt", pt: "%d selecionados", it: "%d selezionati",
             nl: "%d geselecteerd", ru: "Выбрано: %d", pl: "Wybrano %d", tr: "%d seçili", sv: "%d valda", nb: "%d valgt",
-            da: "%d valgt", fi: "%d valittu", zh: "已选 %d 个", ja: "%d 件選択", ko: "%d개 선택됨"
+            da: "%d valgt", fi: "%d valittu", zh: "已选 %d 个", zhHant: "已選取 %d 個", ja: "%d 件選択", ko: "%d개 선택됨"
         ),
         .dup_playlist: tr(
             en: "A playlist named “%@” already exists.", es: "Ya existe una lista llamada «%@».", fr: "Une playlist nommée « %@ » existe déjà.", de: "Eine Playlist namens „%@“ existiert bereits.", pt: "Já existe uma lista chamada “%@”.", it: "Esiste già una playlist chiamata “%@”.",
             nl: "Er bestaat al een afspeellijst met de naam “%@”.", ru: "Плейлист с именем «%@» уже существует.", pl: "Playlista o nazwie „%@” już istnieje.", tr: "“%@” adlı bir çalma listesi zaten var.", sv: "En spellista med namnet ”%@” finns redan.", nb: "En spilleliste med navnet «%@» finnes allerede.",
-            da: "En playliste med navnet “%@” findes allerede.", fi: "Soittolista nimeltä ”%@” on jo olemassa.", zh: "已存在名为“%@”的播放列表。", ja: "「%@」という名前のプレイリストは既に存在します。", ko: "“%@”(이)라는 재생목록이 이미 있습니다."
+            da: "En playliste med navnet “%@” findes allerede.", fi: "Soittolista nimeltä ”%@” on jo olemassa.", zh: "已存在名为“%@”的播放列表。", zhHant: "已有名為「%@」的播放列表。", ja: "「%@」という名前のプレイリストは既に存在します。", ko: "“%@”(이)라는 재생목록이 이미 있습니다."
         ),
         .dup_smart: tr(
             en: "A smart playlist named “%@” already exists.", es: "Ya existe una lista inteligente llamada «%@».", fr: "Une playlist intelligente nommée « %@ » existe déjà.", de: "Eine intelligente Playlist namens „%@“ existiert bereits.", pt: "Já existe uma lista inteligente chamada “%@”.", it: "Esiste già una playlist smart chiamata “%@”.",
             nl: "Er bestaat al een slimme afspeellijst met de naam “%@”.", ru: "Умный плейлист с именем «%@» уже существует.", pl: "Inteligentna playlista o nazwie „%@” już istnieje.", tr: "“%@” adlı bir akıllı çalma listesi zaten var.", sv: "En smart spellista med namnet ”%@” finns redan.", nb: "En smart spilleliste med navnet «%@» finnes allerede.",
-            da: "En smart playliste med navnet “%@” findes allerede.", fi: "Älykäs soittolista nimeltä ”%@” on jo olemassa.", zh: "已存在名为“%@”的智能播放列表。", ja: "「%@」という名前のスマートプレイリストは既に存在します。", ko: "“%@”(이)라는 스마트 재생목록이 이미 있습니다."
+            da: "En smart playliste med navnet “%@” findes allerede.", fi: "Älykäs soittolista nimeltä ”%@” on jo olemassa.", zh: "已存在名为“%@”的智能播放列表。", zhHant: "已有名為「%@」的智慧型播放列表。", ja: "「%@」という名前のスマートプレイリストは既に存在します。", ko: "“%@”(이)라는 스마트 재생목록이 이미 있습니다."
         ),
         .dup_folder: tr(
             en: "A folder named “%@” already exists.", es: "Ya existe una carpeta llamada «%@».", fr: "Un dossier nommé « %@ » existe déjà.", de: "Ein Ordner namens „%@“ existiert bereits.", pt: "Já existe uma pasta chamada “%@”.", it: "Esiste già una cartella chiamata “%@”.",
             nl: "Er bestaat al een map met de naam “%@”.", ru: "Папка с именем «%@» уже существует.", pl: "Folder o nazwie „%@” już istnieje.", tr: "“%@” adlı bir klasör zaten var.", sv: "En mapp med namnet ”%@” finns redan.", nb: "En mappe med navnet «%@» finnes allerede.",
-            da: "En mappe med navnet “%@” findes allerede.", fi: "Kansio nimeltä ”%@” on jo olemassa.", zh: "已存在名为“%@”的文件夹。", ja: "「%@」という名前のフォルダは既に存在します。", ko: "“%@”(이)라는 폴더가 이미 있습니다."
+            da: "En mappe med navnet “%@” findes allerede.", fi: "Kansio nimeltä ”%@” on jo olemassa.", zh: "已存在名为“%@”的文件夹。", zhHant: "已有名為「%@」的資料夾。", ja: "「%@」という名前のフォルダは既に存在します。", ko: "“%@”(이)라는 폴더가 이미 있습니다."
         ),
         // MARK: Playlist detail / edit
         .playlist_edit_title: tr(
             en: "Edit Playlist", es: "Editar lista", fr: "Modifier la playlist", de: "Playlist bearbeiten", pt: "Editar lista", it: "Modifica playlist",
             nl: "Afspeellijst bewerken", ru: "Изменить плейлист", pl: "Edytuj playlistę", tr: "Çalma listesini düzenle", sv: "Redigera spellista", nb: "Rediger spilleliste",
-            da: "Rediger playliste", fi: "Muokkaa soittolistaa", zh: "编辑播放列表", ja: "プレイリストを編集", ko: "재생목록 편집"
+            da: "Rediger playliste", fi: "Muokkaa soittolistaa", zh: "编辑播放列表", zhHant: "編輯播放列表", ja: "プレイリストを編集", ko: "재생목록 편집"
         ),
         .playlist_add_description: tr(
             en: "Add a description", es: "Añadir una descripción", fr: "Ajouter une description", de: "Beschreibung hinzufügen", pt: "Adicionar uma descrição", it: "Aggiungi una descrizione",
             nl: "Beschrijving toevoegen", ru: "Добавить описание", pl: "Dodaj opis", tr: "Açıklama ekle", sv: "Lägg till en beskrivning", nb: "Legg til en beskrivelse",
-            da: "Tilføj en beskrivelse", fi: "Lisää kuvaus", zh: "添加描述", ja: "説明を追加", ko: "설명 추가"
+            da: "Tilføj en beskrivelse", fi: "Lisää kuvaus", zh: "添加描述", zhHant: "新增描述", ja: "説明を追加", ko: "설명 추가"
         ),
         .playlist_remove_from: tr(
             en: "Remove from Playlist", es: "Quitar de la lista", fr: "Retirer de la playlist", de: "Aus Playlist entfernen", pt: "Remover da lista", it: "Rimuovi dalla playlist",
             nl: "Uit afspeellijst verwijderen", ru: "Убрать из плейлиста", pl: "Usuń z playlisty", tr: "Çalma listesinden çıkar", sv: "Ta bort från spellista", nb: "Fjern fra spilleliste",
-            da: "Fjern fra playliste", fi: "Poista soittolistalta", zh: "从播放列表移除", ja: "プレイリストから削除", ko: "재생목록에서 제거"
+            da: "Fjern fra playliste", fi: "Poista soittolistalta", zh: "从播放列表移除", zhHant: "從播放列表中移除", ja: "プレイリストから削除", ko: "재생목록에서 제거"
         ),
 
         // MARK: Now Playing + sleep timer + audio signal path
         .player_mixing: tr(
             en: "Mixing", es: "Mezclando", fr: "Mixage", de: "Übergang", pt: "A misturar", it: "Mix in corso",
             nl: "Mixen", ru: "Микширование", pl: "Miksowanie", tr: "Miksleniyor", sv: "Mixar", nb: "Mikser",
-            da: "Mixer", fi: "Miksataan", zh: "混音中", ja: "ミックス中", ko: "믹싱 중"
+            da: "Mixer", fi: "Miksataan", zh: "混音中", zhHant: "混音中", ja: "ミックス中", ko: "믹싱 중"
         ),
         .player_not_playing: tr(
             en: "Not Playing", es: "No se reproduce", fr: "Rien en lecture", de: "Keine Wiedergabe", pt: "Nada a reproduzir", it: "Nessuna riproduzione",
             nl: "Speelt niet", ru: "Не воспроизводится", pl: "Nic nie gra", tr: "Çalmıyor", sv: "Spelas inte", nb: "Spiller ikke",
-            da: "Afspiller ikke", fi: "Ei toisteta", zh: "未播放", ja: "再生していません", ko: "재생 중 아님"
+            da: "Afspiller ikke", fi: "Ei toisteta", zh: "未播放", zhHant: "未在播放", ja: "再生していません", ko: "재생 중 아님"
         ),
         .sleep_cancel_end_of_track: tr(
             en: "Cancel (end of track)", es: "Cancelar (fin de pista)", fr: "Annuler (fin du titre)", de: "Abbrechen (Titelende)", pt: "Cancelar (fim da faixa)", it: "Annulla (fine brano)",
             nl: "Annuleren (einde nummer)", ru: "Отменить (конец трека)", pl: "Anuluj (koniec utworu)", tr: "İptal et (parça sonu)", sv: "Avbryt (slut på spåret)", nb: "Avbryt (slutt på sporet)",
-            da: "Annuller (slut på nummeret)", fi: "Peruuta (kappaleen lopussa)", zh: "取消（曲目结束）", ja: "キャンセル（曲の終了時）", ko: "취소(트랙 끝)"
+            da: "Annuller (slut på nummeret)", fi: "Peruuta (kappaleen lopussa)", zh: "取消（曲目结束）", zhHant: "取消（曲目結束時）", ja: "キャンセル（曲の終了時）", ko: "취소(트랙 끝)"
         ),
         .sleep_cancel_timer: tr(
             en: "Cancel Timer", es: "Cancelar temporizador", fr: "Annuler le minuteur", de: "Timer abbrechen", pt: "Cancelar temporizador", it: "Annulla timer",
             nl: "Timer annuleren", ru: "Отменить таймер", pl: "Anuluj minutnik", tr: "Zamanlayıcıyı iptal et", sv: "Avbryt timer", nb: "Avbryt timer",
-            da: "Annuller timer", fi: "Peruuta ajastin", zh: "取消计时器", ja: "タイマーをキャンセル", ko: "타이머 취소"
+            da: "Annuller timer", fi: "Peruuta ajastin", zh: "取消计时器", zhHant: "取消計時器", ja: "タイマーをキャンセル", ko: "타이머 취소"
         ),
         .sleep_minutes: tr(
             en: "%d minutes", es: "%d min", fr: "%d min", de: "%d Min.", pt: "%d min", it: "%d min",
             nl: "%d min", ru: "%d мин", pl: "%d min", tr: "%d dk", sv: "%d min", nb: "%d min",
-            da: "%d min", fi: "%d min", zh: "%d 分钟", ja: "%d分", ko: "%d분"
+            da: "%d min", fi: "%d min", zh: "%d 分钟", zhHant: "%d 分鐘", ja: "%d分", ko: "%d분"
         ),
         .sleep_end_of_track: tr(
             en: "End of Track", es: "Fin de pista", fr: "Fin du titre", de: "Titelende", pt: "Fim da faixa", it: "Fine brano",
             nl: "Einde nummer", ru: "Конец трека", pl: "Koniec utworu", tr: "Parça sonu", sv: "Slut på spåret", nb: "Slutt på sporet",
-            da: "Slut på nummeret", fi: "Kappaleen loppu", zh: "曲目结束", ja: "曲の終了時", ko: "트랙 끝"
+            da: "Slut på nummeret", fi: "Kappaleen loppu", zh: "曲目结束", zhHant: "曲目結束時", ja: "曲の終了時", ko: "트랙 끝"
         ),
         .action_yes: tr(
             en: "Yes", es: "Sí", fr: "Oui", de: "Ja", pt: "Sim", it: "Sì",
             nl: "Ja", ru: "Да", pl: "Tak", tr: "Evet", sv: "Ja", nb: "Ja",
-            da: "Ja", fi: "Kyllä", zh: "是", ja: "はい", ko: "예"
+            da: "Ja", fi: "Kyllä", zh: "是", zhHant: "是", ja: "はい", ko: "예"
         ),
         .action_no: tr(
             en: "No", es: "No", fr: "Non", de: "Nein", pt: "Não", it: "No",
             nl: "Nee", ru: "Нет", pl: "Nie", tr: "Hayır", sv: "Nej", nb: "Nei",
-            da: "Nej", fi: "Ei", zh: "否", ja: "いいえ", ko: "아니요"
+            da: "Nej", fi: "Ei", zh: "否", zhHant: "否", ja: "いいえ", ko: "아니요"
         ),
         .action_on: tr(
             en: "On", es: "Activado", fr: "Activé", de: "Ein", pt: "Ativado", it: "Attivo",
             nl: "Aan", ru: "Вкл.", pl: "Wł.", tr: "Açık", sv: "På", nb: "På",
-            da: "Til", fi: "Päällä", zh: "开启", ja: "オン", ko: "켜짐"
+            da: "Til", fi: "Päällä", zh: "开启", zhHant: "開啟", ja: "オン", ko: "켜짐"
         ),
         .action_off: tr(
             en: "Off", es: "Desactivado", fr: "Désactivé", de: "Aus", pt: "Desativado", it: "Disattivo",
             nl: "Uit", ru: "Выкл.", pl: "Wył.", tr: "Kapalı", sv: "Av", nb: "Av",
-            da: "Fra", fi: "Pois", zh: "关闭", ja: "オフ", ko: "꺼짐"
+            da: "Fra", fi: "Pois", zh: "关闭", zhHant: "關閉", ja: "オフ", ko: "꺼짐"
         ),
         .media_equalizer: tr(
             en: "Equalizer", es: "Ecualizador", fr: "Égaliseur", de: "Equalizer", pt: "Equalizador", it: "Equalizzatore",
             nl: "Equalizer", ru: "Эквалайзер", pl: "Korektor", tr: "Ekolayzer", sv: "Equalizer", nb: "Equalizer",
-            da: "Equalizer", fi: "Taajuuskorjain", zh: "均衡器", ja: "イコライザ", ko: "이퀄라이저"
+            da: "Equalizer", fi: "Taajuuskorjain", zh: "均衡器", zhHant: "等化器", ja: "イコライザ", ko: "이퀄라이저"
         ),
         .detail_bitrate: tr(
             en: "Bitrate", es: "Tasa de bits", fr: "Débit", de: "Bitrate", pt: "Taxa de bits", it: "Bitrate",
             nl: "Bitsnelheid", ru: "Битрейт", pl: "Szybkość bitowa", tr: "Bit hızı", sv: "Bithastighet", nb: "Bithastighet",
-            da: "Bithastighed", fi: "Bittinopeus", zh: "比特率", ja: "ビットレート", ko: "비트 전송률"
+            da: "Bithastighed", fi: "Bittinopeus", zh: "比特率", zhHant: "位元率", ja: "ビットレート", ko: "비트 전송률"
         ),
         .detail_sample_rate: tr(
             en: "Sample Rate", es: "Frecuencia de muestreo", fr: "Fréquence d'échantillonnage", de: "Samplerate", pt: "Taxa de amostragem", it: "Frequenza di campionamento",
             nl: "Samplefrequentie", ru: "Частота дискретизации", pl: "Częstotliwość próbkowania", tr: "Örnekleme hızı", sv: "Samplingsfrekvens", nb: "Samplingsrate",
-            da: "Samplingsfrekvens", fi: "Näytteenottotaajuus", zh: "采样率", ja: "サンプルレート", ko: "샘플 레이트"
+            da: "Samplingsfrekvens", fi: "Näytteenottotaajuus", zh: "采样率", zhHant: "取樣率", ja: "サンプルレート", ko: "샘플 레이트"
         ),
         .detail_bit_depth: tr(
             en: "Bit Depth", es: "Profundidad de bits", fr: "Profondeur de bits", de: "Bittiefe", pt: "Profundidade de bits", it: "Profondità bit",
             nl: "Bitdiepte", ru: "Битовая глубина", pl: "Głębia bitowa", tr: "Bit derinliği", sv: "Bitdjup", nb: "Bitdybde",
-            da: "Bitdybde", fi: "Bittisyvyys", zh: "位深", ja: "ビット深度", ko: "비트 깊이"
+            da: "Bitdybde", fi: "Bittisyvyys", zh: "位深", zhHant: "位元深度", ja: "ビット深度", ko: "비트 깊이"
         ),
         .signal_lossless_audio: tr(
             en: "Lossless Audio", es: "Audio sin pérdida", fr: "Audio sans perte", de: "Verlustfreies Audio", pt: "Áudio sem perdas", it: "Audio lossless",
             nl: "Lossless audio", ru: "Аудио без потерь", pl: "Dźwięk bezstratny", tr: "Kayıpsız ses", sv: "Förlustfritt ljud", nb: "Tapsfri lyd",
-            da: "Tabsfri lyd", fi: "Häviötön ääni", zh: "无损音频", ja: "ロスレスオーディオ", ko: "무손실 오디오"
+            da: "Tabsfri lyd", fi: "Häviötön ääni", zh: "无损音频", zhHant: "無損音訊", ja: "ロスレスオーディオ", ko: "무손실 오디오"
         ),
         .signal_output: tr(
             en: "Output", es: "Salida", fr: "Sortie", de: "Ausgabe", pt: "Saída", it: "Uscita",
             nl: "Uitvoer", ru: "Выход", pl: "Wyjście", tr: "Çıkış", sv: "Utgång", nb: "Utgang",
-            da: "Udgang", fi: "Lähtö", zh: "输出", ja: "出力", ko: "출력"
+            da: "Udgang", fi: "Lähtö", zh: "输出", zhHant: "輸出", ja: "出力", ko: "출력"
         ),
         .signal_system_output: tr(
             en: "System Output", es: "Salida del sistema", fr: "Sortie système", de: "Systemausgabe", pt: "Saída do sistema", it: "Uscita di sistema",
             nl: "Systeemuitvoer", ru: "Системный выход", pl: "Wyjście systemowe", tr: "Sistem çıkışı", sv: "Systemutgång", nb: "Systemutgang",
-            da: "Systemudgang", fi: "Järjestelmälähtö", zh: "系统输出", ja: "システム出力", ko: "시스템 출력"
+            da: "Systemudgang", fi: "Järjestelmälähtö", zh: "系统输出", zhHant: "系統輸出", ja: "システム出力", ko: "시스템 출력"
         ),
         .signal_path_title: tr(
             en: "Audio Signal Path", es: "Ruta de la señal de audio", fr: "Chemin du signal audio", de: "Audiosignalpfad", pt: "Caminho do sinal de áudio", it: "Percorso segnale audio",
             nl: "Audiosignaalpad", ru: "Путь аудиосигнала", pl: "Ścieżka sygnału audio", tr: "Ses sinyal yolu", sv: "Ljudsignalväg", nb: "Lydsignalvei",
-            da: "Lydsignalvej", fi: "Äänisignaalin polku", zh: "音频信号路径", ja: "オーディオ信号パス", ko: "오디오 신호 경로"
+            da: "Lydsignalvej", fi: "Äänisignaalin polku", zh: "音频信号路径", zhHant: "音訊訊號路徑", ja: "オーディオ信号パス", ko: "오디오 신호 경로"
         ),
         .signal_source_file: tr(
             en: "Source File", es: "Archivo fuente", fr: "Fichier source", de: "Quelldatei", pt: "Ficheiro de origem", it: "File sorgente",
             nl: "Bronbestand", ru: "Исходный файл", pl: "Plik źródłowy", tr: "Kaynak dosya", sv: "Källfil", nb: "Kildefil",
-            da: "Kildefil", fi: "Lähdetiedosto", zh: "源文件", ja: "ソースファイル", ko: "원본 파일"
+            da: "Kildefil", fi: "Lähdetiedosto", zh: "源文件", zhHant: "來源檔案", ja: "ソースファイル", ko: "원본 파일"
         ),
         .signal_server_stream: tr(
             en: "Server Stream", es: "Flujo del servidor", fr: "Flux serveur", de: "Serverstream", pt: "Stream do servidor", it: "Stream server",
             nl: "Serverstream", ru: "Поток сервера", pl: "Strumień z serwera", tr: "Sunucu akışı", sv: "Serverström", nb: "Serverstrøm",
-            da: "Serverstream", fi: "Palvelimen striimi", zh: "服务器串流", ja: "サーバーストリーム", ko: "서버 스트림"
+            da: "Serverstream", fi: "Palvelimen striimi", zh: "服务器串流", zhHant: "伺服器串流", ja: "サーバーストリーム", ko: "서버 스트림"
         ),
         .signal_transcoding: tr(
             en: "Transcoding", es: "Transcodificación", fr: "Transcodage", de: "Transkodierung", pt: "Transcodificação", it: "Transcodifica",
             nl: "Transcoderen", ru: "Транскодирование", pl: "Transkodowanie", tr: "Kod dönüştürme", sv: "Omkodning", nb: "Omkoding",
-            da: "Transkodning", fi: "Transkoodaus", zh: "转码", ja: "トランスコード", ko: "트랜스코딩"
+            da: "Transkodning", fi: "Transkoodaus", zh: "转码", zhHant: "轉碼", ja: "トランスコード", ko: "트랜스코딩"
         ),
         .signal_original: tr(
             en: "Original", es: "Original", fr: "Original", de: "Original", pt: "Original", it: "Originale",
             nl: "Origineel", ru: "Оригинал", pl: "Oryginał", tr: "Orijinal", sv: "Original", nb: "Original",
-            da: "Original", fi: "Alkuperäinen", zh: "原始", ja: "オリジナル", ko: "원본"
+            da: "Original", fi: "Alkuperäinen", zh: "原始", zhHant: "原始", ja: "オリジナル", ko: "원본"
         ),
         .signal_wifi_quality: tr(
             en: "Wi-Fi Quality", es: "Calidad Wi-Fi", fr: "Qualité Wi-Fi", de: "WLAN-Qualität", pt: "Qualidade Wi-Fi", it: "Qualità Wi-Fi",
             nl: "Wifi-kwaliteit", ru: "Качество Wi-Fi", pl: "Jakość Wi-Fi", tr: "Wi-Fi kalitesi", sv: "Wi-Fi-kvalitet", nb: "Wi-Fi-kvalitet",
-            da: "Wi-Fi-kvalitet", fi: "Wi-Fi-laatu", zh: "Wi-Fi 质量", ja: "Wi-Fi品質", ko: "Wi-Fi 품질"
+            da: "Wi-Fi-kvalitet", fi: "Wi-Fi-laatu", zh: "Wi-Fi 质量", zhHant: "Wi-Fi 品質", ja: "Wi-Fi品質", ko: "Wi-Fi 품질"
         ),
         .signal_cellular_quality: tr(
             en: "Cellular Quality", es: "Calidad móvil", fr: "Qualité cellulaire", de: "Mobilfunkqualität", pt: "Qualidade móvel", it: "Qualità cellulare",
             nl: "Mobiele kwaliteit", ru: "Качество сотовой сети", pl: "Jakość sieci komórkowej", tr: "Hücresel kalite", sv: "Mobilnätskvalitet", nb: "Mobilkvalitet",
-            da: "Mobilkvalitet", fi: "Mobiililaatu", zh: "蜂窝网络质量", ja: "モバイル通信品質", ko: "셀룰러 품질"
+            da: "Mobilkvalitet", fi: "Mobiililaatu", zh: "蜂窝网络质量", zhHant: "行動網路品質", ja: "モバイル通信品質", ko: "셀룰러 품질"
         ),
         .signal_same_as_wifi: tr(
             en: "Same as Wi-Fi", es: "Igual que Wi-Fi", fr: "Comme le Wi-Fi", de: "Wie WLAN", pt: "Igual ao Wi-Fi", it: "Come Wi-Fi",
             nl: "Zelfde als wifi", ru: "Как Wi-Fi", pl: "Tak jak Wi-Fi", tr: "Wi-Fi ile aynı", sv: "Samma som Wi-Fi", nb: "Samme som Wi-Fi",
-            da: "Samme som Wi-Fi", fi: "Sama kuin Wi-Fi", zh: "与 Wi-Fi 相同", ja: "Wi-Fiと同じ", ko: "Wi-Fi와 동일"
+            da: "Samme som Wi-Fi", fi: "Sama kuin Wi-Fi", zh: "与 Wi-Fi 相同", zhHant: "與 Wi-Fi 相同", ja: "Wi-Fiと同じ", ko: "Wi-Fi와 동일"
         ),
         .signal_app_processing: tr(
             en: "App Processing", es: "Procesamiento de la app", fr: "Traitement par l'app", de: "App-Verarbeitung", pt: "Processamento da app", it: "Elaborazione app",
             nl: "App-verwerking", ru: "Обработка в приложении", pl: "Przetwarzanie w aplikacji", tr: "Uygulama işleme", sv: "Appbearbetning", nb: "Appbehandling",
-            da: "Appbehandling", fi: "Sovelluksen käsittely", zh: "应用处理", ja: "アプリ処理", ko: "앱 처리"
+            da: "Appbehandling", fi: "Sovelluksen käsittely", zh: "应用处理", zhHant: "App 處理", ja: "アプリ処理", ko: "앱 처리"
         ),
         .signal_volume_norm: tr(
             en: "Volume Normalization", es: "Normalización de volumen", fr: "Normalisation du volume", de: "Lautstärkenormalisierung", pt: "Normalização de volume", it: "Normalizzazione volume",
             nl: "Volumenormalisatie", ru: "Нормализация громкости", pl: "Normalizacja głośności", tr: "Ses normalizasyonu", sv: "Volymnormalisering", nb: "Volumnormalisering",
-            da: "Lydstyrkenormalisering", fi: "Äänenvoimakkuuden normalisointi", zh: "音量标准化", ja: "音量ノーマライズ", ko: "음량 정규화"
+            da: "Lydstyrkenormalisering", fi: "Äänenvoimakkuuden normalisointi", zh: "音量标准化", zhHant: "音量標準化", ja: "音量ノーマライズ", ko: "음량 정규화"
         ),
         .signal_port_type: tr(
             en: "Port Type", es: "Tipo de puerto", fr: "Type de port", de: "Porttyp", pt: "Tipo de porta", it: "Tipo di porta",
             nl: "Poorttype", ru: "Тип порта", pl: "Typ portu", tr: "Bağlantı noktası türü", sv: "Porttyp", nb: "Porttype",
-            da: "Porttype", fi: "Portin tyyppi", zh: "端口类型", ja: "ポートタイプ", ko: "포트 유형"
+            da: "Porttype", fi: "Portin tyyppi", zh: "端口类型", zhHant: "連接埠類型", ja: "ポートタイプ", ko: "포트 유형"
         ),
         .signal_output_sample_rate: tr(
             en: "Output Sample Rate", es: "Frecuencia de salida", fr: "Fréquence de sortie", de: "Ausgabe-Samplerate", pt: "Taxa de amostragem de saída", it: "Frequenza di uscita",
             nl: "Uitvoer-samplefrequentie", ru: "Частота дискретизации выхода", pl: "Częstotliwość próbkowania wyjścia", tr: "Çıkış örnekleme hızı", sv: "Utgående samplingsfrekvens", nb: "Samplingsrate for utgang",
-            da: "Samplingsfrekvens for output", fi: "Lähdön näytteenottotaajuus", zh: "输出采样率", ja: "出力サンプルレート", ko: "출력 샘플 레이트"
+            da: "Samplingsfrekvens for output", fi: "Lähdön näytteenottotaajuus", zh: "输出采样率", zhHant: "輸出取樣率", ja: "出力サンプルレート", ko: "출력 샘플 레이트"
         ),
         .signal_output_channels: tr(
             en: "Output Channels", es: "Canales de salida", fr: "Canaux de sortie", de: "Ausgabekanäle", pt: "Canais de saída", it: "Canali di uscita",
             nl: "Uitvoerkanalen", ru: "Выходные каналы", pl: "Kanały wyjściowe", tr: "Çıkış kanalları", sv: "Utgångskanaler", nb: "Utgangskanaler",
-            da: "Outputkanaler", fi: "Lähtökanavat", zh: "输出声道", ja: "出力チャンネル", ko: "출력 채널"
+            da: "Outputkanaler", fi: "Lähtökanavat", zh: "输出声道", zhHant: "輸出聲道", ja: "出力チャンネル", ko: "출력 채널"
         ),
         .signal_result: tr(
             en: "Result", es: "Resultado", fr: "Résultat", de: "Ergebnis", pt: "Resultado", it: "Risultato",
             nl: "Resultaat", ru: "Результат", pl: "Wynik", tr: "Sonuç", sv: "Resultat", nb: "Resultat",
-            da: "Resultat", fi: "Tulos", zh: "结果", ja: "結果", ko: "결과"
+            da: "Resultat", fi: "Tulos", zh: "结果", zhHant: "結果", ja: "結果", ko: "결과"
         ),
         .signal_badge: tr(
             en: "Badge", es: "Insignia", fr: "Badge", de: "Badge", pt: "Distintivo", it: "Badge",
             nl: "Badge", ru: "Значок", pl: "Odznaka", tr: "Rozet", sv: "Märke", nb: "Merke",
-            da: "Badge", fi: "Merkki", zh: "徽章", ja: "バッジ", ko: "배지"
+            da: "Badge", fi: "Merkki", zh: "徽章", zhHant: "標記", ja: "バッジ", ko: "배지"
         ),
         .signal_not_lossless: tr(
             en: "Not lossless", es: "No es sin pérdida", fr: "Pas sans perte", de: "Nicht verlustfrei", pt: "Não é sem perdas", it: "Non lossless",
             nl: "Niet lossless", ru: "Не без потерь", pl: "Nie jest bezstratny", tr: "Kayıpsız değil", sv: "Inte förlustfri", nb: "Ikke tapsfri",
-            da: "Ikke tabsfri", fi: "Ei häviötön", zh: "非无损", ja: "ロスレスではありません", ko: "무손실 아님"
+            da: "Ikke tabsfri", fi: "Ei häviötön", zh: "非无损", zhHant: "非無損", ja: "ロスレスではありません", ko: "무손실 아님"
         ),
         .signal_why: tr(
             en: "Why", es: "Motivo", fr: "Pourquoi", de: "Grund", pt: "Motivo", it: "Perché",
             nl: "Waarom", ru: "Причина", pl: "Powód", tr: "Neden", sv: "Varför", nb: "Hvorfor",
-            da: "Hvorfor", fi: "Syy", zh: "原因", ja: "理由", ko: "이유"
+            da: "Hvorfor", fi: "Syy", zh: "原因", zhHant: "原因", ja: "理由", ko: "이유"
         ),
     ]
 }

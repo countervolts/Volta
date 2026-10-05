@@ -20,6 +20,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
     case danish     = "da"
     case finnish    = "fi"
     case chinese    = "zh-Hans"
+    case traditionalChinese = "zh-Hant"
     case japanese   = "ja"
     case korean     = "ko"
 
@@ -43,6 +44,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         case .danish:     return "Dansk"
         case .finnish:    return "Suomi"
         case .chinese:    return "简体中文"
+        case .traditionalChinese: return "繁體中文"
         case .japanese:   return "日本語"
         case .korean:     return "한국어"
         }
